@@ -3,23 +3,111 @@
 Lead reads this file before delegation. Supervisor reads it when assigned a
 protocol audit. Lead passes only task-relevant constraints to the Peer.
 
-This is the bounded-job starting policy. The Human's current assignment controls
-scope and authority; adapt this file as repository risks become known.
+This is a starting template of repository tactics. The Human's current assignment
+controls authority. Complete unknown fields from repository evidence and the
+assignment before the decision that depends on them; do not treat blanks as grants.
+The defaults below can be adapted under the repository's policy mandate.
 
-- Topology: one Engineer owns a bounded implementation; Lead inspects and accepts.
-  Surface architecture lock-in, security/migration risk or a need for independent
-  review before writing. This candidate supports one writer at a time.
-- Ownership: inspect existing changes and active writers before assigning scope.
-  Preserve unrelated work. Workspace IDs alone do not isolate a checkout.
-- Authority: edits, commits, pushes and external effects follow the assignment's
-  separate grants. Profile permissions do not grant task authority.
-- Routing: select installed SLP profiles from current Paseo inventory.
-  Preserve their model, mode, thinking and feature settings. If settings are
-  absent, discover the provider defaults; no model IDs are prescribed here.
-- Proof: use this repo's established checks for the requested behavior. Peer
-  returns exact artifacts/diff, commands/results and a stable snapshot. Lead
-  inspects with the Peer paused and checks identity before/after verification.
-- Escalation: reconcile REOPEN_REQUEST and DEPENDENCY_REQUEST with evidence.
-  Owner-only decisions go to Human. Repeated premise failures call for diagnosis.
-- Evolution: retain causal evidence before changing policy; record material
-  repository risks and proof requirements here as they are established.
+## Status and project characteristics
+
+- Owner: Human/project owner; identify from assignment.
+- Version: 1 (starting template).
+- Last reviewed: not yet reviewed for this repository.
+- Applies to: repository root containing this .paseo-slp directory; verify the actual path.
+- Criticality, dominant risks and expensive-to-reverse decisions: establish per repo.
+- External effects and cost/model budget: use explicit assignment boundaries.
+
+## Decision boundaries
+
+Lead selects methods, routes bounded work, reconciles technical decisions and accepts
+project artifacts within the assignment. Human decides product/portfolio changes,
+important owner-reserved architecture contracts, irreversible/cost trade-offs beyond
+the grant and external effects. Edits, commits, pushes, deploys, host configuration
+and other repositories each follow the applicable authority; profile permissions
+do not supply it. Record additional repository-specific reserved decisions here.
+
+## Task classes and gates
+
+| Class | Starting topology and evidence gate |
+|---|---|
+| Tiny / bounded familiar | One Engineer, focused proof and Lead artifact inspection. Lead may implement tiny tightly coupled work if assignment allows. Independent review optional unless material risk appears. |
+| Cross-module / lifecycle / migration / security | Read-only Architect investigates before implementation; one owner per write scope; independent Reviewer on stable candidate before Lead acceptance. |
+| Foundation / costly architecture lock-in | Independent design lenses or sealed council with distinct mandates; Lead records decision/counterargument/reversal conditions; Engineer then independent review. Human decides owner-only trade-offs. |
+| Large dependency in a different domain | Separate bounded lane or dependency Lead within authority; explicit contract, handback and integration owner. |
+
+For council, default to two distinct lenses, at most one challenge/response round
+per material proposition, then Lead reconciles. Add another lens only for an
+unresolved decision-changing question worth the cost. These are repo defaults,
+not universal role requirements. Escalate foundation uncertainty before tests pin
+an undecided API or representation. In a new domain, establish enough Human framing
+to locate owner boundaries before foundational implementation.
+
+## Ownership and integration
+
+Inspect existing changes and active writers. Record owned/excluded scopes and return
+recipients. Concurrent writers require separate worktrees and non-overlapping scope
+ownership; otherwise serialize handback. Review only paused, stable candidates.
+Assign one integration writer, preserve unrelated changes and reverify the integrated
+candidate. Do not infer filesystem isolation from workspace IDs.
+
+## Routing and skills
+
+Discover installed SLP profiles/providers/models and preserve explicit Human settings.
+When routing is delegated: use an economical model for inventory/structured monitoring,
+a capable coding model for familiar implementation, and strong reasoning for difficult
+ownership, recovery or falsification. Record actual available choices and budget.
+Use fresh sessions for independent judgments even when the model is the same.
+Lead uses macro skills, Supervisor observation/governance skills, Peer task micro skills.
+Use one slp-peer profile; Lead assigns disposition per task. Before each spawn,
+reread slp-routing.json beside this file using the installed routes <absolute-repo>
+command. This repo owns its model choices and quota flags; there is no global fallback.
+Record required strengths, avoided trade-offs and budget here;
+the catalog holds mutable provider/model/thinking choices and quota availability.
+Select among eligible options by the actual work, not a fixed disposition mapping.
+Record authorized quota fallback targets, budget and whether fallback is automatic or needs
+a Human decision. Provider changes for existing work require a new-session handoff.
+Version the protocol and catalog together when authorized. New worktrees need their
+own copy from the selected candidate or an authorized setup copy. Use the installed
+`paseo-slp-onboarding` skill to fill or update these repo files without resetting
+Human choices.
+
+## Monitoring and heartbeat
+
+Use finish/error/permission notifications first. Lead reports material decisions,
+reopen/dependency requests and significant risk changes to the assigned Supervisor.
+For short bounded work with adequate events, default to no heartbeat. For long work
+or incomplete event coverage, decide and record the observer, reporting route,
+cron/timezone, expiry/run bound, evidence checkpoint and stop condition before
+creating a fallback heartbeat. No universal cadence is prescribed. Record the
+creation/deletion receipts and retain pre-existing monitoring outside the task.
+
+## Proof and escalation
+
+Identify established repo checks for each requested outcome; record exact commands
+and the behavior they demonstrate in the assignment. Match evidence to the risk:
+integration/failure/cancellation/migration checks or Human visual/playtest/product
+evaluation where needed. Coverage and mock-only checks cannot define success.
+Use a deterministic snapshot or exact commit with relevant working changes accounted
+for; record external proof separately. Review and verdict bind to the same candidate.
+
+Lead reconciles REOPEN_REQUEST (failed premise) and DEPENDENCY_REQUEST (another owner,
+API or scope). BLOCKED identifies a missing decision/prerequisite/capability. After
+repeated identical failures, inspect the shared mechanism and prerequisite changes
+before retrying; any numeric retry threshold is a repository choice. Owner-only
+decisions go through the assigned Supervisor or directly to Human. At handback,
+record actual proof, unresolved findings and settlement of task-owned resources.
+
+## Repo anti-patterns and evolution
+
+Supervisor notebook: choose an authorized path and owner, or indexed timeline notes
+with a retrieval reference; record the choice when supervision starts. A separate
+file write needs scope just like other writes. Handback preserves notes if durable
+retrieval is unavailable and reports the gap.
+
+For each observed repo-specific pattern, record signal, evidence/counterevidence,
+suspected mechanism, impact, open question, allowed response and outcome. Begin
+without invented repo patterns; use the installed generic catalog when relevant.
+Distill repeated failures into tactics, keep authority changes with Human, and record
+version, review date, causal evidence, counterargument and reversal conditions.
+Review after recurring failures or material architecture change, and check whether
+new rules improve evidence or merely add ceremony. Preserve change history.

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync, lstatSync, readlinkSync, mkdirSync, writeFileSync, copyFileSync, rmSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, lstatSync, readlinkSync, mkdirSync, writeFileSync, copyFileSync, rmSync, realpathSync } from 'node:fs';
 import { resolve, join, relative } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
@@ -15,7 +15,8 @@ export function files(root, prefix = '') {
   });
 }
 export function identity(root) {
-  const paths = ['package.json', 'install.sh', ...files(root, 'bin'), ...files(root, 'src')].sort();
+  const paths = ['package.json', 'install.sh', ...files(root, 'bin'),
+    ...(existsSync(join(root, 'skills')) ? files(root, 'skills') : []), ...files(root, 'src')].sort();
   const entries = paths.map(path => ({ path, sha256: hash(readFileSync(join(root, path))) }));
   return { sha256: hash(json(entries)), files: entries };
 }

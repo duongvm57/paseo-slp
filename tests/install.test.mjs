@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, chmodSync, lstatSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, chmodSync, lstatSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
@@ -72,18 +72,52 @@ test('extra files or changed binding block removal before detaching Paseo', t =>
   assert.equal(readFileSync(join(home, 'config.json'), 'utf8'), current);
 });
 
-test('workspace init creates the installed protocol once and preserves existing instructions', t => {
+test('workspace init creates only protocol and routing once and preserves Human edits independently', t => {
   const { dir, destination } = fixture(t);
   install(root, destination);
   writeFileSync(join(dir, 'AGENTS.md'), 'Human instructions');
   assert.equal(initWorkspace(destination, dir).applied, false);
-  assert.equal(existsSync(join(dir, 'WORKSPACE_PROTOCOL.md')), false);
-  initWorkspace(destination, dir, true);
-  assert.match(readFileSync(join(dir, 'WORKSPACE_PROTOCOL.md'), 'utf8'), /Lead reads this file/);
-  writeFileSync(join(dir, 'WORKSPACE_PROTOCOL.md'), 'Human protocol');
+  assert.equal(existsSync(join(dir, '.paseo-slp')), false);
+  const initialized = initWorkspace(destination, dir, true);
+  assert.equal(initialized.files.length, 2);
+  const protocol = join(dir, '.paseo-slp/WORKSPACE_PROTOCOL.md');
+  const routing = join(dir, '.paseo-slp/slp-routing.json');
+  assert.match(readFileSync(protocol, 'utf8'), /Lead reads this file/);
+  assert.deepEqual(readJson(routing).options, []);
+  assert.equal(existsSync(join(dir, '.paseo-slp/skills')), false);
+  writeFileSync(protocol, 'Human protocol');
   assert.equal(initWorkspace(destination, dir, true).preserved, true);
-  assert.equal(readFileSync(join(dir, 'WORKSPACE_PROTOCOL.md'), 'utf8'), 'Human protocol');
+  assert.equal(readFileSync(protocol, 'utf8'), 'Human protocol');
   assert.equal(readFileSync(join(dir, 'AGENTS.md'), 'utf8'), 'Human instructions');
+  rmSync(routing);
+  const repaired = initWorkspace(destination, dir, true);
+  assert.equal(repaired.files.filter(file => file.applied).length, 1);
+  assert.equal(readFileSync(protocol, 'utf8'), 'Human protocol');
+});
+
+test('repo init imports only an explicit catalog, preserves existing files and rejects invalid imports before writes', t => {
+  const { dir, destination, home } = fixture(t); install(root, destination);
+  const repository = join(dir, 'job'); mkdirSync(repository);
+  const input = join(home, 'slp-routing.json');
+  writeFileSync(input, 'invalid');
+  assert.throws(() => initWorkspace(destination, repository, true, input));
+  assert.equal(existsSync(join(repository, '.paseo-slp')), false);
+  const catalog = readJson(join(root, 'examples/slp-routing.json'));
+  writeFileSync(input, json(catalog));
+  const cli = join(destination, 'bin/slp.mjs');
+  const run = flags => JSON.parse(execFileSync(process.execPath, [cli, 'init', repository, '--routing-from', input, ...flags], { encoding: 'utf8' }));
+  assert.equal(run([]).applied, false);
+  assert.equal(existsSync(join(repository, '.paseo-slp/slp-routing.json')), false);
+  assert.equal(run(['--apply']).applied, true);
+  const routing = join(repository, '.paseo-slp/slp-routing.json');
+  assert.deepEqual(readJson(routing), catalog);
+  catalog.options[0].enabled = false; writeFileSync(routing, json(catalog));
+  assert.equal(run(['--apply']).preserved, true);
+  assert.equal(readJson(routing).options[0].enabled, false);
+  const other = join(dir, 'another-job'); mkdirSync(other);
+  symlinkSync(home, join(other, '.paseo-slp'));
+  assert.throws(() => initWorkspace(destination, other, true), /Expected repo directory/);
+  assert.equal(existsSync(join(other, '.paseo-slp/WORKSPACE_PROTOCOL.md')), false);
 });
 
 test('installed adapter injects every role over stdio while preserving host prompts, permissions and protocol replies', t => {

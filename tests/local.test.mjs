@@ -43,6 +43,7 @@ test('install preserves exact candidate bytes; rollback preserves unrelated sibl
   writeFileSync(join(dir, 'human.txt'), 'preserve');
   install(root, target);
   assert.deepEqual(verifyInstall(target).candidate, identity(root));
+  assert.equal(existsSync(join(target, 'skills/paseo-slp-onboarding/SKILL.md')), true);
   assert.throws(() => install(root, target), /EEXIST/);
   uninstall(target);
   assert.equal(existsSync(target), false);
@@ -70,7 +71,7 @@ test('launcher loads installed role bytes, excludes private review material, pre
   assert.ok(!result.create.initialPrompt.includes('PRIVATE_'));
   assert.equal(result.argv, undefined);
   assert.equal(result.create.provider, 'codex/gpt-5.6-luna');
-  assert.throws(() => launchPlan(installed, { ...request, binding: { ...binding, provider: 'slp-codex-peer' } }), /stock codex/);
+  assert.throws(() => launchPlan(installed, { ...request, binding: { ...binding, provider: 'slp-codex-peer' } }), /matching SLP/);
   assert.equal(launchPlan(installed, { ...request, binding: { ...binding, provider: 'slp-codex-supervisor' } }).create.provider, 'slp-codex-supervisor/gpt-5.6-luna');
   assert.equal(launchPlan(installed, { ...request, binding: { ...binding, modeId: 'full-access' } }).create.settings.modeId, 'full-access');
   const peer = prompt(installed, 'peer', 'bounded outcome', binding);

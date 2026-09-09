@@ -1,0 +1,15 @@
+{
+  "role": "peer",
+  "disposition": "architect",
+  "repository": "/absolute/job-repo",
+  "workspaceId": "replace-with-discovered-workspace-id",
+  "assignment": "Reconstruct cancellation ownership. Read-only; return alternatives, counterargument and reversal conditions to Lead.",
+  "route": {
+    "optionId": "glm-design",
+    "catalogSha256": "replace-with-current-routes-sha256"
+  },
+  "providers": [
+    { "id": "slp-codex-peer", "extends": "codex" },
+    { "id": "slp-pi-peer", "extends": "pi" }
+  ]
+}

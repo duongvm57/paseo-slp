@@ -1,0 +1,15 @@
+{
+  "role": "lead",
+  "repository": "/absolute/job-repo",
+  "workspaceId": "replace-with-discovered-workspace-id",
+  "assignment": "Continue the existing objective with unchanged scope. Inspect handoff evidence and acknowledge ownership before continuing.",
+  "binding": { "provider": "slp-pi-lead", "model": "opencode/glm-5.3-flash", "thinkingOptionId": "medium" },
+  "handoff": {
+    "previousAgentId": "replace-with-old-lead-id",
+    "reason": "Codex quota exhausted; Human requests Pi.",
+    "authority": "Replace with actual Human grant, objective, owned/excluded scope and edit/commit/push/external-action boundaries.",
+    "state": "Replace with decisions, candidate/artifact evidence, actual checks/findings and remaining dependencies.",
+    "previousOwner": { "settled": false, "evidence": "Replace with verified host settlement receipt and writer acknowledgments; only then set settled=true." },
+    "resources": []
+  }
+}

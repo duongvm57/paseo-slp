@@ -5,7 +5,9 @@ import { existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { identity, install, uninstall, verifyInstall, snapshot, readJson, json } from '../src/package.mjs';
 import { launchPlan } from '../src/launch.mjs';
-import { installPaseo, uninstallPaseo, initWorkspace } from '../src/paseo-install.mjs';
+import { handoffPlan } from '../src/handoff.mjs';
+import { readCatalog } from '../src/routing.mjs';
+import { installPaseo, uninstallPaseo, upgradePaseo, initWorkspace } from '../src/paseo-install.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const [command, target, ...args] = process.argv.slice(2);
@@ -15,25 +17,31 @@ try {
     const key = args[i];
     if (Object.hasOwn(options, key)) throw new Error(`Repeated option ${key}`);
     if (key === '--apply' || key === '--reload') options[key] = true;
-    else if (key === '--paseo-home') {
-      if (!args[i + 1] || !isAbsolute(args[i + 1])) throw new Error('Absolute Paseo home required');
+    else if (key === '--paseo-home' || key === '--from' || key === '--routing-from') {
+      if (!args[i + 1] || !isAbsolute(args[i + 1])) throw new Error(`Absolute path required for ${key}`);
       options[key] = args[++i];
     } else throw new Error(`Unknown flag ${key}`);
   }
-  if (args.length && !['install', 'uninstall', 'init'].includes(command)) throw new Error('This command takes no flags');
+  if (args.length && !['install', 'uninstall', 'upgrade', 'init'].includes(command)) throw new Error('This command takes no flags');
+  if (options['--from'] && command !== 'upgrade') throw new Error('--from is only valid for upgrade');
+  if (options['--routing-from'] && command !== 'init') throw new Error('--routing-from is only valid for init');
+  if (command === 'upgrade' && !options['--from']) throw new Error('upgrade requires --from <previous-installation>');
   if (options['--paseo-home'] && command !== 'install') throw new Error('--paseo-home is only valid for install');
-  if (options['--reload'] && (!options['--apply'] || !['install', 'uninstall'].includes(command))) throw new Error('--reload requires install/uninstall --apply');
+  if (options['--reload'] && (!options['--apply'] || !['install', 'uninstall', 'upgrade'].includes(command))) throw new Error('--reload requires install/uninstall/upgrade --apply');
   let result;
   if (command === 'identity') result = identity(root);
   else if (command === 'snapshot') result = snapshot(target);
   else if (command === 'verify') result = verifyInstall(resolve(target));
   else if (command === 'prepare') result = launchPlan(root, readJson(target));
-  else if (command === 'init') result = initWorkspace(root, target, Boolean(options['--apply']));
-  else if (command === 'install' || command === 'uninstall') {
+  else if (command === 'prepare-handoff') result = handoffPlan(root, readJson(target));
+  else if (command === 'routes') result = readCatalog(target);
+  else if (command === 'init') result = initWorkspace(root, target, Boolean(options['--apply']), options['--routing-from']);
+  else if (command === 'install' || command === 'uninstall' || command === 'upgrade') {
     if (!target || !isAbsolute(target)) throw new Error('Absolute destination required');
-    const integrated = command === 'install' ? options['--paseo-home'] : existsSync(resolve(target, 'paseo-binding.json'));
+    const integrated = command === 'upgrade' || (command === 'install' ? options['--paseo-home'] : existsSync(resolve(target, 'paseo-binding.json')));
     if (options['--reload'] && !integrated) throw new Error('--reload requires a Paseo-integrated installation');
-    if (integrated) result = command === 'install'
+    if (command === 'upgrade') result = upgradePaseo(root, target, options['--from'], Boolean(options['--apply']));
+    else if (integrated) result = command === 'install'
       ? installPaseo(root, target, options['--paseo-home'], Boolean(options['--apply']))
       : uninstallPaseo(target, Boolean(options['--apply']));
     else if (!options['--apply']) result = { operation: command, destination: target, applied: false, candidate: command === 'install' ? identity(root) : verifyInstall(target).candidate };
@@ -54,6 +62,6 @@ try {
         process.exitCode = 1;
       }
     }
-  } else throw new Error('Usage: slp.mjs identity | snapshot <repo> | install <absolute-new-dir> [--paseo-home <absolute-home>] [--apply] [--reload] | verify <dir> | uninstall <dir> [--apply] [--reload] | init <absolute-repo> [--apply] | prepare <request.json>');
+  } else throw new Error('Usage: slp.mjs identity | snapshot <repo> | install <absolute-new-dir> [--paseo-home <absolute-home>] [--apply] [--reload] | upgrade <absolute-new-dir> --from <previous-installation> [--apply] [--reload] | verify <dir> | uninstall <dir> [--apply] [--reload] | init <absolute-repo> [--routing-from <absolute-json>] [--apply] | routes <absolute-repo> | prepare <request.json> | prepare-handoff <request.json>');
   process.stdout.write(json(result));
 } catch (error) { console.error(error.message); process.exitCode = 1; }

@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "policy": "Example preferences based on the requested Luna/GLM mix, not measured capability rankings. Human verifies model IDs, effort support and quota before marking ready. Lead may choose any enabled ready Peer option within the assignment budget; reassess suitability for fallback.",
+  "options": [
+    {
+      "id": "luna-code",
+      "provider": "codex",
+      "roles": ["peer"],
+      "model": "gpt-5.6-luna",
+      "thinkingOptionId": "medium",
+      "enabled": true,
+      "availability": "unknown",
+      "priority": 20,
+      "suitableFor": ["coding", "engineer", "bounded-fix"],
+      "avoidFor": ["unresolved-architecture"],
+      "notes": "Intended default for familiar implementation. Use a reasoning option when lifecycle or ownership is undecided. Quota status is maintained by Human."
+    },
+    {
+      "id": "luna-reason",
+      "provider": "codex",
+      "roles": ["peer", "lead"],
+      "model": "gpt-5.6-luna",
+      "thinkingOptionId": "high",
+      "enabled": true,
+      "availability": "unknown",
+      "priority": 10,
+      "suitableFor": ["reasoning", "architect", "review", "lifecycle", "difficult-code"],
+      "avoidFor": ["routine-inventory"],
+      "notes": "Intended for deeper contract analysis and falsification. Prefer a fresh independent session for review; this preference does not establish a benchmark ranking."
+    },
+    {
+      "id": "glm-design",
+      "provider": "pi",
+      "roles": ["peer", "lead"],
+      "model": "opencode/glm-5.3-flash",
+      "thinkingOptionId": "medium",
+      "enabled": true,
+      "availability": "unknown",
+      "priority": 20,
+      "suitableFor": ["architect", "review", "alternative-design"],
+      "avoidFor": [],
+      "notes": "Requested Pi option for another design/review perspective. Human evaluates suitability for difficult code before using it as a coding fallback. Quota and credentials belong to this Pi model endpoint."
+    }
+  ]
+}

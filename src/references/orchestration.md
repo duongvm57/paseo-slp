@@ -1,0 +1,106 @@
+# Topology, independent judgment and handback
+
+Lead reads this procedure before topology selection, independent review, design
+reconciliation or dependency splitting. Repository thresholds and routing belong
+to .paseo-slp/WORKSPACE_PROTOCOL.md; these branches describe how to execute a selected method.
+All creation uses the installed delegation procedure and current task authority.
+
+## Frame and select
+
+Establish outcome, ownership, exclusions, evidence standard and open decisions.
+For foundation work in an unfamiliar domain, expose missing domain framing and
+owner boundaries before committing to a representation. Human may use an advisory
+session to clarify them. Keep file/API plans provisional as vertical slices reveal
+new lifecycle or dependency facts.
+
+Use the smallest topology that supplies the required independent judgment:
+
+| Task need | Execution and handback |
+|---|---|
+| Tiny, tightly coupled | Lead directly if protocol/authority permit, otherwise one Engineer; focused artifact inspection. |
+| Bounded implementation | Engineer owns writes and proof; Lead inspects; independent Reviewer if risk/protocol requires. |
+| Cross-module ownership or lifecycle | Read-only Architect reconstructs boundaries; Lead records design decision; Engineer implements; independent Reviewer falsifies stable result when required. |
+| Multiple plausible foundations or costly lock-in | Independent design lenses or sealed council; Lead reconciles material propositions before implementation. |
+| Large dependency branch | Bounded Peer/lane or dependency Lead, with scope and handback separate from the main objective. |
+
+Engineer, Architect, Reviewer and Scout use the same Peer profile. Assign each a
+self-contained question and disposition-specific output (defined in Peer policy).
+Read-only reports stay in the session unless a separate report write scope is
+granted. A protocol can make review gates stricter; inability to supply a required
+gate is BLOCKED, not permission to skip it.
+
+## Independent design and council
+
+1. Give fresh sessions the problem, evidence and neutral constraints. Withhold the
+   Lead's preferred answer while framing is unresolved. Assign distinct lenses
+   such as ownership/lifecycle versus failure/migration; allow alternatives beyond
+   the Lead's options. Two or three lenses are choices by risk, not fixed counts.
+2. For sealed work, collect each report before exposing any seat's conclusions to
+   another. Do not fork the Lead or share its prior reasoning as a substitute for
+   independence. If visibility leaks, record the limitation and restore independent
+   judgment when that gate requires it. Do not label contaminated work sealed.
+3. Extract material propositions, verify decision-changing claims and use bounded
+   cross-challenge where disagreement matters. The protocol sets debate limits;
+   adding seats or taking a popularity vote supplies no technical authority.
+4. Lead records one binding decision, supporting evidence, alternatives, strongest
+   counterargument, reversal conditions and unresolved risks. Escalate owner-only
+   product/cost/irreversible decisions with that evidence. Engineering starts when
+   the contract needed by the slice is decided, not when every future detail is known.
+
+## Ownership, isolation and integration
+
+Record agent, disposition, repository/worktree, owned scope, dependencies,
+integration owner and acceptance owner for every lane. One moving scope has one
+writer. Concurrent writers require separate worktrees even if their workspace IDs
+differ. Use discovered Paseo create_workspace with isolation=worktree and a known
+source/base, then give create_agent the returned workspaceId; verify actual paths.
+Worktrees branching from a commit do not carry unrelated uncommitted work: identify
+the intended base and required changes explicitly before the lane starts.
+
+Overlapping scopes require serial ownership transfer or decomposition. Read-only
+review also needs a frozen candidate. Have writers acknowledge handback and pause;
+an idle lifecycle label alone is insufficient. The receiving owner inspects the
+candidate and dependencies before accepting transfer. Keep integration itself under
+one write owner; Lead retains the decision even when a Peer performs integration.
+Merging/cherry-picking commits and any commit/push still require applicable authority.
+Review the resulting integrated candidate; branch reviews do not prove integration.
+
+## Reopen, dependencies and recovery boundaries
+
+For REOPEN_REQUEST, identify the failed premise and its behavioral consequences;
+stop the incompatible patch, investigate and record the revised contract. Precision,
+cadence, API shape or failure semantics changes that alter requirements are design
+decisions even if discovered in implementation. Tests verify decided behavior;
+they must not invent a field, adapter or mock shape to settle an unknown contract.
+
+For DEPENDENCY_REQUEST, determine the actual owner and minimum interface/result
+needed. A large new domain can go to a separate Lead through Paseo when authority
+allows. Define its objective, exclusions, contract, stable result, proof and return
+recipient. Keep the original Lead on its trajectory as integration/acceptance owner.
+Escalate cross-project authority before assigning writes in another repository.
+
+For BLOCKED, preserve evidence and state the missing decision, capability or external
+prerequisite. Repeated corrections call for a root-mechanism check, not another local
+patch by default. Lead answers each request with an authorized continuation, revised
+assignment or explicit blocker. Supervisor recovery follows references/governance.md.
+
+## Proof and acceptance
+
+Require exact artifacts/diff (including relevant untracked and pre-existing work),
+actual commands/output/exit codes and a stable identity. Use the installed snapshot
+helper or an exact commit with all relevant working changes accounted for. Record
+external evidence separately; ignored outputs/processes are outside a Git snapshot.
+Submodules require a separately agreed identity method; the helper cannot cover them.
+
+Keep candidate writers paused during review and verification. A before/after identity
+change invalidates that acceptance attempt. Reviewers report severity, evidence,
+checks and APPROVE/FINDINGS; Engineer supplies proof; Lead issues the project verdict.
+Corrections normally return to the same Engineer session, followed by a new stable
+candidate and review of affected findings. Keep unresolved findings visible.
+
+Evidence must address real failure mechanisms and the Human outcome. Use integration,
+migration, cancellation, performance or Human product/visual/playtest evidence as
+appropriate; unit-test success cannot substitute for an untested outcome. The Human
+decides subjective or owner-only trade-offs. Complete with candidate, actual checks,
+review evidence, ACCEPT/CHANGES_REQUESTED/BLOCKED, residual risks and resource settlement
+from references/monitoring.md. Artifact acceptance and resource settlement are distinct.

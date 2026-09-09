@@ -1,4 +1,4 @@
-# Draft first E2E review — NOT CONFIRMED
+# Draft workflow E2E review — NOT CONFIRMED
 
 Derived from supplied guide §11 .
 Human or a reviewer independent of the package implementer confirms this and a
@@ -8,11 +8,11 @@ identity in the request. Implementer has not signed this checklist or a PASS.
 | Criterion | Evidence needed |
 |---|---|
 | U1 Outcome | Real objective and independently chosen check; baseline, final artifact, exact output and exit status on a stable work snapshot. |
-| U2 Entry/instructions | Source + installed identity, actual installed file paths, root launch arguments, each parent's create_agent arguments and child's actual initial input. Compare full common/role/procedure bytes and bindings; titles or self-claims cannot prove loading. Record source-code reads needed to rescue normal usage. |
-| U3 Topology/ownership | Host ParentAgentId and workspace inventory show Supervisor → Lead → Peer; assignment/trace identify the Peer as sole writer; artifacts preserve unrelated changes. No native second control plane. |
-| U4 Acceptance | Peer proof, Lead's actual inspection and verdict refer to the same unchanged work snapshot; distinguish package candidate identity from job candidate identity. Findings remain visible. |
+| U2 Entry/instructions | Source + installed identity, actual installed file paths, root launch arguments, each parent's create_agent arguments and child's actual initial input. Compare common/role/delegation bytes and bindings plus evidence that triggered references were read; titles or self-claims cannot prove loading. Record source-code reads needed to rescue normal usage. |
+| U3 Topology/ownership | Host ParentAgentId and workspace inventory match the assignment and protocol-selected topology (direct Lead, observed existing Lead, or Supervisor/Lead/Peer lanes). One writer per moving scope; parallel writers have distinct worktrees; read-only seats and sealed boundaries are respected. Artifacts preserve unrelated changes. No native second control plane. |
+| U4 Acceptance | Implementer's proof (Peer, or Lead for permitted tiny work), independent review when required, and Lead's actual inspection/verdict refer to the same unchanged candidate. Distinguish package identity from job identity. Findings remain visible. |
 | U5 Human attention | Operator intervention log, launch-to-handback duration, routine assistance count and real owner decisions. No coaching, approval on behalf of agents, restart or candidate edits during observation. |
-| U6 Honest handback | Supervisor relays Lead verdict, actual checks, unresolved assumptions, authority limits and missing evidence. Idle and check success alone are insufficient. |
+| U6 Honest handback | Lead reports verdict, actual checks, unresolved assumptions, authority limits and missing evidence; assigned Supervisor relays these faithfully. Idle and check success alone are insufficient. |
 | U7 Settlement | Host evidence for task descendants, pending permissions, workspace scripts, terminals, schedules/heartbeats and task processes. Idle alone does not prove callbacks/processes settled. Preserve pre-existing resources. |
 
 Record review and outcome check as NOT_RUN until performed. Reviewer writes a separate
@@ -25,3 +25,9 @@ BLOCKED. Role candidates seen in text are only search hints.
 
 Record stop/recovery/concurrency as unverified unless actually exercised. One
 successful job qualifies only that job, provider and candidate.
+
+For a branch selected by the assignment, include its specific evidence: independent
+review candidate/report; sealed design and Lead reconciliation; dependency ownership
+and integration; heartbeat owner/creation/wake/deletion receipts; or recovery mandate,
+old-owner settlement and replacement handback. Mark unexercised branches NOT_RUN.
+The [guide coverage matrix](guide-coverage.md) traces policy text, not E2E outcomes.
