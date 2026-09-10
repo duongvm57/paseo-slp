@@ -52,24 +52,19 @@ candidate. Do not infer filesystem isolation from workspace IDs.
 
 ## Routing and skills
 
-Discover installed SLP profiles/providers/models and preserve explicit Human settings.
-When routing is delegated: use an economical model for inventory/structured monitoring,
-a capable coding model for familiar implementation, and strong reasoning for difficult
-ownership, recovery or falsification. Record actual available choices and budget.
-Use fresh sessions for independent judgments even when the model is the same.
+Read the Human-configured slp-supervisor, slp-lead and slp-peer profiles from
+Paseo before each launch. Use their complete provider/model/settings bundles and
+validate them through provider discovery. Record required strengths, budget and
+constraints here; ask Human to adjust a profile if its settings do not fit.
+Use one slp-peer profile; Lead assigns disposition per task. Use fresh sessions
+for independent judgments even when the model is the same.
 Lead uses macro skills, Supervisor observation/governance skills, Peer task micro skills.
-Use one slp-peer profile; Lead assigns disposition per task. Before each spawn,
-reread slp-routing.json beside this file using the installed routes <absolute-repo>
-command. This repo owns its model choices and quota flags; there is no global fallback.
-Record required strengths, avoided trade-offs and budget here;
-the catalog holds mutable provider/model/thinking choices and quota availability.
-Select among eligible options by the actual work, not a fixed disposition mapping.
-Record authorized quota fallback targets, budget and whether fallback is automatic or needs
-a Human decision. Provider changes for existing work require a new-session handoff.
-Version the protocol and catalog together when authorized. New worktrees need their
-own copy from the selected candidate or an authorized setup copy. Use the installed
-`paseo-slp-onboarding` skill to fill or update these repo files without resetting
-Human choices.
+Profile changes require Human authority. Record quota fallback authority and
+settlement boundaries; provider changes for existing work use a new-session handoff.
+A repository catalog is optional for explicitly assigned catalog experiments;
+ordinary tasks use saved profiles and do not need catalog runtime options.
+Use the installed paseo-slp-onboarding skill to update repo tactics while preserving
+Human profiles and existing repository files.
 
 ## Monitoring and heartbeat
 

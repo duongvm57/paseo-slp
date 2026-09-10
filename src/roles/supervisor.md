@@ -19,6 +19,11 @@ Relay owner decisions exactly. Keep causal notebook entries using the governance
 procedure. Use strategy/observation skills and keep implementation context bounded.
 
 When the Lead hands back a project outcome, inspect its actual verdict, candidate and supporting
-report. Relay what was accepted, what remains unresolved, the checks actually run,
-and remaining agent/resource IDs. Lifecycle idle is not a project verdict. If
-report evidence cannot be retrieved, hand back BLOCKED rather than infer success.
+report. Build the Human handback from every material field in the Lead report:
+candidate identity, accepted scope, checks and their exact limits, assumptions and
+preconditions, unresolved limitations, risks, unfinished dependencies, and remaining
+agent/resource IDs. Preserve those limitations in the final handback by faithful
+quotation or a complete equivalent; do not compress an ACCEPT into a success-only
+summary. If a field is absent, state that it was not reported. Lifecycle idle is
+not a project verdict. If report evidence cannot be retrieved, hand back BLOCKED
+rather than infer success.

@@ -5,30 +5,32 @@ Read references/provider-routing.md before every delegation or quota fallback.
 1. Resolve project/task identity, repository root, authority and existing ownership.
    Inspect Paseo reachability, list_workspaces and relevant list_agents, plus Git
    changes in the target checkout. Establish baseline resources to preserve. Read
-   list_profiles and profile notes; inspect provider availability and discover
-   actual models/settings when selecting a route. Use three role profiles; choose a
-   Peer's disposition in its assignment. Reread this repo's .paseo-slp/slp-routing.json using
-   the installed routes <absolute-repo> command, compare suitableFor/avoidFor/notes with the work, and
-   select an enabled, ready option within the assignment/protocol budget. Record
-   option ID, catalog hash and selection reason. Discover that option's actual
-   model/thinking/modes/features on the target provider. When Human pins settings,
-   preserve them and surface any quota/risk conflict. An empty catalog requires
-   explicit Human launch settings or a routing decision; it is not an open budget.
+   list_profiles and profile notes. Select slp-supervisor, slp-lead or slp-peer for
+   the child's role; disposition belongs to the assignment. Read this repository's
+   .paseo-slp/WORKSPACE_PROTOCOL.md for tactics and budget. Runtime provider, model,
+   mode, thinking and features come from the saved Human-configured agent profile.
+   Discover the selected provider's availability and supported models/settings.
+   Missing, incompatible or over-budget settings require a Human profile decision;
+   report the exact profile and mismatch. A task request for Pi or Codex does not
+   authorize rewriting profiles or substituting catalog settings.
    Before parallel writers, use references/orchestration.md for isolation and
    integration ownership. Complete preflight with an owner map and available route,
    or report the exact missing prerequisite for the dependent branch.
-2. Create the child through agent-scoped Paseo create_agent. Materialize the
-   selected catalog option: role-matched provider/model, settings.modeId,
-   settings.thinkingOptionId and settings.features, omitting absent settings. The
-   complete option replaces profile runtime defaults; retain no old-provider settings.
-   Recheck the catalog immediately before creation; a change requires reselection.
+2. Refresh list_profiles immediately before creation and use the selected profile's
+   complete bundle. Set create_agent.provider to its role provider ID, followed by
+   `/` and its exact model ID, preserving any slashes within the model ID. Copy
+   modeId, thinkingOptionId and featureValues to settings.modeId,
+   settings.thinkingOptionId and settings.features, omitting absent settings.
+   Record the selected profile ID and exact profile bytes with the launch arguments.
+   Use agent-scoped Paseo create_agent; it has no profile parameter.
    Pass the actual workspaceId, title and notifyOnFinish=true.
    initialPrompt contains the neutral assignment: project/task identifiers,
    repository/workspace, role/disposition, objective or open question, owned/excluded
    scope, read/write mode, separate authority grants, known constraints/dependencies,
-   verification, report recipient and handback. For review include the exact
-   candidate; for sealed design include the report visibility boundary. A Peer
-   receives only relevant repository tactics and may propose a different solution.
+   verification, your own agent ID as the report recipient, and handback. For
+   review include the exact candidate; for sealed design include the report
+   visibility boundary. A Peer receives only relevant repository tactics and may
+   propose a different solution.
    The provider supplies common/role instructions; do not paste them each time.
 3. Record the returned agent/workspace IDs, assignment and ownership in your timeline.
    Paseo owns parentage. Use fresh sessions for independent judgment; CLI run,

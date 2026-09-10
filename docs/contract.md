@@ -17,26 +17,27 @@ Local installation/transport checks do not constitute workflow acceptance.
 | src/references/monitoring.md | Supervisor/Lead event observation, heartbeat ownership and resource settlement. |
 | src/references/governance.md | Supervisor scope, causal notebook, authorized recovery and policy evolution. |
 | src/references/anti-patterns.md | All 20 guide §9 hypotheses with evidence, questions and bounded responses; reached on audit/drift triggers. |
-| src/references/provider-routing.md | Human catalog selection, provider settings, quota fallback and provider handoff procedure. |
+| src/references/provider-routing.md | Saved Human profile selection, provider validation and provider handoff procedure. |
 | src/routing.mjs | Read only the assigned repository's catalog; bind a Lead-selected option with fresh hash and availability checks. |
-| skills/paseo-slp-onboarding/SKILL.md | Installable repo setup/update workflow for protocol and routing; project/global installation is independent from repo config initialization. |
+| skills/paseo-slp-onboarding/SKILL.md | Installable repo tactics setup and saved-profile verification; project/global installation is independent from repo config initialization. |
 | src/templates/WORKSPACE_PROTOCOL.md | Repository tactics template with risk classes, routing, monitoring and proof gates; explicit init preserves existing files. |
 | src/launch.mjs, src/profiles.mjs | Compose shared role bytes and optional offline create_agent arguments from selected settings. |
 | src/handoff.mjs | Prepare a new-session handoff with explicit authority, old-owner evidence, resources and current work snapshot; no lifecycle mutations. |
 | src/package.mjs | Package identity, exclusive staging, integrity checks and stable Git work snapshot. |
 | bin/slp.mjs | Install/upgrade/preview, verify/uninstall, init, routes, prepare/handoff, identity and snapshot entrypoints. |
 | src/observation.mjs | Offline evidence helpers; no lifecycle runner or acceptance oracle. |
+| skills/paseo-slp-e2e/SKILL.md | Single-session full-suite execution procedure; requires the source checkout and authorized Paseo actors. |
+| e2e/ | Development-only scenario manifest, fixture, external outcome check, evidence collector and repository E2E protocol. Collector commands do not create agents or judge behavioral evidence. |
 | tests/*.test.mjs | Local installer, rollback, transport, envelope and snapshot checks. |
 
-The install unit is package.json, install.sh, bin/ and src/. installed.json binds their
+The install unit is package.json, install.sh, bin/, skills/ and src/. installed.json binds their
 exact bytes. A Paseo-integrated install also binds paseo-binding.json, containing
 only owned entries and the prior values of two MCP flags, never credentials.
 The shell installer and installed CLI share the same installation code.
 
 Only three managed profiles exist: slp-{supervisor,lead,peer}; providers use
 slp-codex-{role} and slp-pi-{role}. Peer disposition belongs to the assignment;
-it never maps to a specialized profile. Explicit Human profile launches remain
-supported, with settings in Paseo. Existing IDs must be
+it never maps to a specialized profile. Ordinary launches use the saved Human-configured role profiles in Paseo. Existing IDs must be
 removed before installing; unrelated configuration is preserved.
 
 Installation performs no agent creation. Reload changes host configuration for
@@ -78,34 +79,34 @@ primitives; no semantic detector, lifecycle runner, tool filter or schedule adap
 is added. Missing capabilities remain explicit before any fallback. See
 [guide coverage](guide-coverage.md) for requirement mapping, load paths and host gaps.
 
-Codex and Pi share role bytes through their respective adapters. Provider changes
-within a managed profile use the matching role wrapper; repeat installation preserves
-those selections. Offline prepare accepts stock or matching role Codex/Pi providers,
-slash-bearing model IDs and optional modes. Stock providers receive the role envelope
-in initialPrompt, while installed wrappers also load it independently. Cross-family
-route overrides require a target model and drop old mode/thinking/features unless
-explicitly supplied. The ordinary delegation path discovers target capabilities.
+Codex and Pi share role bytes through their respective adapters. Human configures
+slp-supervisor, slp-lead and slp-peer with matching SLP role providers in Paseo.
+Ordinary delegation refreshes list_profiles and copies the saved provider, model,
+modeId, thinkingOptionId and featureValues into create_agent arguments. Discovery
+validates availability/settings; it does not select a replacement model. Missing
+or incompatible profile settings require Human configuration before launch.
 
-The Human catalog is <repository>/.paseo-slp/slp-routing.json beside
-<repository>/.paseo-slp/WORKSPACE_PROTOCOL.md.
-init creates the missing protocol and empty catalog; it preserves each existing file
-independently. --routing-from explicitly seeds a
-missing repo catalog from a validated JSON file; no automatic import or merging.
-Uninstall does not remove repo files. The two repo files have separate formats:
-protocol owns tactics/budget, catalog owns concrete runtime options within those bounds.
-Lead reads them on every delegation and reasons over suitability,
-restrictions, priority and quota, and chooses an option independently of disposition.
-routes requires an absolute repo directory, not a catalog file or installation path.
-prepare resolves from request.repository and rejects route.catalogFile. Neither cwd,
-PASEO_HOME, another repo, nor an old global catalog supplies a fallback. Worktrees
-use their own copies; the chosen base candidate or an authorized copy supplies them.
-The routes command returns current bytes' hash. Catalog-based prepare requires that
-hash, role eligibility, enabled=true and availability=ready; conflicting inline
-settings fail. It emits a complete runtime bundle without inheriting profile defaults.
-Provider inventory is checked; live model/effort/features and quota require host
-discovery. The check is at preparation time, not an atomic gate in Paseo create_agent.
-Policy requires rereading immediately before creation and prohibits silent catalog
-bypass. This is a local selector and agent procedure, not a quota telemetry service.
+Optional prepare accepts fresh profiles/providers inventories and returns profileId
+plus exact create arguments. This path rejects explicit binding and route runtime
+or catalog overrides, and requires no repository catalog. It is not a mandatory
+step before agent-scoped Paseo create_agent. Stock provider bindings and catalog
+requests remain separate explicit offline paths for authorized experiments/handoffs.
+They do not qualify saved-profile acceptance.
+
+init preserves existing files and creates missing protocol plus an empty optional
+catalog at <repository>/.paseo-slp. Protocol holds repo tactics and budget. Ordinary
+profile-based tasks may leave the catalog empty. --routing-from and routes remain
+for explicitly assigned catalog experiments/migrations: no global or other-repo
+fallback, stale hash or disabled/unavailable option bypass. Catalog settings never
+override a saved-profile request. The helper validates supplied inventory at
+preparation time; host provenance, freshness and actual launch need live evidence.
+
+New basic-codex/basic-pi manifests require runtimeSource=profiles and the corresponding
+provider family. Human configures all three profiles before testing; coordinator
+records raw inventories and never edits profiles to make a row launchable. begin
+validates settings.source/profiles/providers and derives the role bundles. U2
+compares all actor launches with those saved profiles. Old frozen manifests and
+reviews keep their original criteria; no past catalog run gains profile acceptance.
 
 Provider switching creates a new session: prepare-handoff requires old-owner settlement
 evidence and transfers state/resources without inventing new parentage or acceptance.

@@ -82,10 +82,11 @@ test('launcher loads installed role bytes, excludes private review material, pre
     assert.ok(child.create.initialPrompt.includes(readFileSync(join(installed, `src/roles/${role}.md`), 'utf8')));
     assert.equal(child.create.notifyOnFinish, true);
   }
-  const routed = launchPlan(installed, { ...request, profiles: [{ id: 'slp-supervisor',
-    ...binding, provider: 'slp-codex-supervisor', featureValues: { fast_mode: false } }],
-    providers: [{ id: 'codex' }], route: { provider: 'codex', modeId: 'full-access' } });
-  assert.equal(routed.create.provider, 'codex/gpt-5.6-luna');
+  const routed = launchPlan(installed, { ...request, binding: undefined, profiles: [{ id: 'slp-supervisor',
+    ...binding, provider: 'slp-codex-supervisor', modeId: 'full-access', featureValues: { fast_mode: false } }],
+    providers: [{ id: 'slp-codex-supervisor', status: 'available' }] });
+  assert.equal(routed.create.provider, 'slp-codex-supervisor/gpt-5.6-luna');
+  assert.equal(routed.profileId, 'slp-supervisor');
   assert.equal(routed.create.settings.modeId, 'full-access');
   assert.deepEqual(routed.create.settings.features, { fast_mode: false });
 });

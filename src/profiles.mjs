@@ -32,3 +32,18 @@ export function resolveProfile(role, profiles, providers, route = {}) {
     thinkingOptionId: setting('thinkingOptionId', profile.thinkingOptionId),
     features: structuredClone(setting('features', profile.featureValues) ?? {}) };
 }
+
+// Saved profiles are complete Human-owned runtime bundles.
+export function savedProfileBinding(role, profiles, providers, route = {}) {
+  for (const key of ['provider', 'model', 'modeId', 'thinkingOptionId', 'features', 'optionId', 'catalogSha256', 'catalogFile']) {
+    if (Object.hasOwn(route, key)) throw new Error(`Saved profile settings cannot be overridden by route.${key}; ask Human to configure the agent profile`);
+  }
+  if (!Array.isArray(profiles)) throw new Error('Paseo list_profiles inventory required');
+  if (!Array.isArray(providers)) throw new Error('Paseo list_providers inventory required');
+  const binding = resolveProfile(role, profiles, providers, route);
+  const family = roleProvider(role, binding.provider);
+  if (binding.provider !== providerId(role, family)) throw new Error(`Human must configure ${binding.profileId} with the matching SLP role provider`);
+  if (typeof binding.model !== 'string' || !binding.model.trim()) throw new Error(`Human must configure a model in agent profile ${binding.profileId}`);
+  if (binding.features === null || typeof binding.features !== 'object' || Array.isArray(binding.features)) throw new Error(`Invalid features in agent profile ${binding.profileId}`);
+  return binding;
+}

@@ -17,10 +17,12 @@ Use create_agent/send_agent_prompt with notifyOnFinish=true for completion, erro
 and permission wakes. While work is active, material signals include major design
 decisions, ambiguity, reopen/dependency requests, changed assumptions, repeated
 failures, stalled progress and stable candidates/findings. When a Supervisor is
-assigned, Lead includes decision, evidence reference and needed attention in a
-bounded report using the agreed Paseo route when available. Preserve its ID in the
-assignment; a Peer reports to Lead. Avoid routine status chatter and notification
-ping-pong: informational reports do not require acknowledgment prompts.
+assigned, Lead sends decision, evidence reference and needed attention to that
+Supervisor's agent ID as a bounded report; a Peer reports to Lead the same way.
+Resolve a recipient's ID from the assignment or from the child's
+paseo.parent-agent-id label. Keep reports material: a verdict, handback, blocker or
+changed assumption always warrants one, and an informational report needs no
+acknowledgment prompt in reply.
 
 If the host has no semantic event bridge, record that gap. Finish callbacks alone
 do not prove mid-task detection. Explicit material reports and, when justified,
@@ -33,7 +35,10 @@ wake/report path meets the job's observation need, report the dependent work BLO
 Use a heartbeat when the task's duration/risk and incomplete event coverage warrant
 periodic observation within the assignment. Cadence, timezone, expiry/run bounds and
 observer ownership are repository/assignment choices; there is no universal 15-minute
-rule. A bounded task with adequate notifications can operate without a heartbeat.
+rule. Before ending a turn with delegated work still outstanding, arm a bounded
+task-local fallback wake and record it; cancel it once that child's report is in
+hand. A finish notification you are waiting on promises a future turn without
+guaranteeing one.
 
 The observing session calls Paseo create_heartbeat with prompt and cron, plus
 timezone, name, maxRuns and/or expiresIn as appropriate to the agreed boundary.

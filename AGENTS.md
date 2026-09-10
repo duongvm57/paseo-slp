@@ -10,3 +10,9 @@ acceptance. Record missing host capabilities before adding workarounds.
 Keep repository tactics in WORKSPACE_PROTOCOL.md, outside global roles.
 Runtime installation, host configuration, live agents, commit and push require
 task authority. Other repositories are read-only unless explicitly authorized.
+
+When asked to run E2E or dogfood this package, read
+skills/paseo-slp-e2e/SKILL.md and execute the requested scenarios from this session
+(the whole manifest for a full-suite request). Resume an existing run when requested;
+report every scenario, including blocked and unrun branches. Repository E2E tactics
+live in e2e/WORKSPACE_PROTOCOL.md.

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join, isAbsolute } from 'node:path';
-import { resolveProfile, roleProvider } from './profiles.mjs';
+import { savedProfileBinding, roleProvider } from './profiles.mjs';
 import { verifyInstall } from './package.mjs';
 import { catalogBinding } from './routing.mjs';
 
@@ -20,8 +20,8 @@ export function roleInstructions(root, role) {
   const commandPath = "'" + join(root, 'bin/slp.mjs').replaceAll("'", "'\\''") + "'";
   return `SLP role=${role}\n${read('common.md')}\n${read(`roles/${role}.md`)}\n` +
     (role === 'peer' ? '' : read('delegation.md') + '\n') +
-    (role === 'peer' ? '' : `Before each spawn or quota fallback, read the assigned repository's .paseo-slp/WORKSPACE_PROTOCOL.md and run node ${commandPath} routes <absolute-repository-root>. ` +
-      `This reads .paseo-slp/slp-routing.json in that repository only. For repo setup/update, use the installed paseo-slp-onboarding skill; its packaged source is ${join(root, 'skills/paseo-slp-onboarding/SKILL.md')}.\n`) +
+    (role === 'peer' ? '' : `Before each spawn, read the assigned repository's .paseo-slp/WORKSPACE_PROTOCOL.md and refresh Paseo list_profiles. ` +
+      `Use the saved profile for the child role, including its exact provider/model/settings. For repo setup/update, use ${join(root, 'skills/paseo-slp-onboarding/SKILL.md')}.\n`) +
     `Installed policy directory: ${join(root, 'src')}\nSnapshot command: node ${commandPath} snapshot <repository>\n` +
     `Use the current authorized Human or delegated assignment and its Paseo workspace. Notifications and heartbeat prompts do not replace that assignment.\n`;
 }
@@ -35,18 +35,22 @@ export function launchPlan(root, request) {
   }
   if (!isAbsolute(request.repository)) throw new Error('Absolute repository required');
   let routing;
-  if (request.route?.optionId != null) {
+  if (request.profiles != null) {
+    if (request.binding) throw new Error('Choose saved profiles or an explicit binding, not both');
+    request = { ...request, binding: savedProfileBinding(role, request.profiles, request.providers, { ...request.route, disposition }) };
+  } else if (request.route?.optionId != null) {
     if (request.binding) throw new Error('Choose catalog routing or an explicit binding, not both');
     const selected = catalogBinding(request.repository, role, request.providers, request.route);
     request = { ...request, binding: selected.binding };
     routing = selected.routing;
-  } else if (request.profiles) request = { ...request, binding: resolveProfile(role, request.profiles, request.providers, { ...request.route, disposition }) };
+  }
   roleProvider(role, request.binding?.provider);
   const initialPrompt = prompt(root, role, `Repository: ${request.repository}\nWorkspace ID: ${request.workspaceId}\n${disposition ? `Disposition: ${disposition}\n` : ''}${request.assignment}`, request.binding);
   return {
     transport: 'Paseo create_agent; settings.features must be preserved',
     role, instructionPath: join(root, `src/roles/${role}.md`),
     ...(routing ? { routing } : {}),
+    ...(request.binding?.profileId ? { profileId: request.binding.profileId } : {}),
     create: { title: `SLP ${role}`, notifyOnFinish: true, provider: `${request.binding.provider}/${request.binding.model}`,
       workspaceId: request.workspaceId, initialPrompt,
       settings: { ...(request.binding.modeId ? { modeId: request.binding.modeId } : {}), ...(request.binding.thinkingOptionId ? { thinkingOptionId: request.binding.thinkingOptionId } : {}), features: request.binding.features ?? {} } },

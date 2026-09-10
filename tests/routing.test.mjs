@@ -37,10 +37,39 @@ function catalogFixture(dir) {
   return { path, catalog, route };
 }
 
+test('saved profile launches preserve each role bundle and reject runtime substitution', t => {
+  const { dir, installed } = fixture(t); install(root, installed);
+  const saved = ['supervisor', 'lead', 'peer'].map((role, i) => ({
+    id: `slp-${role}`, provider: `slp-pi-${role}`, model: `upstream/model-${i}`,
+    thinkingOptionId: i ? 'high' : 'medium', featureValues: { enabled: i === 2 },
+  }));
+  const inventory = saved.map(profile => ({ id: profile.provider, status: 'available' }));
+  const launch = fields => launchPlan(installed, { ...request, repository: dir, profiles: saved, providers: inventory, ...fields });
+  assert.equal(existsSync(join(dir, '.paseo-slp/slp-routing.json')), false);
+  for (const role of ['supervisor', 'lead', 'peer']) {
+    const selected = saved.find(p => p.id === `slp-${role}`);
+    const plan = launch({ role });
+    assert.equal(plan.profileId, selected.id);
+    assert.equal(plan.create.provider, `${selected.provider}/${selected.model}`);
+    assert.deepEqual(plan.create.settings, { thinkingOptionId: selected.thinkingOptionId, features: selected.featureValues });
+    assert.equal(plan.create.settings.modeId, undefined);
+  }
+  const { route } = catalogFixture(dir);
+  assert.equal(launch({}).create.provider, 'slp-pi-peer/upstream/model-2', 'Even an existing catalog cannot replace a saved profile');
+  for (const override of [route('luna-code'), { provider: 'slp-codex-peer' }, { model: 'other' }, { modeId: 'full-access' }, { thinkingOptionId: 'low' }, { features: {} }]) {
+    assert.throws(() => launch({ route: override }), /Saved profile settings cannot be overridden/);
+  }
+  assert.throws(() => launch({ binding: { provider: 'pi', model: 'other' } }), /Choose saved profiles/);
+  const changed = structuredClone(saved); changed[2].model = 'different/model';
+  assert.equal(launch({ profiles: changed }).create.provider, 'slp-pi-peer/different/model');
+  delete changed[2].model;
+  assert.throws(() => launch({ profiles: changed }), /Human must configure a model/);
+});
+
 test('Lead selects independent runtime bundles for one Peer role without a disposition mapping', t => {
   const { dir, installed } = fixture(t); install(root, installed);
   const { route } = catalogFixture(dir);
-  const launch = fields => launchPlan(installed, { ...request, repository: dir, ...fields });
+  const launch = fields => launchPlan(installed, { ...request, profiles: undefined, repository: dir, ...fields });
   const engineer = launch({ disposition: 'Engineer', route: route('luna-code') });
   const architect = launch({ disposition: 'architect', route: route('glm-design') });
   assert.equal(engineer.create.provider, 'slp-codex-peer/gpt-5.6-luna');
@@ -73,10 +102,10 @@ test('provider fallback requires explicit target model and clears nonportable se
   const { installed } = fixture(t); install(root, installed);
   assert.throws(() => resolveProfile('lead', profiles, providers, { provider: 'slp-pi-lead' }), /explicit target model/);
   const route = { provider: 'slp-pi-lead', model: 'opencode/glm-5.3-flash', thinkingOptionId: 'low' };
-  const plan = launchPlan(installed, { ...request, role: 'lead', route });
+  const plan = launchPlan(installed, { ...request, profiles: undefined, role: 'lead', binding: resolveProfile('lead', profiles, providers, route) });
   assert.equal(plan.create.provider, 'slp-pi-lead/opencode/glm-5.3-flash');
   assert.deepEqual(plan.create.settings, { thinkingOptionId: 'low', features: {} });
-  const clear = launchPlan(installed, { ...request, role: 'lead', route: { thinkingOptionId: null, modeId: null, features: {} } });
+  const clear = launchPlan(installed, { ...request, profiles: undefined, role: 'lead', binding: resolveProfile('lead', profiles, providers, { thinkingOptionId: null, modeId: null, features: {} }) });
   assert.deepEqual(clear.create.settings, { features: {} });
 });
 
@@ -127,7 +156,7 @@ test('Pi wrapper appends role while preserving RPC bytes, resume, model, thinkin
 
 test('quota handoff preserves evidence and old parentage, emits only new-session arguments', t => {
   const { dir, installed } = fixture(t); install(root, installed);
-  const replacement = { ...request, role: 'lead', route: { provider: 'slp-pi-lead', model: 'opencode/glm-5.3-flash', thinkingOptionId: 'medium' },
+  const replacement = { ...request, profiles: undefined, role: 'lead', binding: { provider: 'slp-pi-lead', model: 'opencode/glm-5.3-flash', thinkingOptionId: 'medium' },
     handoff: { previousAgentId: 'old-lead', reason: 'quota', authority: 'Human requests Pi replacement; existing edit scope only.', state: 'Architect report ready; Engineer paused on snapshot.', previousOwner: { settled: true, evidence: 'cancel receipt and paused writer acknowledgment' }, resources: [{ agentId: 'peer-1', parentAgentId: 'old-lead', state: 'paused' }] } };
   const plan = handoffPlan(installed, replacement);
   assert.equal(plan.create.provider, 'slp-pi-lead/opencode/glm-5.3-flash');
@@ -195,7 +224,7 @@ test('upgrade refuses changed managed provider before writing a new installation
 test('quota edits invalidate prepared selections and fresh selection can use another provider', t => {
   const { dir, installed } = fixture(t); install(root, installed);
   const { path, catalog, route } = catalogFixture(dir);
-  const launch = fields => launchPlan(installed, { ...request, repository: dir, ...fields });
+  const launch = fields => launchPlan(installed, { ...request, profiles: undefined, repository: dir, ...fields });
   const stale = route('luna-code');
   catalog.options[0].availability = 'quota-exhausted';
   writeFileSync(path, json(catalog));
@@ -281,7 +310,7 @@ test('same option ID can resolve differently per repo; missing repo config canno
   const a = catalogFixture(repoA), b = catalogFixture(repoB);
   b.catalog.options[0].provider = 'pi'; b.catalog.options[0].model = 'opencode/glm-5.3-flash';
   b.catalog.options[0].thinkingOptionId = 'high'; writeFileSync(b.path, json(b.catalog));
-  const launch = (repository, route) => launchPlan(installed, { ...request, repository, route });
+  const launch = (repository, route) => launchPlan(installed, { ...request, profiles: undefined, repository, route });
   assert.equal(launch(repoA, a.route('luna-code')).create.provider, 'slp-codex-peer/gpt-5.6-luna');
   assert.equal(launch(repoB, b.route('luna-code')).create.provider, 'slp-pi-peer/opencode/glm-5.3-flash');
   assert.throws(() => launch(repoB, a.route('luna-code')), /catalog changed/);
