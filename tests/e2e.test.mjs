@@ -73,6 +73,7 @@ test('basic preflight requires Human profiles for the scenario family before cre
   for (const family of ['codex', 'pi']) {
     const id = `basic-${family}`;
     const current = structuredClone(config);
+    delete current.confirmer; // Basic flows launch without a paid prelaunch reviewer.
     current.settings.profiles = ['supervisor', 'lead', 'peer'].map((role, i) => ({
       id: `slp-${role}`, provider: `slp-${family}-${role}`, model: `endpoint/model-${i}`,
       thinkingOptionId: i ? 'high' : 'medium', featureValues: { custom: i === 2 },
@@ -103,6 +104,14 @@ test('basic preflight requires Human profiles for the scenario family before cre
       assert.deepEqual(saved.roles[role].features, profile.featureValues);
     }
   }
+});
+test('non-basic scenarios still require independent prelaunch confirmation', t => {
+  const dir = temporary(t), run = join(dir, 'run');
+  initialize(run);
+  const current = structuredClone(config);
+  delete current.confirmer;
+  assert.throws(() => begin(run, 'direct-codex', current), /Independent prelaunch confirmer/);
+  assert.equal(existsSync(join(run, 'direct-codex')), false);
 });
 test('coordinator path and hash references cannot substitute for frozen transcript bytes', t => {
   const data = setup(t), path = join(data.dir, 'receipt.json');

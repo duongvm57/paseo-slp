@@ -72,7 +72,9 @@ export function begin(directory, id, config) {
   }
   requireValue(nonempty(config.host?.id) && nonempty(config.host?.version), 'Pinned host id/version required');
   requireValue(config.settings && typeof config.settings === 'object', 'Discovered settings required');
-  requireValue(nonempty(config.confirmer?.id) && config.confirmer.id !== config.operatorId && nonempty(config.confirmer?.evidence), 'Independent prelaunch confirmer and evidence required');
+  if (loaded.scenario.prelaunchConfirmation !== 'coordinator') {
+    requireValue(nonempty(config.confirmer?.id) && config.confirmer.id !== config.operatorId && nonempty(config.confirmer?.evidence), 'Independent prelaunch confirmer and evidence required');
+  }
   if (loaded.scenario.runtimeSource === 'profiles') {
     requireValue(config.settings.source === 'profiles', 'Basic E2E requires Human-configured agent profiles; catalog or inline settings cannot substitute');
     const bindings = Object.fromEntries(roles.map(role => {

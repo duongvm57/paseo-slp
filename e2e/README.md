@@ -13,6 +13,16 @@ review validation. It does not create agents or implement SLP orchestration.
 The agent continues through the skill. `npm run e2e -- --help` exits normally.
 Live execution and skill discovery remain NOT_RUN until exercised on a real host.
 
+## Basic flows
+
+`basic-pi` and `basic-codex` use the current authorized Paseo host with a separate
+fixture. They require no prelaunch confirmer (`config.confirmer` may be omitted).
+The coordinator validates candidate/profiles, prepares the fixture and failing
+baseline, then launches Supervisor → Lead → Peer. Final outcome checks,
+independent review and settlement remain required. Missing observability is
+reported in the final verdict rather than blocking task creation. See
+[Basic flow launch](WORKSPACE_PROTOCOL.md#basic-flow-launch) for budget and scope.
+
 ## Commands
 
 Use `npm run e2e -- plan` for the whole manifest, or append a scenario ID for one
@@ -38,7 +48,7 @@ npm run e2e -- summary .e2e-runs/run-001
 The coordinator creates the config from discovery and existing Human authority;
 the Human does not need to fill out JSON. `begin` requires `operatorId`,
 `authority.source`, positive integer `budget.maxAgents` and
-`budget.maxWallTimeSeconds`, `host.id`, `host.version`, a `settings` object and
+`budget.maxWallTimeSeconds`, `host.id`, `host.version`, a `settings` object and, for non-basic rows,
 `confirmer: { id, evidence }`. The confirmer must be independent of the operator;
 its evidence points to actual prelaunch approval. Include provider CLI versions,
 installed package paths/hash, discovered full settings for each planned role,
@@ -125,7 +135,7 @@ record the limitation. Decode `bytes` as base64 to inspect the original artifact
 
 | Kind | Required contents |
 |---|---|
-| preflight | Capabilities, actual authority, versions, candidate/install bindings, budget, independent prelaunch approval and baseline inventory. |
+| preflight | Capabilities, actual authority, versions, candidate/install bindings, budget, independent prelaunch approval for non-basic rows, and baseline inventory. |
 | launch | Root launch and every parent spawn request/response, profile/catalog bytes/hashes and settings at start/resume/handoff. |
 | instructions | Actual session initial/resume instructions and triggered reference reads correlated to installed bytes and provider command. |
 | timeline | Full relevant host events, parentage, messages, reports, faults, notifications and owner decisions. |

@@ -22,6 +22,19 @@ for the full suite selects the whole manifest. Record the selection in preflight
 report selected-row results separately from the full-manifest summary. A single
 basic flow does not require running the separate onboarding acceptance scenarios.
 
+## Basic flows
+
+For `basic-pi`/`basic-codex`, follow **Basic flow launch** in
+`e2e/WORKSPACE_PROTOCOL.md` instead of the prelaunch confirmer procedure below.
+Use the current authorized host and a separate fixture; no isolated daemon or
+paid prelaunch confirmer is required. The coordinator completes the config and
+uses the checked-in public contract/outcome check. After candidate/profile checks,
+fixture protocol and failing baseline, create the Supervisor. Missing draft fields
+are preparation work; missing transcript access is a final evidence limitation,
+not a task launch gate. Retain independent final review and honest evidence gaps.
+Use the protocol's bounded default when Human gave no budget; record a renewed
+window on an explicit new run request, preserving previous elapsed history.
+
 ## Execute
 
 1. Resolve current authority, host, installed candidate, model/effort choices and

@@ -1,9 +1,11 @@
 # Draft workflow E2E review — NOT CONFIRMED
 
 Derived from supplied guide §11 .
-Human or a reviewer independent of the package implementer confirms this and a
-job-specific outcome check before launch. Record confirmer and frozen file
-identity in the request. Implementer has not signed this checklist or a PASS.
+For basic-pi/basic-codex, the coordinator uses this checklist and the checked-in
+outcome check without a prelaunch confirmer. Other scenarios require Human or an
+independent reviewer to confirm the checklist and job-specific check before launch.
+All scenarios retain independent final review of frozen evidence; coordinator
+preparation is not a PASS.
 
 | Criterion | Evidence needed |
 |---|---|

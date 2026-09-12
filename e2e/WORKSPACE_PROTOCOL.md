@@ -4,6 +4,39 @@ This is the repository tactic for running the package's E2E suite. It does not
 change global SLP roles or grant runtime authority. A run tests one frozen package
 candidate on explicitly identified host/provider/model/effort configurations.
 
+## Basic flow launch
+
+For `basic-pi` and `basic-codex`, this section takes precedence over the
+independent prelaunch confirmation and evidence-access launch gates below.
+The objective is to exercise Supervisor → Lead → Peer on a real repair.
+
+Use the current Paseo host and an independent fixture workspace. A separate daemon
+or host selector is not required for basic flows; isolation requirements belong
+to scenarios that explicitly test installation, global scope or host faults.
+Preserve unrelated host resources and obtain runtime cutover authority if needed.
+
+The coordinator checks the installed candidate/bindings, matching saved profiles
+and provider availability, then writes the attempt config, creates the fixture,
+completes its protocol and records the failing baseline. Use the checked-in public
+contract and `e2e/check-outcome.mjs`; no paid confirmer or Human approval of a draft
+is required. Launch the Supervisor as soon as these checks pass. Missing draft
+fields are coordinator work to complete, not a reason to defer the scenario.
+
+Record a bounded time/agent budget from the assignment. If Human supplied no
+budget, use 45 minutes and at most six agents including coordinator, the three
+SLP actors and final suite reviewer, with one spare slot. A new explicit request
+to run again supplies a new default window; on resume retain elapsed history and
+record the renewed window rather than silently rewriting it. An explicit Human
+cap or stop remains binding. A future deadline is not a blocker: use remaining
+time; at expiry settle activity and report unfinished work.
+
+Collect available evidence during execution. An unavailable native transcript or
+other observability path does not prevent the basic task launch: record the gap
+and let final review mark the affected criteria BLOCKED. Do not fabricate proof
+or claim PASS. Keep final outcome checks, independent acceptance review, frozen
+evidence and resource settlement. Report task execution separately from evidence
+qualification so an evidence gap cannot be mistaken for an unattempted workflow.
+
 ## One-session ownership
 
 The coordinating session owns suite progress, evidence and the consolidated
@@ -271,8 +304,8 @@ set and independent review under remaining authority and budget.
 
 ## Acceptance and reruns
 
-Human or a fresh independent reviewer confirms the outcome check and the frozen
-docs/review-checklist.md before launch. At completion, a fresh Paseo reviewer gets
+For non-basic scenarios, Human or a fresh independent reviewer confirms the
+outcome check and frozen docs/review-checklist.md before launch. At completion, a fresh Paseo reviewer gets
 the objective, public contract, frozen evidence, assertions and checklist, with a
 neutral brief. It verifies participant/parentage evidence and the unchanged task
 candidate. Reviewer assertions are judgments; the collector checks integrity and

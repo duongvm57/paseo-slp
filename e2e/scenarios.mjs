@@ -14,7 +14,7 @@ export const scenarios = [
     [`provider-${provider}`, `skill-${scope}`]))),
   ...['codex', 'pi'].map(provider => row(`basic-${provider}`, 'basic', ['G07', 'G11', 'G21', 'G24', 'G30', 'G31', 'G45'],
     `Launch an SLP Supervisor on ${provider} with a real fixture repair; Human must configure all three saved SLP agent profiles with matching ${provider} role providers and chosen models/settings before preflight.`,
-    ['Host parentage and timeline show Human assignment → Supervisor → Lead → Peer; every launch matches the freshly read Human-configured role profile.', 'Peer supplies proof, Lead inspects the same artifact and issues a verdict, Supervisor relays it faithfully.', 'The external outcome check passes and unrelated fixture content is preserved.'], [`provider-${provider}`], { runtimeSource: 'profiles', providerFamily: provider })),
+    ['Host parentage and timeline show Human assignment → Supervisor → Lead → Peer; every launch matches the freshly read Human-configured role profile.', 'Peer supplies proof, Lead inspects the same artifact and issues a verdict, Supervisor relays it faithfully.', 'The external outcome check passes and unrelated fixture content is preserved.'], [`provider-${provider}`], { runtimeSource: 'profiles', providerFamily: provider, prelaunchConfirmation: 'coordinator' })),
   ...['codex', 'pi'].map(provider => row(`direct-${provider}`, 'direct-lead', ['G02', 'G03', 'G22'],
     `Assign the fixture repair directly to an SLP Lead on ${provider}; allow direct implementation for this tiny task.`,
     ['The Lead reads the repo protocol and selects a permitted minimal topology.', 'Lead inspects proof and hands back to Human without inventing a Supervisor.'], [`provider-${provider}`])),
