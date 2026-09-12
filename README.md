@@ -159,6 +159,19 @@ launch. Không có pool/option hợp lệ thì hoàn thiện onboarding; không 
 `slp-peer`, settings của Lead hay catalog global. `priority` là gợi ý lựa chọn,
 không thay thế đánh giá suitability và budget.
 
+**Fallback quota của Peer:** cấu hình ngay trong `.paseo-slp/slp-routing.json`:
+
+```json
+"quotaFallback": { "enabled": true, "optionIds": ["luna-code", "glm-design"] }
+```
+
+Các ID phải tồn tại trong `options`; dùng ID thực tế của repo. Mặc định tắt hoặc
+thiếu cấu hình thì dừng nhánh hết quota. Lead chọn bundle còn khả dụng, phù hợp
+và nằm trong danh sách này; `prepare` nhận thêm `route.quotaFallbackFrom` là ID
+option bị quota. Không tự đổi model ngoài pool bằng `update_agent`, không dùng
+provider default, và không coi model khác cùng tài khoản là quota mới. Nếu không
+còn fallback hợp lệ thì báo BLOCKED; giữ ownership và bằng chứng trước khi handoff.
+
 **Đổi Lead sang Pi khi Codex hết quota:** đổi provider của **SLP Lead** thành
 `slp-pi-lead`, chọn model/thinking tương ứng và Save cho các launch sau. Để chuyển
 công việc đang chạy, nhắn Supervisor: “Codex hết quota, chuyển Lead này sang Pi,
@@ -180,8 +193,8 @@ Supervisor/Lead thêm inventory `profiles`/`providers`; Peer thêm `providers` v
 `route: {optionId, catalogSha256}` lấy từ `routes`. Có thể kèm profiles khi chuẩn bị
 Peer, nhưng chúng không thay thế pool. Option quyết định nguyên bundle và map sang
 `slp-pi-peer`/`slp-codex-peer`; model chứa `/` được giữ nguyên. `binding` tường minh
-không kèm profiles còn hỗ trợ cho thử nghiệm/handoff được Human cho phép, không
-phải fallback khi thiếu pool.
+không kèm profiles chỉ hỗ trợ Supervisor/Lead khi được Human cho phép. Peer luôn
+phải chọn option trong pool, kể cả handoff và recovery.
 `prepare-handoff <request.json>` thêm snapshot và handoff vào create_agent arguments;
 xem [ví dụ handoff](examples/provider-handoff.request.json). Hai lệnh chỉ chuẩn bị
 arguments; Supervisor/Lead dùng Paseo để thực sự tạo agent.

@@ -26,7 +26,8 @@ const bindingSources = [
 ];
 
 export function resolveBinding(role, request, disposition) {
-  if (role === 'peer' && request.binding == null) {
+  if (role === 'peer') {
+    if (request.binding != null) throw new Error('Peer requires a project pool option; explicit bindings cannot bypass routing');
     // Profile inventory may accompany discovery, but never selects a Peer runtime.
     if (!request.route?.optionId) throw new Error('Peer requires a project routing option; run onboarding and select route.optionId with catalogSha256');
     return catalogBinding(request.repository, role, request.providers, { ...request.route, disposition });

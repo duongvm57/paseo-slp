@@ -1,6 +1,7 @@
 Delegation procedure (Supervisor and Lead only):
 
-Read references/provider-routing.md before every delegation or quota fallback.
+Read references/provider-routing.md before every delegation, quota fallback or runtime settings change.
+Peer runtime changes remain inside the project pool; quota fallback follows its quotaFallback setting.
 
 1. Resolve project/task identity, repository root, authority and existing ownership.
    Inspect Paseo reachability, list_workspaces and relevant list_agents, plus Git

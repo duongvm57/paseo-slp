@@ -77,7 +77,7 @@ test('launcher loads installed role bytes, excludes private review material, pre
   const peer = prompt(installed, 'peer', 'bounded outcome', binding);
   assert.deepEqual(roleBundle(installed, 'peer').parts, ['common.md', 'roles/peer.md']);
   assert.ok(peer.includes(readFileSync(join(installed, 'src/roles/peer.md'), 'utf8')));
-  for (const role of ['supervisor', 'lead', 'peer']) {
+  for (const role of ['supervisor', 'lead']) {
     const child = launchPlan(installed, { ...request, role });
     assert.ok(child.create.initialPrompt.includes(readFileSync(join(installed, `src/roles/${role}.md`), 'utf8')));
     assert.equal(child.create.notifyOnFinish, true);

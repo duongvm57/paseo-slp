@@ -117,7 +117,7 @@ test('provider fallback requires explicit target model and clears nonportable se
 test('stock Pi offline preparation accepts catalog model IDs and no mode', t => {
   const { dir, installed } = fixture(t); install(root, installed);
   const path = join(dir, 'request.json');
-  writeFileSync(path, json({ ...request, profiles: undefined, providers: undefined, binding: { provider: 'pi', model: 'commandcode/z-ai/glm-5.3-flash', thinkingOptionId: 'medium' } }));
+  writeFileSync(path, json({ ...request, role: 'lead', profiles: undefined, providers: undefined, binding: { provider: 'pi', model: 'commandcode/z-ai/glm-5.3-flash', thinkingOptionId: 'medium' } }));
   const plan = JSON.parse(execFileSync(process.execPath, [join(installed, 'bin/slp.mjs'), 'prepare', path], { env: { PATH: '' }, encoding: 'utf8' }));
   assert.equal(plan.create.provider, 'pi/commandcode/z-ai/glm-5.3-flash');
   assert.equal(plan.create.settings.modeId, undefined);
@@ -342,4 +342,36 @@ test('same option ID can resolve differently per repo; missing repo config canno
   rmSync(b.path);
   assert.throws(() => launch(repoB, { optionId: 'luna-code', catalogSha256: a.route('luna-code').catalogSha256 }), /Missing repository routing catalog/);
   assert.throws(() => readCatalog(), /Absolute repository/);
+});
+
+test('quota fallback stays within the authorized project pool and preserves complete bundles', t => {
+  const { dir, installed } = fixture(t); install(root, installed);
+  const {path, catalog, route} = catalogFixture(dir);
+  const launch = overrides => launchPlan(installed, {...request, profiles: undefined, repository:dir, route:{...route('glm-design'), quotaFallbackFrom:'luna-code', ...overrides}});
+  assert.throws(()=>launch(), /disabled or target/);
+  delete catalog.quotaFallback; writeFileSync(path,json(catalog));
+  assert.throws(()=>launch(), /disabled or target/);
+  catalog.quotaFallback={enabled:true,optionIds:['glm-design']};writeFileSync(path,json(catalog));
+  const plan=launch();
+  execFileSync('git',['init','-q',dir]);
+  const handoff = {previousAgentId:'old-peer',reason:'quota',authority:'project quotaFallback',state:'read-only findings retained',previousOwner:{settled:true,evidence:'host idle and no writes'},resources:[]};
+  const next = handoffPlan(installed,{...request,profiles:undefined,repository:dir,route:{...route('glm-design'),quotaFallbackFrom:'luna-code'},handoff});
+  assert.equal(next.routing.quotaFallbackFrom,'luna-code');
+  assert.equal(next.create.provider,plan.create.provider);
+  assert.throws(()=>handoffPlan(installed,{...request,profiles:undefined,repository:dir,route:{...route('luna-reason'),quotaFallbackFrom:'luna-code'},handoff}),/not authorized/);
+  assert.equal(plan.create.provider,'slp-pi-peer/opencode/glm-5.3-flash');
+  assert.equal(plan.routing.quotaFallbackFrom,'luna-code');
+  assert.deepEqual(plan.create.settings,{thinkingOptionId:'medium',features:{}});
+  assert.throws(()=>launch({optionId:'luna-reason'}),/disabled or target/);
+  assert.throws(()=>launch({model:'gpt-5.6-sol'}),/conflicting/);
+  assert.throws(()=>launchPlan(installed,{...request,repository:dir,profiles:undefined,binding:{provider:'slp-codex-peer',model:'gpt-5.6-sol'}}),/explicit bindings cannot bypass/);
+  assert.throws(()=>launch({quotaFallbackFrom:'glm-design'}),/different source/);
+  assert.throws(()=>launch({quotaFallbackFrom:'outside-pool'}),/different source/);
+  const stale=route('glm-design').catalogSha256;
+  catalog.options.find(o=>o.id==='glm-design').availability='quota-exhausted';writeFileSync(path,json(catalog));
+  assert.throws(()=>launch({catalogSha256:stale}),/changed or hash missing/);
+  assert.throws(()=>launch(),/unavailable/);
+  for(const fallback of [{enabled:true,optionIds:['outside-pool']},{enabled:true,optionIds:[]},{enabled:true,optionIds:['glm-design','glm-design']},{enabled:'true',optionIds:['glm-design']},{enabled:true,optionIds:['glm-design'],model:'gpt-5.6-sol'}]) {
+    assert.throws(()=>validateCatalog({...catalog,quotaFallback:fallback}),/quotaFallback/);
+  }
 });

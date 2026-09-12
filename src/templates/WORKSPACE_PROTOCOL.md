@@ -63,7 +63,9 @@ or Lead settings. Fresh independent judgments use fresh sessions even with the
 same model. Missing pool/eligible runtime requires repo setup, not host fallback.
 
 Lead uses macro skills, Supervisor observation/governance skills, Peer task micro
-skills. Record allowed pool maintenance, cost limits, quota fallback authority and
+skills. Configure Peer quotaFallback.enabled/optionIds in slp-routing.json; default
+disabled, targets restricted to existing eligible pool options. Record allowed pool
+maintenance, cost limits and
 settlement boundaries. Provider changes for existing work require a new-session
 handoff; an eligible pool option does not itself grant replacement authority.
 Use paseo-slp-onboarding to update tactics and pool while preserving Human choices.

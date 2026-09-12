@@ -1,6 +1,7 @@
 {
   "version": 1,
   "policy": "Example preferences based on the requested Luna/GLM mix, not measured capability rankings. Human verifies model IDs, effort support and quota before marking ready. Lead may choose any enabled ready Peer option within the assignment budget; reassess suitability for fallback.",
+  "quotaFallback": { "enabled": false, "optionIds": [] },
   "options": [
     {
       "id": "luna-code",

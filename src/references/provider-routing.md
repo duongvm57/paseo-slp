@@ -40,6 +40,32 @@ Peer delegation: use paseo-slp-onboarding to complete project setup. Do not fall
 back to host/global/another repository's catalog, a saved Peer profile or inherited
 Lead settings. Unknown availability is not permission to launch.
 
+## Peer quota fallback
+
+The catalog's quotaFallback is { enabled: boolean, optionIds: [pool option IDs] }.
+Absent or disabled means stop the quota-blocked branch. Enabled authorizes Lead to
+choose a suitable target only from that list and the current project pool, within
+assignment budget. The list is an allowlist, not a command to try every option.
+
+On a real quota error, record the source option, failed operation and provider error.
+Refresh routes and live capabilities. Select a different enabled/ready Peer option
+allowed by quotaFallback; reject any target whose runtime/account is known to share
+the exhausted quota. A different model on the same provider is not proof of fresh quota.
+Use prepare with route.optionId, route.catalogSha256 and route.quotaFallbackFrom
+(the failed option ID). Missing authorization, no viable target or a repeated quota
+error ends this fallback attempt; report the blocked branch without a retry loop.
+Catalog status is configuration, not proof of live quota or recovery.
+
+Use the validated complete bundle for every create, resume or settings change.
+Never override a pool model with a provider default or discovery result, or use an
+explicit binding to bypass the pool. For same-provider continuation, verify current
+ownership and apply the complete target settings before resuming; if absent settings
+cannot be cleared through the host, use a fresh session after settlement instead.
+For a provider change, settle the old owner and use prepare-handoff with the same
+route fields and handoff evidence before creating a fresh Peer. Keep the failed
+session/evidence; enforce task topology and one writer. Fallback authority does not
+waive ownership, independent-review requirements or authorize new pool entries.
+
 ## Preparation and role loading
 
 Supervisor/Lead prepare requests use fresh profiles/providers, role, repository,
@@ -53,8 +79,8 @@ the same policy. Codex receives developer instructions; Pi uses
 --append-system-prompt while preserving host extensions/MCP arguments. Pi model IDs
 may contain endpoint prefixes and slashes; preserve the exact discovered ID.
 
-Explicit binding requests remain an offline escape hatch for Human-authorized
-experiments/handoffs, not ordinary Peer routing or a missing-pool fallback.
+Explicit bindings are for separately authorized Supervisor/Lead experiments. Peer quota
+recovery always uses the project pool and its quotaFallback configuration.
 Historical profile/catalog experiments do not establish the current default path.
 
 ## Provider quota failure or requested switch

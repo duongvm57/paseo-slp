@@ -132,3 +132,10 @@ symlink targets, permission modes and deleted markers. It excludes ignored build
 outputs, staging intent, external artifacts and processes; relevant external
 proof must be recorded separately. Submodules are unsupported. Before/after
 snapshots detect drift while Peer is paused, not transient or malicious writes.
+
+Peer quota fallback is configured by catalog quotaFallback.enabled and optionIds.
+Missing/disabled means stop; targets must be existing eligible pool bundles.
+prepare validates route.quotaFallbackFrom against this authorization and fresh hash.
+Raw Paseo create/update calls remain host capabilities: the package supplies policy
+and validation, not a host security boundary. Evidence must verify actual settings
+on start/resume/update; availability flags alone do not prove quota recovery.

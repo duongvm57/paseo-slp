@@ -48,6 +48,11 @@ Populate the project catalog before Peer delegation. Every option has:
 - priority: numeric preference; suitableFor and avoidFor: lists of task descriptions;
   notes: concrete guidance/tradeoffs for Lead. Priority is not automatic selection.
 
+Configure quotaFallback: { enabled: false, optionIds: [] } by default. Enable it
+only under Human fallback authority; optionIds must reference existing pool options.
+Choose allowed fallback options by suitability and budget, not provider model lists.
+Preserve existing fallback preferences on updates. Missing settings mean no fallback.
+
 The catalog envelope is version: 1, a nonempty policy describing selection/budget
 boundaries, and options: an array of these bundles. Lead chooses an option per
 assignment; do not hard-code Engineer/Architect/Reviewer to one model. Multiple
