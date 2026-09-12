@@ -4,7 +4,9 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, cpSync, ex
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { initialize, begin, fixture, collect, collectCoordinator, collectResources, seal, review, reviewAddendum, defer, summary, sourceRoot } from '../e2e/collector.mjs';
-import { scenarios, criteria, evidenceKinds } from '../e2e/scenarios.mjs';
+import { scenarios } from '../e2e/scenarios.mjs';
+import { evidenceKinds } from '../e2e/evidence.mjs';
+import { criterionIds as criteria, criterionEvidence } from '../e2e/criteria.mjs';
 import { createFixture } from '../e2e/fixture.mjs';
 import { hash } from '../src/package.mjs';
 
@@ -362,4 +364,26 @@ test('plain npm E2E entry cannot be mistaken for a successful live run', () => {
   const result = spawnSync(process.execPath, [join(sourceRoot, 'e2e/cli.mjs')], { encoding: 'utf8' });
   assert.equal(result.status, 2);
   assert.equal(JSON.parse(result.stdout).execution, 'SESSION_REQUIRED');
+});
+
+test('a criterion is only discharged by evidence of a kind that can support it', t => {
+  const data = setup(t), input = fakeReview(data);
+  // fakeReview collects one receipt per kind, in evidenceKinds order.
+  const all = input.criteria.U1.evidence;
+  const pathFor = kind => all[evidenceKinds.indexOf(kind)];
+  assert.deepEqual(criterionEvidence.U7, ['resources']);
+  assert.deepEqual(criterionEvidence.U1, ['checks', 'artifacts']);
+
+  const unrelated = structuredClone(input);
+  unrelated.criteria.U7 = { status: 'PASS', reason: 'Settlement claimed from an unrelated receipt', evidence: [pathFor('checks')] };
+  assert.throws(() => review(data.attempt, unrelated), /U7: observed verdict needs resources evidence/);
+
+  const wrongWayRound = structuredClone(input);
+  wrongWayRound.criteria.U1 = { status: 'FAIL', reason: 'Outcome claimed from a settlement receipt', evidence: [pathFor('resources')] };
+  assert.throws(() => review(data.attempt, wrongWayRound), /U1: observed verdict needs checks or artifacts evidence/);
+
+  // BLOCKED needs no evidence at all, so the support rule does not apply to it.
+  const blocked = structuredClone(input);
+  blocked.criteria.U7 = { status: 'BLOCKED', reason: 'Host settlement receipts unavailable', evidence: [] };
+  assert.equal(review(data.attempt, blocked).status, 'BLOCKED');
 });

@@ -1,6 +1,13 @@
+import { dispositionPattern, rejectRouteKeys, verifyProvider,
+  runtimeSettingKeys, catalogRouteKeys } from './binding.mjs';
+
 export const roles = ['supervisor', 'lead', 'peer'];
 export const families = ['codex', 'pi'];
-export const profileId = role => `slp-${role}`;
+const profilePrefix = 'slp-';
+export const profileId = role => `${profilePrefix}${role}`;
+// Inverse of profileId. Only Peer ever had legacy `slp-peer-<disposition>` profiles.
+export const roleOfProfileId = id =>
+  id.startsWith(`${profileId('peer')}-`) ? 'peer' : id.slice(profilePrefix.length);
 export const providerId = (role, family = 'codex') => `slp-${family}-${role}`;
 
 export function roleProvider(role, provider) {
@@ -10,20 +17,19 @@ export function roleProvider(role, provider) {
   return family;
 }
 
+// Builder for the explicit-binding source: turns a saved profile plus an optional
+// provider switch into a Binding a caller can hand to launchPlan as request.binding.
+// The saved-profile source below wraps it and forbids every runtime override.
 export function resolveProfile(role, profiles, providers, route = {}) {
   if (!roles.includes(role)) throw new Error('Unknown role');
-  if (route.disposition != null && (typeof route.disposition !== 'string' || !/^[a-z][a-z0-9-]*$/i.test(route.disposition))) throw new Error('Invalid Peer disposition');
+  if (route.disposition != null && (typeof route.disposition !== 'string' || !dispositionPattern.test(route.disposition))) throw new Error('Invalid Peer disposition');
   const disposition = route.disposition?.toLowerCase();
   if (disposition && role !== 'peer') throw new Error('Disposition requires Peer role');
   const id = route.profileId ?? profileId(role);
   const profile = profiles.find(p => p.id === id);
   if (!profile) throw new Error(`Missing Paseo profile ${id}`);
-  const provider = providers?.find(p => p.id === (route.provider ?? profile.provider));
-  if (!provider || provider.enabled === false || provider.status === 'unavailable') {
-    throw new Error(`Unverified provider for ${id}`);
-  }
-  const family = roleProvider(role, provider.id);
-  if (provider.extends != null && provider.extends !== family) throw new Error(`Unverified provider family for ${id}`);
+  const { observed: provider, family } = verifyProvider(providers, route.provider ?? profile.provider,
+    id => roleProvider(role, id), `for ${id}`);
   const switched = family !== roleProvider(role, profile.provider);
   if (switched && !route.model) throw new Error('Provider switch requires an explicit target model; old provider settings are not portable');
   const setting = (key, fallback) => Object.hasOwn(route, key) ? route[key] : switched ? undefined : fallback;
@@ -35,9 +41,8 @@ export function resolveProfile(role, profiles, providers, route = {}) {
 
 // Saved profiles are complete Human-owned runtime bundles.
 export function savedProfileBinding(role, profiles, providers, route = {}) {
-  for (const key of ['provider', 'model', 'modeId', 'thinkingOptionId', 'features', 'optionId', 'catalogSha256', 'catalogFile']) {
-    if (Object.hasOwn(route, key)) throw new Error(`Saved profile settings cannot be overridden by route.${key}; ask Human to configure the agent profile`);
-  }
+  rejectRouteKeys(route, [...runtimeSettingKeys, ...catalogRouteKeys],
+    key => `Saved profile settings cannot be overridden by route.${key}; ask Human to configure the agent profile`);
   if (!Array.isArray(profiles)) throw new Error('Paseo list_profiles inventory required');
   if (!Array.isArray(providers)) throw new Error('Paseo list_providers inventory required');
   const binding = resolveProfile(role, profiles, providers, route);

@@ -6,8 +6,8 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { identity, install, verifyInstall, uninstall, snapshot, json } from '../src/package.mjs';
 import { prompt, launchPlan } from '../src/launch.mjs';
+import { roleBundle } from '../src/role-bundle.mjs';
 import { resolveProfile } from '../src/profiles.mjs';
-import { descendants, observationEnd, report, instructionEvidence } from '../src/observation.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const binding = { provider: 'codex', model: 'gpt-5.6-luna', modeId: 'auto', thinkingOptionId: 'medium' };
@@ -75,7 +75,7 @@ test('launcher loads installed role bytes, excludes private review material, pre
   assert.equal(launchPlan(installed, { ...request, binding: { ...binding, provider: 'slp-codex-supervisor' } }).create.provider, 'slp-codex-supervisor/gpt-5.6-luna');
   assert.equal(launchPlan(installed, { ...request, binding: { ...binding, modeId: 'full-access' } }).create.settings.modeId, 'full-access');
   const peer = prompt(installed, 'peer', 'bounded outcome', binding);
-  assert.ok(!peer.includes('Delegation procedure'));
+  assert.deepEqual(roleBundle(installed, 'peer').parts, ['common.md', 'roles/peer.md']);
   assert.ok(peer.includes(readFileSync(join(installed, 'src/roles/peer.md'), 'utf8')));
   for (const role of ['supervisor', 'lead', 'peer']) {
     const child = launchPlan(installed, { ...request, role });
@@ -121,25 +121,25 @@ test('work snapshot detects untracked edits, deletion and executable mode withou
   assert.deepEqual(snapshot(dir).files, [{ path: 'owned.txt', deleted: true }]);
 });
 
-test('observer uses host parentage, never role names or idle as acceptance', () => {
-  // Fields follow the inspected stock CLI 0.7.2 serializer, not a new host API.
-  const records = [
-    { Id: 'root', ParentAgentId: null, Status: 'idle' },
-    { Id: 'lead', ParentAgentId: 'root', Status: 'idle' },
-    { Id: 'peer', ParentAgentId: 'lead', Status: 'idle' },
-    { Id: 'other', ParentAgentId: null, Name: 'SLP Peer', Status: 'running' },
-  ];
-  const owned = descendants('root', records);
-  assert.deepEqual(owned.map(a => a.Id), ['root', 'lead', 'peer']);
-  assert.equal(observationEnd(owned, false), null);
-  assert.equal(observationEnd(owned, true), 'DEADLINE');
-  assert.equal(observationEnd([{ ...owned[2], PendingPermissions: [{ id: 'p' }] }], false), 'BLOCKED_PERMISSION');
-  const result = report('DEADLINE', owned);
-  assert.equal(result.review, 'NOT_RUN');
-  assert.equal(result.resourceSettlement, 'UNVERIFIED');
-  assert.ok(!JSON.stringify(result).includes('PASS'));
-  const evidence = instructionEvidence('root', owned, { peer: 'I am the Peer' }, { peer: 'Exact installed instruction bytes' });
-  assert.equal(evidence[2].configuredRole, null);
-  assert.deepEqual(evidence[2].completeRoleTextSeen, []);
-  assert.equal(evidence[2].verdict, 'UNVERIFIED');
+test('role bundle load paths are the contract: Peer never receives delegation policy', t => {
+  const installed = join(fixture(t), 'release');
+  install(root, installed);
+  const expected = {
+    supervisor: ['common.md', 'roles/supervisor.md', 'delegation.md'],
+    lead: ['common.md', 'roles/lead.md', 'delegation.md'],
+    peer: ['common.md', 'roles/peer.md'],
+  };
+  for (const [role, parts] of Object.entries(expected)) {
+    const bundle = roleBundle(installed, role);
+    assert.deepEqual(bundle.parts, parts);
+    assert.equal(bundle.orchestrates, role !== 'peer');
+    for (const part of parts) {
+      assert.ok(bundle.instructions.includes(readFileSync(join(installed, 'src', part), 'utf8')), `${role} must load ${part}`);
+    }
+    const withheld = ['common.md', 'roles/supervisor.md', 'roles/lead.md', 'roles/peer.md', 'delegation.md'].filter(p => !parts.includes(p));
+    for (const part of withheld) {
+      assert.ok(!bundle.instructions.includes(readFileSync(join(installed, 'src', part), 'utf8')), `${role} must not load ${part}`);
+    }
+  }
+  assert.throws(() => roleBundle(installed, 'engineer'), /Unknown role/);
 });

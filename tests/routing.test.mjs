@@ -7,8 +7,9 @@ import { execFileSync } from 'node:child_process';
 import { identity, install, readJson, json, hash, verifyInstall } from '../src/package.mjs';
 import { installPaseo, upgradePaseo, initWorkspace } from '../src/paseo-install.mjs';
 import { resolveProfile } from '../src/profiles.mjs';
-import { launchPlan, roleInstructions } from '../src/launch.mjs';
-import { handoffPlan } from '../src/handoff.mjs';
+import { launchPlan, handoffPlan } from '../src/launch.mjs';
+import { roleInstructions, roleBundle } from '../src/role-bundle.mjs';
+
 import { piRoleArgs } from '../src/role-transport.mjs';
 import { readCatalog, emptyCatalog, validateCatalog } from '../src/routing.mjs';
 
@@ -78,7 +79,7 @@ test('Lead selects independent runtime bundles for one Peer role without a dispo
   assert.deepEqual(architect.create.settings, { thinkingOptionId: 'medium', features: {} });
   for (const plan of [engineer, architect]) {
     assert.ok(plan.create.initialPrompt.includes(readFileSync(join(installed, 'src/roles/peer.md'), 'utf8')));
-    assert.ok(!plan.create.initialPrompt.includes('Delegation procedure'));
+    assert.equal(roleBundle(installed, plan.role).parts.includes('delegation.md'), false);
   }
   assert.match(architect.create.initialPrompt, /Disposition: architect/);
   assert.equal(resolveProfile('peer', profiles, providers, { disposition: 'auditor' }).profileId, 'slp-peer');

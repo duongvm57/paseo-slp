@@ -20,9 +20,9 @@ agent compliance or E2E success.
 
 | Material | Entry and reader | When loaded |
 |---|---|---|
-| [Common](../src/common.md) | [roleInstructions](../src/launch.mjs) for all three roles | Session entry; adapter injects assembled instructions on supported start/resume/override messages. |
-| [Supervisor](../src/roles/supervisor.md), [Lead](../src/roles/lead.md), [Peer](../src/roles/peer.md) | roleInstructions selects exactly one | Always for that role. |
-| [Delegation](../src/delegation.md) | roleInstructions for Supervisor/Lead only | Always for orchestrating roles; Peer excluded. |
+| [Common](../src/common.md) | [roleBundle](../src/role-bundle.mjs) for all three roles | Session entry; adapter injects assembled instructions on supported start/resume/override messages. |
+| [Supervisor](../src/roles/supervisor.md), [Lead](../src/roles/lead.md), [Peer](../src/roles/peer.md) | roleBundle selects exactly one | Always for that role. |
+| [Delegation](../src/delegation.md) | roleBundle for orchestrating roles only (bundleParts) | Always for orchestrating roles; Peer excluded. |
 | [Orchestration](../src/references/orchestration.md) | Lead pointer; delegation points to isolation branch | Before topology selection, independent review, design dispute or dependency splitting. |
 | [Monitoring](../src/references/monitoring.md) | Supervisor/Lead and delegation pointers | Before observation/wait and at settlement. |
 | [Governance](../src/references/governance.md) | Supervisor pointer; recovery branch from orchestration | Supervision setup, recovery or policy evolution; recovery owner is Supervisor under mandate. |

@@ -2,6 +2,8 @@ import { readFileSync, lstatSync, realpathSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { hash } from './package.mjs';
 import { families, roles, providerId } from './profiles.mjs';
+import { settingIdPattern, unsafeModelPattern, rejectRouteKeys, verifyProvider,
+  runtimeSettingKeys, profileRouteKeys } from './binding.mjs';
 
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const nonempty = value => typeof value === 'string' && value.trim().length > 0;
@@ -17,9 +19,9 @@ export function validateCatalog(catalog) {
     if (!families.includes(option.provider)) throw new Error(`Routing option ${option.id}: provider must be codex or pi`);
     if (!Array.isArray(option.roles) || !option.roles.length || option.roles.some(role => !roles.includes(role))) throw new Error(`Routing option ${option.id}: invalid roles`);
     if (typeof option.enabled !== 'boolean' || !statuses.includes(option.availability)) throw new Error(`Routing option ${option.id}: explicit enabled and availability required`);
-    if (typeof option.model !== 'string' || (option.enabled && !option.model) || /[\s\x00-\x1f\x7f]/.test(option.model)) throw new Error(`Routing option ${option.id}: invalid model`);
+    if (typeof option.model !== 'string' || (option.enabled && !option.model) || unsafeModelPattern.test(option.model)) throw new Error(`Routing option ${option.id}: invalid model`);
     for (const key of ['thinkingOptionId', 'modeId']) {
-      if (option[key] != null && (typeof option[key] !== 'string' || !/^[a-zA-Z0-9._-]+$/.test(option[key]))) throw new Error(`Routing option ${option.id}: invalid ${key}`);
+      if (option[key] != null && (typeof option[key] !== 'string' || !settingIdPattern.test(option[key]))) throw new Error(`Routing option ${option.id}: invalid ${key}`);
     }
     if (option.features != null && !record(option.features)) throw new Error(`Routing option ${option.id}: invalid features`);
     if (!Number.isFinite(option.priority)) throw new Error(`Routing option ${option.id}: priority required`);
@@ -57,12 +59,10 @@ export function catalogBinding(repository, role, providers, route) {
   const option = catalog.options.find(item => item.id === route.optionId);
   if (!option) throw new Error(`Unknown routing option ${route.optionId}`);
   if (!option.enabled || option.availability !== 'ready' || !option.roles.includes(role)) throw new Error(`Routing option ${option.id} is disabled, unavailable or excluded for ${role}`);
-  for (const key of ['profileId', 'provider', 'model', 'thinkingOptionId', 'modeId', 'features']) {
-    if (Object.hasOwn(route, key)) throw new Error(`Routing option settings are complete; conflicting route.${key}`);
-  }
+  rejectRouteKeys(route, [...profileRouteKeys, ...runtimeSettingKeys],
+    key => `Routing option settings are complete; conflicting route.${key}`);
   const provider = providerId(role, option.provider);
-  const observed = providers?.find(item => item.id === provider);
-  if (!observed || observed.enabled === false || observed.status === 'unavailable' || (observed.extends != null && observed.extends !== option.provider)) throw new Error(`Unverified provider ${provider}`);
+  verifyProvider(providers, provider, () => option.provider, provider);
   return {
     binding: { provider, model: option.model, modeId: option.modeId, thinkingOptionId: option.thinkingOptionId, features: structuredClone(option.features ?? {}) },
     routing: { catalogFile: catalog.path, catalogSha256: catalog.sha256, optionId: option.id },

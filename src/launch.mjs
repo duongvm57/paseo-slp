@@ -1,58 +1,99 @@
-import { readFileSync } from 'node:fs';
 import { join, isAbsolute } from 'node:path';
 import { savedProfileBinding, roleProvider } from './profiles.mjs';
-import { verifyInstall } from './package.mjs';
+import { verifyInstall, snapshot } from './package.mjs';
 import { catalogBinding } from './routing.mjs';
+import { bindingCheck, dispositionPattern } from './binding.mjs';
+import { roleInstructions, orchestrates } from './role-bundle.mjs';
 
-export function bindingCheck(binding) {
-  if (!binding || typeof binding.provider !== 'string' || !/^[a-zA-Z0-9._-]+$/.test(binding.provider)) throw new Error('Provider required');
-  if (binding.modeId != null && (typeof binding.modeId !== 'string' || !/^[a-zA-Z0-9._-]+$/.test(binding.modeId))) throw new Error('Invalid mode');
-  if (typeof binding.model !== 'string' || !binding.model || /[\s\x00-\x1f\x7f]/.test(binding.model)) throw new Error('Explicit model required');
-  if (binding.thinkingOptionId != null && (typeof binding.thinkingOptionId !== 'string' || !/^[a-zA-Z0-9._-]+$/.test(binding.thinkingOptionId))) throw new Error('Invalid thinking option');
+// Every Binding source normalises to { binding, routing? } right here, so nothing
+// downstream unwraps a source-specific shape. Order is precedence, highest first.
+const bindingSources = [
+  {
+    name: 'saved profiles',
+    selects: request => request.profiles != null,
+    resolve: (role, request, route) => ({ binding: savedProfileBinding(role, request.profiles, request.providers, route) }),
+  },
+  {
+    name: 'catalog routing',
+    selects: request => request.route?.optionId != null,
+    resolve: (role, request, route) => catalogBinding(request.repository, role, request.providers, route),
+  },
+  {
+    name: 'an explicit binding',
+    selects: request => request.binding != null,
+    resolve: (role, request) => ({ binding: request.binding }),
+  },
+];
+
+export function resolveBinding(role, request, disposition) {
+  const source = bindingSources.find(candidate => candidate.selects(request));
+  if (!source) throw new Error('Binding source required: saved profiles, catalog routing or an explicit binding');
+  if (request.binding != null && source.name !== 'an explicit binding') {
+    throw new Error(`Choose ${source.name} or an explicit binding, not both`);
+  }
+  return source.resolve(role, request, { ...request.route, disposition });
 }
+
 export function prompt(root, role, assignment, binding) {
   bindingCheck(binding);
   return `${roleInstructions(root, role)}\nLaunch binding: ${JSON.stringify(binding)}\nAssignment:\n${assignment}\n`;
 }
-export function roleInstructions(root, role) {
-  if (!['supervisor', 'lead', 'peer'].includes(role)) throw new Error('Unknown role');
-  const read = path => readFileSync(join(root, 'src', path), 'utf8');
-  const commandPath = "'" + join(root, 'bin/slp.mjs').replaceAll("'", "'\\''") + "'";
-  return `SLP role=${role}\n${read('common.md')}\n${read(`roles/${role}.md`)}\n` +
-    (role === 'peer' ? '' : read('delegation.md') + '\n') +
-    (role === 'peer' ? '' : `Before each spawn, read the assigned repository's .paseo-slp/WORKSPACE_PROTOCOL.md and refresh Paseo list_profiles. ` +
-      `Use the saved profile for the child role, including its exact provider/model/settings. For repo setup/update, use ${join(root, 'skills/paseo-slp-onboarding/SKILL.md')}.\n`) +
-    `Installed policy directory: ${join(root, 'src')}\nSnapshot command: node ${commandPath} snapshot <repository>\n` +
-    `Use the current authorized Human or delegated assignment and its Paseo workspace. Notifications and heartbeat prompts do not replace that assignment.\n`;
+
+// Provider switching creates a new session; it never mutates provider identity
+// or reparents agents. The packet is evidence, gathered before anything is planned.
+function handoffPacket(request) {
+  const handoff = request.handoff;
+  for (const key of ['previousAgentId', 'reason', 'authority', 'state']) {
+    if (typeof handoff?.[key] !== 'string' || !handoff[key].trim()) throw new Error(`Missing handoff ${key}`);
+  }
+  if (handoff.previousOwner?.settled !== true || typeof handoff.previousOwner.evidence !== 'string' || !handoff.previousOwner.evidence.trim()) {
+    throw new Error('Handoff requires old-owner settlement evidence; quota failure or idle alone is insufficient');
+  }
+  if (!Array.isArray(handoff.resources)) throw new Error('Handoff requires a resources list (including remaining Peer IDs and wake owners)');
+  const candidate = snapshot(request.repository);
+  return { ...handoff, candidate: { head: candidate.head, sha256: candidate.sha256 } };
 }
-export function launchPlan(root, request) {
+
+const handoffNotice = (role, packet) => `\nProvider handoff evidence:\n${JSON.stringify(packet, null, 2)}\n` +
+  'Before taking ownership, verify the current candidate and old-owner settlement against host/repository evidence. ' +
+  'Reconcile existing Peer/workspace/resource ownership with the Human or assigned Supervisor. ' +
+  'Parentage has not changed; do not claim control of old descendants or create duplicate writers. ' +
+  'Acknowledge the transferred assignment. ' +
+  (orchestrates(role) ? 'Use references/provider-routing.md for the handoff procedure.\n' : 'Return bounded findings to Lead; do not manage agents.\n');
+
+// The single owner of the create_agent argument record. Nothing edits it afterwards.
+function plan(root, request, packet) {
   verifyInstall(root);
   const role = request.role ?? 'supervisor';
   const disposition = request.disposition ?? request.route?.disposition;
-  if (disposition != null && (role !== 'peer' || typeof disposition !== 'string' || !/^[a-z][a-z0-9-]*$/i.test(disposition))) throw new Error('Invalid Peer disposition');
+  if (disposition != null && (role !== 'peer' || typeof disposition !== 'string' || !dispositionPattern.test(disposition))) throw new Error('Invalid Peer disposition');
   for (const key of ['workspaceId', 'repository', 'assignment']) {
     if (typeof request[key] !== 'string' || !request[key].trim()) throw new Error(`Missing ${key}`);
   }
   if (!isAbsolute(request.repository)) throw new Error('Absolute repository required');
-  let routing;
-  if (request.profiles != null) {
-    if (request.binding) throw new Error('Choose saved profiles or an explicit binding, not both');
-    request = { ...request, binding: savedProfileBinding(role, request.profiles, request.providers, { ...request.route, disposition }) };
-  } else if (request.route?.optionId != null) {
-    if (request.binding) throw new Error('Choose catalog routing or an explicit binding, not both');
-    const selected = catalogBinding(request.repository, role, request.providers, request.route);
-    request = { ...request, binding: selected.binding };
-    routing = selected.routing;
-  }
-  roleProvider(role, request.binding?.provider);
-  const initialPrompt = prompt(root, role, `Repository: ${request.repository}\nWorkspace ID: ${request.workspaceId}\n${disposition ? `Disposition: ${disposition}\n` : ''}${request.assignment}`, request.binding);
+  const { binding, routing } = resolveBinding(role, request, disposition);
+  roleProvider(role, binding?.provider);
+  const assignment = `Repository: ${request.repository}\nWorkspace ID: ${request.workspaceId}\n${disposition ? `Disposition: ${disposition}\n` : ''}${request.assignment}`;
   return {
     transport: 'Paseo create_agent; settings.features must be preserved',
     role, instructionPath: join(root, `src/roles/${role}.md`),
     ...(routing ? { routing } : {}),
-    ...(request.binding?.profileId ? { profileId: request.binding.profileId } : {}),
-    create: { title: `SLP ${role}`, notifyOnFinish: true, provider: `${request.binding.provider}/${request.binding.model}`,
-      workspaceId: request.workspaceId, initialPrompt,
-      settings: { ...(request.binding.modeId ? { modeId: request.binding.modeId } : {}), ...(request.binding.thinkingOptionId ? { thinkingOptionId: request.binding.thinkingOptionId } : {}), features: request.binding.features ?? {} } },
+    ...(binding?.profileId ? { profileId: binding.profileId } : {}),
+    create: {
+      title: packet ? `SLP ${role} handoff` : `SLP ${role}`,
+      notifyOnFinish: true,
+      provider: `${binding.provider}/${binding.model}`,
+      workspaceId: request.workspaceId,
+      initialPrompt: prompt(root, role, assignment, binding) + (packet ? handoffNotice(role, packet) : ''),
+      settings: {
+        ...(binding.modeId ? { modeId: binding.modeId } : {}),
+        ...(binding.thinkingOptionId ? { thinkingOptionId: binding.thinkingOptionId } : {}),
+        features: binding.features ?? {},
+      },
+    },
+    ...(packet ? { handoff: packet, activation: 'Paseo create_agent after current settlement verification; no agent started by this command' } : {}),
   };
 }
+
+export const launchPlan = (root, request) => plan(root, request, null);
+export const handoffPlan = (root, request) => plan(root, request, handoffPacket(request));

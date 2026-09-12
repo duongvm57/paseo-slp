@@ -9,6 +9,7 @@ Local installation/transport checks do not constitute workflow acceptance.
 |---|---|
 | install.sh | One-command local install into the selected destination and Paseo home; reload configuration. |
 | src/paseo-install.mjs | Merge owned provider/profile entries, preserve existing preferences, record rollback binding, initialize repository protocol. |
+| src/host-config.mjs | Sole reader/writer of the Paseo host configuration; one rule each for owned provider and owned profile verification and the two MCP flags. |
 | bin/codex-role.mjs, src/role-transport.mjs | Transparent Codex stdio adapter; append installed role instructions at start/resume and existing turn overrides. |
 | bin/pi-role.mjs, src/role-transport.mjs | Pi native append-system-prompt adapter; preserve RPC bytes, host extensions and session/model/thinking arguments. |
 | src/common.md, src/roles/*.md | Authority and role behavior; no repository tactics or model IDs. |
@@ -21,12 +22,14 @@ Local installation/transport checks do not constitute workflow acceptance.
 | src/routing.mjs | Read only the assigned repository's catalog; bind a Lead-selected option with fresh hash and availability checks. |
 | skills/paseo-slp-onboarding/SKILL.md | Installable repo tactics setup and saved-profile verification; project/global installation is independent from repo config initialization. |
 | src/templates/WORKSPACE_PROTOCOL.md | Repository tactics template with risk classes, routing, monitoring and proof gates; explicit init preserves existing files. |
-| src/launch.mjs, src/profiles.mjs | Compose shared role bytes and optional offline create_agent arguments from selected settings. |
-| src/handoff.mjs | Prepare a new-session handoff with explicit authority, old-owner evidence, resources and current work snapshot; no lifecycle mutations. |
+| src/binding.mjs | Every rule a Binding must satisfy: setting patterns, the route override deny-lists and the single provider-health check. Imports nothing from the package. |
+| src/role-bundle.mjs | Which policy bytes each role receives at session entry, and their order; the load-path contract traced in guide-coverage.md. |
+| src/launch.mjs, src/profiles.mjs | Select one Binding source (saved profiles, catalog routing or an explicit binding), then compose the create_agent argument record. launchPlan and handoffPlan share one builder; nothing edits that record afterwards. Handoff adds explicit authority, old-owner evidence, resources and current work snapshot; no lifecycle mutations. |
 | src/package.mjs | Package identity, exclusive staging, integrity checks and stable Git work snapshot. |
 | bin/slp.mjs | Install/upgrade/preview, verify/uninstall, init, routes, prepare/handoff, identity and snapshot entrypoints. |
-| src/observation.mjs | Offline evidence helpers; no lifecycle runner or acceptance oracle. |
 | skills/paseo-slp-e2e/SKILL.md | Single-session full-suite execution procedure; requires the source checkout and authorized Paseo actors. |
+| e2e/evidence.mjs | One contract per evidence kind: what may enter the ledger and what discharges the kind's requirement at seal. |
+| e2e/criteria.mjs | U1–U7 as code, each naming the evidence kinds that can support it; the mapping a reviewer previously held in their head. |
 | e2e/ | Development-only scenario manifest, fixture, external outcome check, evidence collector and repository E2E protocol. Collector commands do not create agents or judge behavioral evidence. |
 | tests/*.test.mjs | Local installer, rollback, transport, envelope and snapshot checks. |
 

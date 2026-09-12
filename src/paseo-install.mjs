@@ -1,32 +1,18 @@
-import { existsSync, readFileSync, writeFileSync, renameSync, rmSync, lstatSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, rmSync, lstatSync, mkdirSync } from 'node:fs';
 import { join, resolve, isAbsolute, relative } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { json, readJson, hash, identity, install, verifyInstall, files } from './package.mjs';
 import { roles, families, profileId, providerId } from './profiles.mjs';
 import { emptyCatalog, validateCatalog, routingPath } from './routing.mjs';
-
-export { roles, profileId, providerId } from './profiles.mjs';
-const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
-
-function configFile(home) {
-  if (!isAbsolute(home)) throw new Error('Absolute Paseo home required');
-  const path = join(home, 'config.json');
-  if (existsSync(path) && !lstatSync(path).isFile()) throw new Error('Paseo config must be a regular file');
-  const bytes = existsSync(path) ? readFileSync(path, 'utf8') : null;
-  const config = bytes === null ? { version: 1 } : JSON.parse(bytes);
-  for (const value of [config, config.agents ?? {}, config.agents?.providers ?? {}, config.daemon ?? {}, config.daemon?.mcp ?? {}]) {
-    if (!record(value)) throw new Error('Invalid Paseo configuration object');
-  }
-  if (!Array.isArray(config.daemon?.agentProfiles ?? [])) throw new Error('Invalid Paseo agentProfiles');
-  return { path, bytes, config };
-}
+import { configFile, writeConfig, mcpFlags, requireMcp, verifyOwnedProviders, verifyOwnedProfiles,
+  providers as hostProviders, agentProfiles as hostAgentProfiles } from './host-config.mjs';
 
 export function configurationPlan(destination, config) {
   const providers = {}, profiles = [];
-  const existing = config.daemon?.agentProfiles ?? [];
+  const existing = hostAgentProfiles(config);
   for (const role of roles) for (const family of families) {
     const id = providerId(role, family);
-    if (Object.hasOwn(config.agents?.providers ?? {}, id) || existing.some(p => p.id === profileId(role))) {
+    if (Object.hasOwn(hostProviders(config), id) || existing.some(p => p.id === profileId(role))) {
       throw new Error(`SLP entry already exists: ${role}; uninstall its owning installation first`);
     }
     providers[id] = { extends: family, label: `SLP ${family} ${role}`, command: [process.execPath, join(destination, `bin/${family}-role.mjs`), role] };
@@ -39,19 +25,6 @@ export function configurationPlan(destination, config) {
   return { providers, profiles };
 }
 
-function writeConfig(file, next) {
-  // Recheck immediately before replacing; preserve config permissions and unrelated fields.
-  const current = existsSync(file.path) ? readFileSync(file.path, 'utf8') : null;
-  if (current !== file.bytes) throw new Error('Paseo config changed during installation; retry');
-  const temp = `${file.path}.slp-${process.pid}.tmp`;
-  let created = false;
-  try {
-    writeFileSync(temp, json(next), { flag: 'wx', mode: file.bytes === null ? 0o600 : lstatSync(file.path).mode & 0o777 });
-    created = true;
-    renameSync(temp, file.path);
-  } finally { if (created) rmSync(temp, { force: true }); }
-}
-
 export function installPaseo(source, destination, home, apply = false) {
   destination = resolve(destination);
   const homeWithinInstall = relative(destination, resolve(home));
@@ -62,15 +35,9 @@ export function installPaseo(source, destination, home, apply = false) {
     if (manifest.candidate.sha256 !== identity(source).sha256) throw new Error('Different candidate already installed; detach the previous installation before upgrading');
     const binding = readJson(join(destination, 'paseo-binding.json'));
     if (binding.configPath !== file.path) throw new Error('Installation belongs to a different Paseo home');
-    for (const [id, expected] of Object.entries(binding.providers)) {
-      if (!isDeepStrictEqual(file.config.agents?.providers?.[id], expected)) throw new Error(`Modified provider ${id}; preserve installation`);
-    }
-    for (const expected of binding.profiles) {
-      const matches = file.config.daemon?.agentProfiles?.filter(p => p.id === expected.id) ?? [];
-      const role = expected.id.startsWith('slp-peer-') ? 'peer' : expected.id.slice(4);
-      if (matches.length !== 1 || !families.some(f => matches[0].provider === providerId(role, f))) throw new Error(`Missing or rebound profile ${expected.id}`);
-    }
-    if (file.config.daemon?.mcp?.enabled !== true || file.config.daemon?.mcp?.injectIntoAgents !== true) throw new Error('SLP requires Paseo MCP enabled and injected');
+    verifyOwnedProviders(file.config, binding.providers);
+    verifyOwnedProfiles(file.config, binding.profiles, 'bound');
+    requireMcp(file.config);
     return { destination, configPath: file.path, applied: false, alreadyInstalled: true, reloadRequired: true };
   }
   const proposal = configurationPlan(destination, file.config);
@@ -83,8 +50,8 @@ export function installPaseo(source, destination, home, apply = false) {
   next.agents.providers = { ...next.agents.providers, ...proposal.providers };
   next.daemon ??= {};
   next.daemon.agentProfiles = [...(next.daemon.agentProfiles ?? []), ...proposal.profiles];
-  const mcpBefore = Object.fromEntries(['enabled', 'injectIntoAgents'].map(key => [key, next.daemon.mcp?.[key] ?? null]));
-  next.daemon.mcp = { ...next.daemon.mcp, enabled: true, injectIntoAgents: true };
+  const mcpBefore = Object.fromEntries(mcpFlags.map(key => [key, next.daemon.mcp?.[key] ?? null]));
+  next.daemon.mcp = { ...next.daemon.mcp, ...Object.fromEntries(mcpFlags.map(key => [key, true])) };
   try {
     // Only owned entries and two shared MCP flags are recorded, never credentials.
     const binding = json({ configPath: file.path, ...proposal, mcpBefore });
@@ -106,14 +73,9 @@ export function uninstallPaseo(destination, apply = false) {
   const binding = readJson(bindingPath);
   const file = configFile(resolve(binding.configPath, '..'));
   const next = structuredClone(file.config);
-  for (const [id, expected] of Object.entries(binding.providers)) {
-    if (!isDeepStrictEqual(next.agents?.providers?.[id], expected)) throw new Error(`Modified provider ${id}; preserve installation`);
-    delete next.agents.providers[id];
-  }
-  for (const expected of binding.profiles) {
-    const matches = next.daemon?.agentProfiles?.filter(p => p.id === expected.id) ?? [];
-    if (matches.length !== 1 || !isDeepStrictEqual(matches[0], expected)) throw new Error(`Modified profile ${expected.id}; preserve installation`);
-  }
+  verifyOwnedProviders(next, binding.providers);
+  for (const id of Object.keys(binding.providers)) delete next.agents.providers[id];
+  verifyOwnedProfiles(next, binding.profiles, 'exact');
   next.daemon.agentProfiles = next.daemon.agentProfiles.filter(p => !binding.profiles.some(owned => owned.id === p.id));
   for (const [key, before] of Object.entries(binding.mcpBefore)) {
     if (next.daemon.mcp?.[key] !== true) throw new Error(`Modified MCP setting ${key}; preserve installation`);
@@ -145,17 +107,9 @@ export function upgradePaseo(source, destination, previous, apply = false) {
   if (!homeWithinInstall || (!homeWithinInstall.startsWith('..') && !isAbsolute(homeWithinInstall))) throw new Error('Paseo home must be outside the installation directory');
   const file = configFile(home);
   const base = structuredClone(file.config);
-  for (const [id, expected] of Object.entries(prior.providers)) {
-    if (!isDeepStrictEqual(base.agents?.providers?.[id], expected)) throw new Error(`Modified provider ${id}; preserve previous installation`);
-    delete base.agents.providers[id];
-  }
-  const saved = new Map();
-  for (const expected of prior.profiles) {
-    const matches = base.daemon?.agentProfiles?.filter(p => p.id === expected.id) ?? [];
-    const role = expected.id.startsWith('slp-peer-') ? 'peer' : expected.id.slice(4);
-    if (matches.length !== 1 || !families.some(f => matches[0].provider === providerId(role, f))) throw new Error(`Missing or rebound profile ${expected.id}`);
-    saved.set(expected.id, matches[0]);
-  }
+  verifyOwnedProviders(base, prior.providers, 'previous installation');
+  for (const id of Object.keys(prior.providers)) delete base.agents.providers[id];
+  const saved = verifyOwnedProfiles(base, prior.profiles, 'bound');
   base.daemon.agentProfiles = base.daemon.agentProfiles.filter(p => !saved.has(p.id));
   const proposal = configurationPlan(destination, base);
   proposal.profiles = proposal.profiles.map(p => saved.get(p.id) ?? p);
@@ -170,7 +124,7 @@ export function upgradePaseo(source, destination, previous, apply = false) {
     next.daemon.agentProfiles = [...next.daemon.agentProfiles, ...proposal.profiles];
     const binding = json({ configPath: file.path, ...proposal, mcpBefore: prior.mcpBefore,
       retiredProfiles: [...(prior.retiredProfiles ?? []), ...retiredProfiles] });
-    if (next.daemon.mcp?.enabled !== true || next.daemon.mcp?.injectIntoAgents !== true) throw new Error('SLP requires Paseo MCP enabled and injected');
+    requireMcp(next);
     writeFileSync(join(destination, 'paseo-binding.json'), binding, { flag: 'wx', mode: 0o600 });
     const manifest = readJson(join(destination, 'installed.json'));
     writeFileSync(join(destination, 'installed.json'), json({ ...manifest, paseoBindingSha256: hash(binding) }));

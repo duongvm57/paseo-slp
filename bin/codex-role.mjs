@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
-import { roleInstructions } from '../src/launch.mjs';
+import { roleInstructions } from '../src/role-bundle.mjs';
 import { verifyInstall } from '../src/package.mjs';
 import { injectRole } from '../src/role-transport.mjs';
 

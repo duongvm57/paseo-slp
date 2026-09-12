@@ -1,6 +1,4 @@
 // Scenario assertions are reviewed against frozen host evidence, not agent labels.
-export const criteria = ['U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7'];
-export const evidenceKinds = ['preflight', 'launch', 'instructions', 'timeline', 'coordinator', 'artifacts', 'checks', 'interventions', 'resources'];
 const row = (id, group, requirements, trigger, assertions, capabilities = [], extra = {}) => ({
   id, group, requirements, trigger, assertions, capabilities,
   fixture: 'basic', repetitions: 1, dependsOn: [], ...extra,

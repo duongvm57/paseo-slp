@@ -2,9 +2,11 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, realpa
 import { resolve, join, dirname, basename, relative, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { identity, files, hash, json, readJson, snapshot } from '../src/package.mjs';
-import { scenarios, criteria, evidenceKinds } from './scenarios.mjs';
+import { scenarios } from './scenarios.mjs';
+import { evidenceKinds, evidenceVersion, within, acceptEvidence, satisfiesEvidence } from './evidence.mjs';
+import { criterionIds, criterionEvidence } from './criteria.mjs';
 import { savedProfileBinding, roles, providerId } from '../src/profiles.mjs';
-import { bindingCheck } from '../src/launch.mjs';
+import { bindingCheck } from '../src/binding.mjs';
 import { createFixture } from './fixture.mjs';
 
 export const sourceRoot = fileURLToPath(new URL('..', import.meta.url));
@@ -23,8 +25,7 @@ export function initialize(directory, root = sourceRoot) {
   mkdirSync(dirname(directory), { recursive: true });
   mkdirSync(directory); // Exclusive; never reset a previous run.
   mkdirSync(join(directory, 'frozen'));
-  const frozen = { scenarios, criteria, evidenceKinds, candidate, harness,
-    coordinatorEvidenceVersion: 2, resourceEvidenceVersion: 1 };
+  const frozen = { scenarios, criteria: criterionIds, criterionEvidence, evidenceKinds, evidenceVersion, candidate, harness };
   put(join(directory, 'frozen', 'manifest.json'), frozen);
   for (const name of ['review-checklist.md', 'contract.md']) {
     writeFileSync(join(directory, 'frozen', name), readFileSync(join(root, 'docs', name)), { flag: 'wx' });
@@ -111,8 +112,8 @@ export function collect(attempt, kind, path) {
   const loaded = loadAttempt(attempt);
   requireValue(loaded.frozen.evidenceKinds.includes(kind), 'Unknown evidence kind');
   requireValue(!existsSync(join(loaded.attempt, 'report.json')), 'Attempt sealed');
-  const bytes = readFileSync(path);
-  return storeEvidence(loaded, kind, path, bytes);
+  // Raw capture: an invalid payload stays visible in the ledger. seal() is the gate.
+  return storeEvidence(loaded, kind, path, readFileSync(path));
 }
 export function collectCoordinator(attempt, path, sessionId) {
   const loaded = loadAttempt(attempt);
@@ -122,16 +123,16 @@ export function collectCoordinator(attempt, path, sessionId) {
   requireValue(!within(loaded.directory, source), 'Coordinator transcript source must be outside the E2E run directory');
   requireValue(basename(source).includes(sessionId), 'Coordinator transcript filename must bind the native sessionId');
   const transcript = readFileSync(source, 'utf8');
-  const payload = { operatorId: loaded.data.config.operatorId, sessionId, source,
-    transcript, transcriptSha256: hash(Buffer.from(transcript)) };
-  requireValue(validCoordinatorTranscript(payload, loaded.data.config.operatorId, loaded.directory), 'Coordinator transcript must contain nonempty JSONL object records and the native session marker');
-  return storeEvidence(loaded, 'coordinator', source, Buffer.from(json(payload)));
+  const bytes = Buffer.from(json({ operatorId: loaded.data.config.operatorId, sessionId, source,
+    transcript, transcriptSha256: hash(Buffer.from(transcript)) }));
+  acceptEvidence('coordinator', bytes, evidenceContext(loaded));
+  return storeEvidence(loaded, 'coordinator', source, bytes);
 }
 export function collectResources(attempt, path) {
   const loaded = loadAttempt(attempt);
   requireValue(!existsSync(join(loaded.attempt, 'report.json')), 'Attempt sealed');
   const bytes = readFileSync(path);
-  requireValue(resourceSettlementShape(bytes), 'Resource settlement must use the version 1 structured receipt');
+  acceptEvidence('resources', bytes, evidenceContext(loaded));
   return storeEvidence(loaded, 'resources', path, bytes);
 }
 function storeEvidence(loaded, kind, path, bytes) {
@@ -141,53 +142,6 @@ function storeEvidence(loaded, kind, path, bytes) {
   put(join(loaded.attempt, 'evidence', name), record);
   return { path: `evidence/${name}`, kind, sha256: hash(json(record)), payloadSha256: record.sha256 };
 }
-function within(parent, path) {
-  const value = relative(parent, path);
-  return value === '' || (!value.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) && value !== '..' && !isAbsolute(value));
-}
-function containsValue(value, expected) {
-  if (value === expected) return true;
-  if (Array.isArray(value)) return value.some(item => containsValue(item, expected));
-  return value !== null && typeof value === 'object'
-    && Object.values(value).some(item => containsValue(item, expected));
-}
-function validCoordinatorTranscript(payload, operatorId, runDirectory) {
-  if (payload?.operatorId !== operatorId || !nonempty(payload?.sessionId)
-      || !nonempty(payload?.source) || !nonempty(payload?.transcript)) return false;
-  if (runDirectory && within(runDirectory, resolve(payload.source))) return false;
-  if (!basename(payload.source).includes(payload.sessionId)) return false;
-  if (hash(Buffer.from(payload.transcript)) !== payload.transcriptSha256) return false;
-  try {
-    const records = payload.transcript.trim().split('\n').filter(line => line.trim()).map(line => JSON.parse(line));
-    return records.length > 0
-      && records.every(record => record !== null && typeof record === 'object' && !Array.isArray(record))
-      && records.some(record => containsValue(record, payload.sessionId));
-  } catch { return false; }
-}
-function resourceSettlementShape(bytes) {
-  try {
-    const payload = JSON.parse(bytes);
-    return payload?.version === 1 && nonempty(payload?.capturedAt)
-      && payload.workspace !== null && typeof payload.workspace === 'object' && nonempty(payload.workspace.status)
-      && Array.isArray(payload.taskActors)
-      && payload.settlement !== null && typeof payload.settlement === 'object'
-      && nonempty(payload.settlement.observed)
-      && Array.isArray(payload.settlement.actions)
-      && Array.isArray(payload.settlement.unresolved);
-  } catch { return false; }
-}
-function validResourceSettlement(bytes) {
-  if (!resourceSettlementShape(bytes)) return false;
-  const payload = JSON.parse(bytes);
-  if (payload.settlement.unresolved.length > 0) return false;
-  if (payload.taskActors.length === 0) {
-    return payload.settlement.noActorsCreated === true && nonempty(payload.settlement.noActorsReason);
-  }
-  return payload.taskActors.every(actor => nonempty(actor?.id) && nonempty(actor?.role)
-    && nonempty(actor?.status) && Array.isArray(actor.pendingPermissions)
-    && actor.pendingPermissions.length === 0
-    && !/(^|\/)(running|working|pending|unknown)(\/|$)/i.test(actor.status));
-}
 function evidenceIndex(attempt) {
   return files(attempt, 'evidence').map(path => {
     const bytes = readFileSync(join(attempt, path));
@@ -196,18 +150,13 @@ function evidenceIndex(attempt) {
     return { path, kind: record.kind, sha256: hash(bytes) };
   });
 }
+const evidenceContext = loaded => ({ operatorId: loaded.data.config.operatorId, runDirectory: loaded.directory });
 function missingEvidence(loaded, evidence) {
+  const context = evidenceContext(loaded);
   return loaded.frozen.evidenceKinds.filter(kind => !evidence.some(item => {
     if (item.kind !== kind) return false;
     const record = readJson(join(loaded.attempt, item.path));
-    const bytes = Buffer.from(record.bytes, 'base64');
-    if (kind === 'coordinator' && loaded.frozen.coordinatorEvidenceVersion >= 1) {
-      try { return validCoordinatorTranscript(JSON.parse(bytes), loaded.data.config.operatorId,
-        loaded.frozen.coordinatorEvidenceVersion >= 2 ? loaded.directory : undefined); }
-      catch { return false; }
-    }
-    if (kind === 'resources' && loaded.frozen.resourceEvidenceVersion === 1) return validResourceSettlement(bytes);
-    return bytes.length > 0;
+    return satisfiesEvidence(kind, Buffer.from(record.bytes, 'base64'), context);
   }));
 }
 export function seal(attempt, { gaps = [] } = {}) {
@@ -259,12 +208,20 @@ function validateReview(attempt, input) {
   requireValue(nonempty(input.independenceEvidence), 'Reviewer host session/neutral brief evidence required');
   requireValue(json(Object.keys(input.criteria ?? {}).sort()) === json([...loaded.frozen.criteria].sort()), 'Review exactly U1–U7');
   const paths = new Set(loaded.report.evidence.map(item => item.path));
-  const check = (item, label) => {
+  const kindOfPath = new Map(loaded.report.evidence.map(item => [item.path, item.kind]));
+  // A criterion cannot be asked for evidence the seal already recorded as unavailable.
+  const declaredGaps = new Set((loaded.report.evidenceGaps ?? []).map(gap => gap.kind));
+  const check = (item, label, supportKinds) => {
+    const support = (supportKinds ?? []).filter(kind => !declaredGaps.has(kind));
     requireValue(item && ['PASS', 'FAIL', 'BLOCKED'].includes(item.status) && nonempty(item.reason), `${label}: status/reason required`);
     requireValue(Array.isArray(item.evidence) && item.evidence.every(path => paths.has(path)), `${label}: invalid evidence reference`);
     requireValue(item.status === 'BLOCKED' || item.evidence.length > 0, `${label}: observed verdict needs evidence`);
+    if (support?.length && item.status !== 'BLOCKED') {
+      requireValue(item.evidence.some(path => support.includes(kindOfPath.get(path))),
+        `${label}: observed verdict needs ${support.join(' or ')} evidence`);
+    }
   };
-  for (const criterion of loaded.frozen.criteria) check(input.criteria?.[criterion], criterion);
+  for (const criterion of loaded.frozen.criteria) check(input.criteria?.[criterion], criterion, loaded.frozen.criterionEvidence?.[criterion]);
   requireValue(Array.isArray(input.assertions) && input.assertions.length === loaded.scenario.assertions.length, 'Review every scenario assertion in manifest order');
   input.assertions.forEach((item, i) => check(item, `Assertion ${i + 1}`));
   const checks = [...Object.values(input.criteria), ...input.assertions];

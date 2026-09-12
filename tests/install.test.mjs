@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { install, verifyInstall, json, readJson } from '../src/package.mjs';
 import { installPaseo, uninstallPaseo, initWorkspace } from '../src/paseo-install.mjs';
-import { roleInstructions } from '../src/launch.mjs';
+import { configFile, writeConfig } from '../src/host-config.mjs';
+import { roleInstructions, roleBundle } from '../src/role-bundle.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 function fixture(t) {
@@ -17,7 +18,8 @@ function fixture(t) {
   mkdirSync(home);
   return { dir, home, destination };
 }
-function config(home, value) { writeFileSync(join(home, 'config.json'), json(value), { mode: 0o600 }); }
+// Tests cross the same host-config seam as production instead of forging config.json.
+function config(home, value) { writeConfig(configFile(home), value); }
 
 test('integrated install previews, preserves preferences and unrelated config, and rolls back only owned entries', t => {
   const { home, destination } = fixture(t);
@@ -147,7 +149,7 @@ test('installed adapter injects every role over stdio while preserving host prom
     assert.deepEqual(actual[2], messages[2]);
     assert.ok(actual[3].params.collaborationMode.settings.developer_instructions.endsWith(instruction));
     assert.deepEqual(actual.slice(4), messages.slice(4));
-    if (role === 'peer') assert.ok(!instruction.includes('Delegation procedure'));
+    assert.equal(roleBundle(destination, role).orchestrates, role !== 'peer');
     assert.equal(execFileSync(process.execPath, [argv[0], role, '--version'], { env, encoding: 'utf8' }).trim(), 'probe-ok');
   }
 });

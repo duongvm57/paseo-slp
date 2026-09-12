@@ -4,8 +4,7 @@ import { resolve, isAbsolute } from 'node:path';
 import { existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { identity, install, uninstall, verifyInstall, snapshot, readJson, json } from '../src/package.mjs';
-import { launchPlan } from '../src/launch.mjs';
-import { handoffPlan } from '../src/handoff.mjs';
+import { launchPlan, handoffPlan } from '../src/launch.mjs';
 import { readCatalog } from '../src/routing.mjs';
 import { installPaseo, uninstallPaseo, upgradePaseo, initWorkspace } from '../src/paseo-install.mjs';
 

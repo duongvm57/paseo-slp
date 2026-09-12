@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, lstatSync, readlinkSync, mkdirSync, writeFileSync, copyFileSync, rmSync, realpathSync } from 'node:fs';
-import { resolve, join, relative } from 'node:path';
+import { resolve, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 export const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -71,9 +71,4 @@ export function snapshot(root) {
   try { head = git(['rev-parse', '--verify', '--quiet', 'HEAD']).toString().trim(); }
   catch (error) { if (error.status !== 1) throw error; }
   return { root, head, sha256: hash(json({ head, entries })), files: entries };
-}
-export function separate(a, b) {
-  a = realpathSync(a); b = realpathSync(b);
-  const inside = (x, y) => { const rel = relative(x, y); return rel === '' || (!rel.startsWith('..') && !rel.startsWith('/')); };
-  return !inside(a, b) && !inside(b, a);
 }

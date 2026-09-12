@@ -2,7 +2,7 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { verifyInstall } from '../src/package.mjs';
-import { roleInstructions } from '../src/launch.mjs';
+import { roleInstructions } from '../src/role-bundle.mjs';
 import { piRoleArgs } from '../src/role-transport.mjs';
 
 const [role, ...args] = process.argv.slice(2);
