@@ -82,7 +82,7 @@ test('Lead selects independent runtime bundles for one Peer role without a dispo
   assert.deepEqual(engineer.create.settings, { thinkingOptionId: 'medium', features: {} });
   assert.deepEqual(architect.create.settings, { thinkingOptionId: 'medium', features: {} });
   for (const plan of [engineer, architect]) {
-    assert.ok(plan.create.initialPrompt.includes(readFileSync(join(installed, 'src/roles/peer.md'), 'utf8')));
+    assert.ok(!plan.create.initialPrompt.includes(readFileSync(join(installed, 'src/roles/peer.md'), 'utf8')), 'Installed Peer wrapper supplies policy, not the task prompt');
     assert.equal(roleBundle(installed, plan.role).parts.includes('delegation.md'), false);
   }
   assert.match(architect.create.initialPrompt, /Disposition: architect/);

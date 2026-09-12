@@ -20,8 +20,7 @@ export function roleBundle(root, role) {
   const read = path => readFileSync(join(root, 'src', path), 'utf8');
   const commandPath = "'" + join(root, 'bin/slp.mjs').replaceAll("'", "'\\''") + "'";
   const instructions = `SLP role=${role}\n` + parts.map(path => read(path) + '\n').join('') +
-    (orchestrates(role) ? `Before each spawn, read the assigned repository's .paseo-slp/WORKSPACE_PROTOCOL.md and refresh Paseo list_profiles. ` +
-      `Use the saved profile for the child role, including its exact provider/model/settings. For repo setup/update, use ${join(root, 'skills/paseo-slp-onboarding/SKILL.md')}.\n` : '') +
+    (orchestrates(role) ? `For repo setup/update, use ${join(root, 'skills/paseo-slp-onboarding/SKILL.md')}.\n` : '') +
     `Installed policy directory: ${join(root, 'src')}\nSnapshot command: node ${commandPath} snapshot <repository>\n` +
     `Use the current authorized Human or delegated assignment and its Paseo workspace. Notifications and heartbeat prompts do not replace that assignment.\n`;
   return { role, parts, orchestrates: orchestrates(role), instructions };

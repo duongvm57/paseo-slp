@@ -81,6 +81,12 @@ test('launcher loads installed role bytes, excludes private review material, pre
     const child = launchPlan(installed, { ...request, role });
     assert.ok(child.create.initialPrompt.includes(readFileSync(join(installed, `src/roles/${role}.md`), 'utf8')));
     assert.equal(child.create.notifyOnFinish, true);
+    for (const family of ['pi', 'codex']) {
+      const wrapped = launchPlan(installed, { ...request, role, binding: { ...binding, provider: `slp-${family}-${role}` } });
+      assert.ok(wrapped.create.initialPrompt.includes(request.assignment));
+      assert.ok(!wrapped.create.initialPrompt.includes(readFileSync(join(installed, `src/roles/${role}.md`), 'utf8')), 'Wrapper policy must not be broadcast again as task input');
+      assert.ok(!wrapped.create.initialPrompt.includes(readFileSync(join(installed, 'src/common.md'), 'utf8')));
+    }
   }
   const routed = launchPlan(installed, { ...request, binding: undefined, profiles: [{ id: 'slp-supervisor',
     ...binding, provider: 'slp-codex-supervisor', modeId: 'full-access', featureValues: { fast_mode: false } }],

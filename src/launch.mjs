@@ -41,7 +41,9 @@ export function resolveBinding(role, request, disposition) {
 
 export function prompt(root, role, assignment, binding) {
   bindingCheck(binding);
-  return `${roleInstructions(root, role)}\nLaunch binding: ${JSON.stringify(binding)}\nAssignment:\n${assignment}\n`;
+  const instructions = binding.provider === roleProvider(role, binding.provider)
+    ? roleInstructions(root, role) : `SLP role=${role}\n`;
+  return `${instructions}\nLaunch binding: ${JSON.stringify(binding)}\nAssignment:\n${assignment}\n`;
 }
 
 // Provider switching creates a new session; it never mutates provider identity
