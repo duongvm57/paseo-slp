@@ -79,6 +79,14 @@ actual lost momentum.
 Before sending a corrective prompt, check current activity: an earlier tool error
 does not establish a stall if the agent has moved on. A prompt to a running agent
 may interrupt an in-flight mutation; do not use it as a routine status nudge.
+Preparation commands, corrected requests and acceptance checks are progress.
+Compare the latest activity with your prior checkpoint before diagnosing lost
+momentum. A turn ending while a known child is running is an event-driven wait;
+on the child's finish, let the owner retrieve evidence and complete acceptance.
+Send a continuation only for an evidenced idle owner with actionable work and
+no pending wait, or under an explicit recovery mandate. Record every prompt
+separately with its timestamp and observed pre-send state, including prompts
+that overlap progress; a later success does not prove the prompt was needed.
 When intervention is necessary, preserve the pending operation and its uncertain
 outcome in the recovery handback. For interrupted creation, apply delegation.md's
 ownership reconciliation before asking for another child.

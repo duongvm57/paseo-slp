@@ -72,6 +72,14 @@ Supervisor/Lead prepare requests use fresh profiles/providers, role, repository,
 workspaceId and assignment. Peer requests use the same task fields and providers,
 plus route.optionId/catalogSha256. Preparation reads only the assigned repository
 pool and emits arguments; it never creates an agent or chooses the option for Lead.
+Pass the array returned by live list_providers as request.providers, extracting
+it from the tool response envelope when necessary. Each entry carries the observed
+id, enabled and status (and extends when present). A missing inventory is a request
+construction error: supply the discovery already obtained and rerun preparation;
+it is not a reason to change the selected model or read package implementation.
+Use taskLabel for a short Human-readable work label and disposition for the Peer
+seat. prepare renders the naming convention from delegation.md; omitted taskLabel
+uses the repository directory name, and omitted Peer disposition displays General.
 Catalog hash validation is not atomic with host creation; record actual launches.
 
 Installed providers are slp-codex-{role} and slp-pi-{role}. Both Peer wrappers load

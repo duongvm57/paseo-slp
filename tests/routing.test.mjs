@@ -95,6 +95,29 @@ test('Lead selects independent runtime bundles for one Peer role without a dispo
   assert.equal(resolveProfile('peer', staleProfiles, providers, { disposition: 'architect' }).profileId, 'slp-peer');
 });
 
+test('prepared titles distinguish Peer dispositions and work scopes without changing bundles', t => {
+  const { dir, installed } = fixture(t); install(root, installed);
+  const { route } = catalogFixture(dir);
+  const input = { ...request, repository: dir, route: route('luna-code'), taskLabel: 'checkout totals' };
+  const engineer = launchPlan(installed, { ...input, disposition: 'engineer' });
+  const reviewer = launchPlan(installed, { ...input, disposition: 'Reviewer' });
+  assert.equal(engineer.create.title, 'Peer — Engineer — checkout totals');
+  assert.equal(reviewer.create.title, 'Peer — Reviewer — checkout totals');
+  assert.deepEqual(engineer.create.settings, reviewer.create.settings);
+  assert.equal(engineer.create.provider, reviewer.create.provider);
+  assert.equal(launchPlan(installed, { ...input, disposition: 'reviewer', taskLabel: 'checkout totals / API' }).create.title,
+    'Peer — Reviewer — checkout totals / API');
+  assert.match(launchPlan(installed, { ...input, taskLabel: undefined }).create.title, /^Peer — General — routing-/);
+  const lead = launchPlan(installed, { ...input, role: 'lead', route: undefined });
+  assert.equal(lead.create.title, 'Lead — checkout totals');
+  for (const taskLabel of ['', '   ', 'line\nbreak', 42, 'x'.repeat(101)]) {
+    assert.throws(() => launchPlan(installed, { ...input, taskLabel }), /taskLabel/);
+  }
+  for (const providers of [undefined, { providers: [] }]) {
+    assert.throws(() => launchPlan(installed, { ...input, providers }), /list_providers inventory required/);
+  }
+});
+
 test('explicit profile overrides disposition; missing profiles, unavailable and wrong-role providers fail', () => {
   const custom = [...profiles, { id: 'human-architecture', provider: 'slp-pi-peer', model: 'b-ai/glm-5.3-flash' }];
   assert.equal(resolveProfile('peer', custom, providers, { disposition: 'architect', profileId: 'human-architecture' }).model, 'b-ai/glm-5.3-flash');
@@ -190,6 +213,7 @@ test('Peer handoff resolves the new project option without a saved Peer profile'
   assert.equal(plan.routing.optionId, 'glm-design');
   assert.equal(plan.create.provider, 'slp-pi-peer/opencode/glm-5.3-flash');
   assert.equal(plan.handoff.previousAgentId, 'old-peer');
+  assert.equal(plan.create.title, 'Peer — Engineer — repo — Handoff');
   assert.throws(() => handoffPlan(installed, { ...current, route: undefined }), /Peer requires a project routing option/);
 });
 

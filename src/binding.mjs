@@ -21,6 +21,7 @@ export function rejectRouteKeys(route, keys, message) {
 // One provider-health rule for every Binding source. familyFor resolves the
 // expected provider family from the observed provider id, and may itself reject.
 export function verifyProvider(inventory, id, familyFor, label = id) {
+  if (!Array.isArray(inventory)) throw new Error('Paseo list_providers inventory required: pass the discovered providers array as request.providers, not the tool response envelope');
   const observed = inventory?.find(item => item.id === id);
   if (!observed || observed.enabled === false || observed.status === 'unavailable') throw new Error(`Unverified provider ${label}`);
   const family = familyFor(observed.id);

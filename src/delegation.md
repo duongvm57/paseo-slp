@@ -33,6 +33,14 @@ Peer runtime changes remain inside the project pool; quota fallback follows its 
    catalog option ID/hash and exact bundle with the launch arguments.
    Use agent-scoped Paseo create_agent; it has no profile parameter.
    Pass the actual workspaceId, title and notifyOnFinish=true.
+   Use titles `Supervisor — <task>`, `Lead — <task>` and
+   `Peer — <Disposition> — <task>`; for example Engineer and Reviewer Peers
+   share the task label but have distinct dispositions. Pass taskLabel and the
+   Peer disposition to prepare and preserve its returned title. For multiple
+   seats with the same disposition, qualify taskLabel with their bounded scope
+   or seat (for example `checkout totals / API review`). Resume keeps the name;
+   prepare-handoff adds `Handoff` for a new session. Titles aid Human navigation;
+   record actual agent IDs for ownership and report routing.
    initialPrompt contains the neutral assignment: project/task identifiers,
    repository/workspace, role/disposition, objective or open question, owned/excluded
    scope, read/write mode, separate authority grants, known constraints/dependencies,

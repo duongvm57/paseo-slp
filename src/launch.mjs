@@ -1,4 +1,4 @@
-import { join, isAbsolute } from 'node:path';
+import { join, isAbsolute, basename } from 'node:path';
 import { savedProfileBinding, roleProvider } from './profiles.mjs';
 import { verifyInstall, snapshot } from './package.mjs';
 import { catalogBinding } from './routing.mjs';
@@ -69,6 +69,16 @@ const handoffNotice = (role, packet) => `\nProvider handoff evidence:\n${JSON.st
   'Acknowledge the transferred assignment. ' +
   (orchestrates(role) ? 'Use references/provider-routing.md for the handoff procedure.\n' : 'Return bounded findings to Lead; do not manage agents.\n');
 
+function agentTitle(role, disposition, request, packet) {
+  const label = request.taskLabel ?? (basename(request.repository) || 'Task');
+  if (typeof label !== 'string' || !label.trim() || label.trim().length > 100 || /[\x00-\x1f\x7f]/.test(label)) {
+    throw new Error('taskLabel must be a nonempty single-line string of at most 100 characters');
+  }
+  const display = value => value[0].toUpperCase() + value.slice(1).toLowerCase();
+  return [display(role), ...(role === 'peer' ? [display(disposition ?? 'general')] : []),
+    label.trim(), ...(packet ? ['Handoff'] : [])].join(' — ');
+}
+
 // The single owner of the create_agent argument record. Nothing edits it afterwards.
 function plan(root, request, packet) {
   verifyInstall(root);
@@ -88,7 +98,7 @@ function plan(root, request, packet) {
     ...(routing ? { routing } : {}),
     ...(binding?.profileId ? { profileId: binding.profileId } : {}),
     create: {
-      title: packet ? `SLP ${role} handoff` : `SLP ${role}`,
+      title: agentTitle(role, disposition, request, packet),
       notifyOnFinish: true,
       provider: `${binding.provider}/${binding.model}`,
       workspaceId: request.workspaceId,

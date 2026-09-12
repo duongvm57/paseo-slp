@@ -188,6 +188,14 @@ tự động chọn provider dự phòng, ghi trước fallback và budget/autho
 chỉ lỗi quota không tự cấp quyền đổi provider. Đổi model/thinking trong cùng provider
 có thể dùng `update_agent`, tùy capability của provider.
 
+Tên agent dùng quy chuẩn `Supervisor — <task>`, `Lead — <task>` và
+`Peer — <Disposition> — <task>`. Ví dụ `Peer — Engineer — checkout totals`
+và `Peer — Reviewer — checkout totals` phân biệt hai nhiệm vụ dù cùng role Peer.
+Truyền `taskLabel` và `disposition` vào `prepare`; nhiều reviewer thì thêm phạm vi
+vào taskLabel, như `checkout totals / API`. Khi bỏ qua, taskLabel lấy tên thư mục
+repo và disposition hiển thị `General`. Resume giữ tên; session handoff mới thêm
+`Handoff`. Agent ID vẫn là định danh dùng cho ownership và gửi báo cáo.
+
 Đường offline tùy chọn: `prepare` nhận role, repository, workspaceId, assignment.
 Supervisor/Lead thêm inventory `profiles`/`providers`; Peer thêm `providers` và
 `route: {optionId, catalogSha256}` lấy từ `routes`. Có thể kèm profiles khi chuẩn bị
