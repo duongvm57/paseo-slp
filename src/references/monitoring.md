@@ -74,8 +74,16 @@ If a discovered host timeline path cannot recover it, report the evidence gap ra
 than infer an outcome. If action is needed, use observation → evidence → hypothesis →
 open question to Lead. Use references/anti-patterns.md for suspected drift and repeated
 failures. Distinguish idle, external waiting, permissions, missing prerequisites and
-actual lost momentum. Identical retries with unchanged prerequisites add no evidence;
-inspect quota/auth/tool/authority causes before repeating. Retry thresholds belong
+actual lost momentum.
+
+Before sending a corrective prompt, check current activity: an earlier tool error
+does not establish a stall if the agent has moved on. A prompt to a running agent
+may interrupt an in-flight mutation; do not use it as a routine status nudge.
+When intervention is necessary, preserve the pending operation and its uncertain
+outcome in the recovery handback. For interrupted creation, apply delegation.md's
+ownership reconciliation before asking for another child.
+Identical retries with unchanged prerequisites add no evidence; inspect
+quota/auth/tool/authority causes before repeating. Retry thresholds belong
 to the protocol; numerical examples in the guide are heuristics.
 
 ## Settlement and stop

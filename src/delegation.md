@@ -33,6 +33,14 @@ Read references/provider-routing.md before every delegation or quota fallback.
    propose a different solution.
    The provider supplies common/role instructions; do not paste them each time.
 3. Record the returned agent/workspace IDs, assignment and ownership in your timeline.
+   If create_agent is aborted, times out or loses its response, its outcome is
+   unknown: the child may still start. Keep that scope reserved to the pending
+   creation. Reconcile the request with host events and child inventory; an empty
+   list_agents result alone does not prove the request had no side effect.
+   Adopt a matching child when identified. Create a replacement only after the
+   host confirms the original request cannot still create a child and any existing
+   owner is settled. If the host cannot resolve that uncertainty, report this
+   delegation blocked and continue only unrelated scopes; do not retry the create.
    Paseo owns parentage. Use fresh sessions for independent judgment; CLI run,
    native subagents and context forks are not delegation substitutes.
 4. Use references/monitoring.md to arrange event-driven waits, material reporting
