@@ -166,7 +166,7 @@ test('one-command installer registers profiles and reloads the selected home, un
   assert.equal(result.applied, true);
   assert.equal(result.reloadRequired, false);
   assert.equal(readFileSync(join(home, 'reload-receipt'), 'utf8'), 'reload --host 127.0.0.1:12345 --json');
-  assert.equal(readJson(join(home, 'config.json')).daemon.agentProfiles.length, 3);
+  assert.equal(readJson(join(home, 'config.json')).daemon.agentProfiles.length, 2);
   execFileSync(process.execPath, [join(destination, 'bin/slp.mjs'), 'uninstall', destination, '--apply', '--reload'], { env, timeout: 5000 });
   assert.equal(readJson(join(home, 'config.json')).daemon.agentProfiles.length, 0);
   assert.equal(existsSync(destination), false);
@@ -200,5 +200,5 @@ test('reload failure reports applied files and leaves a usable installation for 
   assert.equal(report.reloadRequired, true);
   assert.match(report.reloadError, /Files applied/);
   verifyInstall(destination);
-  assert.equal(readJson(join(home, 'config.json')).daemon.agentProfiles.length, 3);
+  assert.equal(readJson(join(home, 'config.json')).daemon.agentProfiles.length, 2);
 });

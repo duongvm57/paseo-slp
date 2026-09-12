@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync, rmSync, lstatSync, mkdirSync }
 import { join, resolve, isAbsolute, relative } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { json, readJson, hash, identity, install, verifyInstall, files } from './package.mjs';
-import { roles, families, profileId, providerId } from './profiles.mjs';
+import { roles, profileRoles, families, profileId, providerId } from './profiles.mjs';
 import { emptyCatalog, validateCatalog, routingPath } from './routing.mjs';
 import { configFile, writeConfig, mcpFlags, requireMcp, verifyOwnedProviders, verifyOwnedProfiles,
   providers as hostProviders, agentProfiles as hostAgentProfiles } from './host-config.mjs';
@@ -12,15 +12,15 @@ export function configurationPlan(destination, config) {
   const existing = hostAgentProfiles(config);
   for (const role of roles) for (const family of families) {
     const id = providerId(role, family);
-    if (Object.hasOwn(hostProviders(config), id) || existing.some(p => p.id === profileId(role))) {
+    if (Object.hasOwn(hostProviders(config), id) || (profileRoles.includes(role) && existing.some(p => p.id === profileId(role)))) {
       throw new Error(`SLP entry already exists: ${role}; uninstall its owning installation first`);
     }
     providers[id] = { extends: family, label: `SLP ${family} ${role}`, command: [process.execPath, join(destination, `bin/${family}-role.mjs`), role] };
   }
-  for (const role of roles) {
+  for (const role of profileRoles) {
     profiles.push({ id: profileId(role), name: `SLP ${role[0].toUpperCase() + role.slice(1)}`,
       provider: providerId(role),
-      notes: `SLP ${role}; installed role instructions load automatically. ${role === 'peer' ? 'One bounded outcome; no orchestration.' : 'Use Paseo delegation and finish notifications.'}` });
+      notes: `SLP ${role}; installed role instructions load automatically. Use Paseo delegation and finish notifications.` });
   }
   return { providers, profiles };
 }
@@ -113,7 +113,8 @@ export function upgradePaseo(source, destination, previous, apply = false) {
   base.daemon.agentProfiles = base.daemon.agentProfiles.filter(p => !saved.has(p.id));
   const proposal = configurationPlan(destination, base);
   proposal.profiles = proposal.profiles.map(p => saved.get(p.id) ?? p);
-  const retiredProfiles = [...saved.values()].filter(profile => profile.id.startsWith('slp-peer-'));
+  const retainedIds = new Set(proposal.profiles.map(profile => profile.id));
+  const retiredProfiles = [...saved.values()].filter(profile => !retainedIds.has(profile.id));
   const result = { destination, retainedInstallation: previous, configPath: file.path, applied: apply, ...proposal,
     retiredProfiles: retiredProfiles.map(profile => profile.id), reloadRequired: true };
   if (!apply) return result;

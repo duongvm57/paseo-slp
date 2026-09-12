@@ -39,10 +39,11 @@ window on an explicit new run request, preserving previous elapsed history.
 
 1. Resolve current authority, host, installed candidate, model/effort choices and
    budget from the Human assignment and existing repo settings. Reuse authorized
-   choices. For basic-codex/basic-pi, first read the three saved SLP profiles;
-   Human must configure matching role providers, models and settings. Ask for any
-   missing/mismatched profile before starting paid confirmation or task actors.
-   Never modify profiles or substitute fixture catalog options to satisfy the row.
+   choices. For basic-codex/basic-pi, first read the saved Supervisor/Lead profiles
+   and the intended project Peer pool;
+   both profiles and eligible pool options must match the basic row family.
+   Resolve missing setup before task actors. Do not edit saved profiles to satisfy
+   the row; prepare the fixture pool under the current project setup authority.
    Discover the actual Paseo tools/CLI, profiles and providers before
    constructing calls. Record missing capabilities and proof paths. Ask once for
    consequential missing authority/settings only if they prevent the requested
@@ -98,33 +99,32 @@ The source checkout hosts the coordinator; the fixture hosts the SLP task.
 Missing .paseo-slp files in the package checkout are normal. Use the fixture's
 absolute root. e2e/WORKSPACE_PROTOCOL.md governs testing, not the fixture's role tactics.
 
-For ordinary profile-based task scenarios:
+For ordinary tasks, Supervisor/Lead use saved profiles and Peer uses the project pool:
 
-1. Read fresh Paseo list_profiles/list_providers and discover each saved profile's
-   model/settings. For basic-pi/basic-codex, all three slp-{role} profiles must use
-   the scenario's matching custom role providers. Human sets these in Paseo Agent
-   profiles before testing. Missing/wrong-family profiles or missing models are
-   setup blockers: name the profile and ask Human to configure it. A model named
-   in chat is not permission to override a saved profile or edit host settings.
-2. Record raw discovery receipts and exact profile bundles in preflight. Basic
-   attempt configs use settings.source="profiles", settings.profiles and
-   settings.providers arrays; begin validates them against the frozen scenario.
-   Follow prelaunch confirmation in e2e/WORKSPACE_PROTOCOL.md.
-3. Use the fixture helper and installed onboarding workflow within setup authority.
-   Complete .paseo-slp/WORKSPACE_PROTOCOL.md with scope, topology, checks, budget
-   and settlement. An empty catalog from init is valid for profile-based work;
-   preserve it instead of generating runtime overrides. Capture setup bytes.
-4. Verify the installed candidate and fixture workspace, and prove baseline failure.
-   Refresh profiles before launch; if settings changed since approval, reconcile
-   preflight first. Create only the Supervisor via Paseo using its saved profile.
-   Optional prepare uses fresh profiles/providers inventories, without binding or
-   catalog overrides. Supervisor/Lead read their child profiles themselves.
-5. Capture each parent's selected profile, exact create request/response and actual
-   child settings. Require them to match under U2. Finish ordinary evidence,
-   settlement and independent review as above; profile discovery alone is not PASS.
+1. Read fresh Paseo profiles/providers and discover the exact models/settings.
+   Only slp-supervisor/slp-lead saved profiles are required. Peer options belong in
+   .paseo-slp/slp-routing.json with complete runtime bundles and suitability notes.
+   Basic rows constrain both profiles and eligible Peer options to their family;
+   mixed-peer uses options from both families without requiring saved Peer profiles.
+2. Record raw inventories and proposed pool bytes in preflight. Basic configs use
+   settings.source="profiles-and-peer-pool", settings.profiles, settings.providers
+   and settings.peerPool (the catalog object). begin validates Supervisor/Lead and
+   eligible Peer options; it does not choose the Peer's option for Lead.
+3. Create the fixture and apply installed onboarding. Complete its protocol and
+   populate the approved pool. Init's empty catalog is only a scaffold. Preserve
+   unrelated fixture content and existing Human choices; never import another
+   project's options implicitly. Capture the exact pool bytes/hash.
+4. Verify installed identity, actual fixture workspace and failing baseline.
+   Refresh profiles/providers/pool before launch, reconciling changed configuration.
+   Create only Supervisor via Paseo from its saved profile. Supervisor discovers
+   its Lead profile; Lead reads the project pool and chooses each Peer option.
+5. Capture profile/create arguments for Supervisor/Lead and the fresh option ID,
+   catalog hash, suitability rationale and actual bundle for each Peer. U2 compares
+   launches against the corresponding source. Catalog availability alone is not
+   PASS. Complete evidence, settlement and independent final review as above.
 
-For explicitly selected catalog/routing scenarios, prepare only their required
-catalog and declared stimuli. Label their runtime source separately; they cannot
-substitute for basic profile acceptance. Onboarding rows retain their absent-file
+For routing scenarios, apply only their declared pool stimuli and record every
+configuration version and subsequent launch. They test pool refresh/rejection,
+not a different default delegation mechanism. Onboarding rows retain their absent-file
 baseline and let fresh setup actors discover the skill and produce its expected
 files; coordinator setup does not pre-satisfy onboarding assertions.

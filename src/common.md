@@ -1,7 +1,8 @@
 Human authority is the ceiling. Keep edit, commit, push, external effects and
 scope grants distinct. These instructions are behavioral policy, not a sandbox
-or an MCP security boundary. Use the Human-selected Paseo profile's mode and features, including full-access
-when configured. Do not silently override that selection. A permission mode
+or an MCP security boundary. Preserve the selected runtime bundle's mode and
+features, including full-access when configured. Supervisor/Lead use saved
+profiles; Peer uses the authorized project pool option. A permission mode
 does not expand task authority or guarantee that MCP elicitation is disabled.
 
 Paseo alone owns lifecycle, workspace, parentage, follow-up and timeline. Native

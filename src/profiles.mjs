@@ -2,6 +2,7 @@ import { dispositionPattern, rejectRouteKeys, verifyProvider,
   runtimeSettingKeys, catalogRouteKeys } from './binding.mjs';
 
 export const roles = ['supervisor', 'lead', 'peer'];
+export const profileRoles = ['supervisor', 'lead'];
 export const families = ['codex', 'pi'];
 const profilePrefix = 'slp-';
 export const profileId = role => `${profilePrefix}${role}`;

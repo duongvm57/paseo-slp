@@ -95,23 +95,18 @@ cleanup are postlaunch evidence, not prerequisites for approving this plan.
 Correct an incomplete draft and have the same confirmer reassess the corrections.
 
 Compare the installed candidate with the frozen source and verify host bindings.
-Task settings must match the Human-configured saved role profiles. For basic-pi,
-Human sets slp-supervisor, slp-lead and slp-peer to the corresponding slp-pi-{role}
-providers; for basic-codex, to slp-codex-{role}. Human selects the model and optional
-thinking/mode/features for each profile in Paseo Settings → Agents → Agent profiles.
-A scenario name or a model mentioned in chat does not authorize coordinator edits
-to those profiles. If a profile is missing, incomplete or in the wrong family,
-request that Human configure it and record the exact mismatch. Stop before creating
-a confirmer or task actor until this prerequisite is met. Full-suite requests
-need Human configuration at each family transition, or explicitly authorized
-isolated hosts with the corresponding Human-configured profiles.
+For basic-pi/basic-codex, Supervisor/Lead saved profiles use the corresponding
+slp-{family}-{role} providers. Human chooses their models/settings in Paseo.
+Peer uses the fixture's project pool; prepare eligible options for the row family
+under setup authority. No saved slp-peer is required. Mixed-peer uses both Peer
+families and does not require switching Supervisor/Lead profiles to match each Peer.
 
-For these basic rows, begin requires settings.source="profiles", settings.profiles
-(the list_profiles array) and settings.providers (the list_providers array).
-It validates all three saved role bundles against the scenario family and records
-settings.roles derived from those profiles. This is a local consistency gate;
-raw discovery receipts, freshness and actual launch settings still need review.
-Candidate alignment uses upgrade/reload only under current runtime authority.
+Basic begin requires settings.source="profiles-and-peer-pool", settings.profiles,
+settings.providers and settings.peerPool (the proposed catalog). It records
+settings.roles for Supervisor/Lead only; Lead chooses the Peer option at delegation.
+Raw receipts, model capability discovery and matching fixture pool bytes still need
+review. Frozen older manifests retain their saved-profile criteria. Candidate
+alignment uses upgrade/reload only under current runtime authority.
 
 Before task launch, inspect the selected modes and permission behavior for the
 role's required reads, delegation and fixture writes. Record the authorized
@@ -176,27 +171,23 @@ For a newly generated fixture, replace the template with the resolved tactics
 directly; there is no need to retain unused template sections. Existing Human
 protocol/routing choices on resume remain authoritative.
 
-For profile-based tasks, the fixture protocol records which saved role profiles
-supply runtime settings. An empty catalog created by init is valid; do not populate
-it to replace profile settings. Preserve existing catalog bytes. Only explicitly
-selected routing/catalog scenarios prepare catalog options according to their
-manifest stimulus; that branch does not qualify profile launches.
+For task scenarios, record the saved Supervisor/Lead profiles and the project Peer
+pool separately. Populate complete eligible pool options with suitability notes;
+empty init output is not ready for Peer delegation. Routing scenarios change this
+same pool at their declared trigger. Do not preselect each Peer option for Lead.
 
-Before root launch, capture fixture protocol bytes and raw profile/provider/model
-and capability discovery receipts. Refresh each saved profile and compare it with
-the approved preflight bundle. If Human changed it, update the preflight confirmation
-before launching rather than using stale bytes. Preserve prior receipts on resume.
-A missing model or unsupported setting is a profile setup blocker for Human.
+Capture protocol/pool bytes and raw profile/provider/model/capability discovery
+before root launch. Refresh the two saved profiles and compare with preflight;
+reconcile Human changes before launching. Preserve prior receipts on resume.
+Verify the workspace's actual path equals fixtureRoot on the target host.
 
-Verify the task workspace's actual path equals fixtureRoot on the target host.
-Create only the Supervisor with its saved profile's provider/model and settings,
-using Paseo create_agent. Optional prepare takes repository, workspaceId, assignment,
-role and fresh profiles/providers inventories; omit binding and route overrides.
-It returns create arguments and creates no agent. Record profile ID, exact saved
-profile, create request/response and actual runtime settings. Supervisor and Lead
-refresh their own child role profiles before each delegation. U2 must trace every
-launch back to the corresponding Human-configured profile; matching a custom
-provider alone does not establish profile usage.
+Create only Supervisor using its saved profile through Paseo create_agent. Record
+profile bytes, exact request/response and actual runtime settings. Supervisor
+refreshes slp-lead before delegation. Lead reads routes, chooses a Peer option with
+its rationale, validates a fresh hash via prepare, and creates the Peer from that
+bundle. Profile inventories cannot override the Peer pool. U2 traces profiles for
+Supervisor/Lead and project option/hash/settings for Peer, including both families
+when mixed-peer is selected.
 
 Onboarding scenarios deliberately start with their declared absent/existing-file
 baseline and test fresh-session skill discovery. Let those setup actors produce

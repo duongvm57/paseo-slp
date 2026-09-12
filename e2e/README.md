@@ -59,16 +59,15 @@ confirm that authorization, discovery or independent review occurred.
 
 Complete the draft before independent confirmation; see
 [Prelaunch confirmation](WORKSPACE_PROTOCOL.md#prelaunch-confirmation) for its scope.
-For basic-codex/basic-pi, Human must first configure all three saved SLP profiles
-with the scenario's matching custom role providers and chosen models/settings.
-The coordinator reads these profiles; it does not edit them or replace them with
-fixture catalog options. The basic config requires settings.source="profiles",
-settings.profiles from list_profiles and settings.providers from list_providers.
-begin derives settings.roles from those inventories and rejects a missing profile,
-missing model or wrong provider family before creating the attempt. Record the run's start
-and deadline including preparation and review, permission-response authority, and
-resource retention choice. Dogfood keeps agents/workspace visible for Human
-inspection by default while settling task activity; archive only when requested.
+For basic-codex/basic-pi, Human configures slp-supervisor/slp-lead with the
+matching family and chosen models/settings. Coordinator prepares a fixture Peer
+pool within project setup authority. No saved Peer profile is required.
+Basic config uses settings.source="profiles-and-peer-pool", profiles/providers
+inventories and settings.peerPool containing the proposed catalog object. begin
+validates the two profiles and eligible pool options, then records role bundles
+for Supervisor/Lead. It does not select the Peer's option. Lead does that at launch.
+Record start/deadline, permission authority and retention; keep agents/workspace
+visible while settling activity, and archive only when requested.
 
 `fixture` creates an exclusive `workspace/` Git repo with a real code defect,
 public task contract/test and an unrelated Human note. It does not create protocol,
@@ -97,12 +96,13 @@ path and `<installed>` verified against the pinned host candidate:
 node <installed>/bin/slp.mjs init <fixtureRoot> --apply
 Read and apply <installed>/skills/paseo-slp-onboarding/SKILL.md:
   fill the fixture protocol from the task authority/topology/proof/budget;
-  verify the saved Human-configured role profiles through live discovery.
-  leave the generated catalog empty for profile-based tasks.
+  verify Supervisor/Lead profiles and discover the Peer runtimes.
+  populate the project pool with authorized options and suitability descriptions.
 ```
 
-These are ordered setup steps, not a shell script: `init` leaves a template and an
-empty optional catalog. Complete the protocol; saved profiles supply runtime settings. The exact completion gate and
+These are ordered setup steps, not a shell script: init leaves a template and an
+empty catalog. Complete the protocol and Peer pool before delegation. Saved profiles
+supply Supervisor/Lead settings; the selected pool option supplies Peer settings. The exact completion gate and
 root launch binding are in [WORKSPACE_PROTOCOL.md](WORKSPACE_PROTOCOL.md#fixture-setup-and-launch-gate).
 Record fixture files, exact saved profiles, discovery receipts and validation output with
 `collect ... preflight <source-file>` before creating the task's Supervisor.

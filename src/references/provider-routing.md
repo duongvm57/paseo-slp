@@ -1,62 +1,61 @@
 # Provider/model routing and quota handoff
 
-Supervisor/Lead read before every delegation or quota fallback. Three profiles carry
-Human runtime settings: slp-supervisor, slp-lead and slp-peer. Lead chooses a task-specific Peer
-disposition in the assignment; disposition never creates or selects another profile.
+Supervisor/Lead read before every delegation or quota fallback. Supervisor and
+Lead have saved Paseo profiles; Peer has a project runtime pool. The three roles
+are behavior contracts, not a requirement for three saved profiles.
 
-## Select a saved agent profile
+## Supervisor and Lead
 
-1. Read the assigned repository's .paseo-slp/WORKSPACE_PROTOCOL.md for authority,
-   tactics and budget. Read Paseo list_profiles and all relevant notes.
-2. Select slp-supervisor, slp-lead or slp-peer for the intended role. The Human
-   configures provider, model, thinkingOptionId, modeId and featureValues in
-   Paseo Agent profiles. Peer disposition is independent of this selection.
-3. Discover list_providers, list_models and inspect_provider for that saved
-   provider. Verify its role wrapper, exact model and supported settings. Missing
-   or incompatible profile settings block launch with the profile ID and reason;
-   ask Human to configure the profile. Discovery validates the saved choice.
-4. Refresh list_profiles before each spawn. Materialize its complete bundle as
-   described in delegation.md, and record the profile and actual launch arguments.
-   Compare the returned agent settings with that bundle; surface mismatches.
+Read the repository protocol for authority/tactics/budget. Refresh list_profiles
+and select slp-supervisor or slp-lead. Verify the matching installed role provider,
+exact model and optional mode/thinking/features with live provider discovery.
+Copy the complete saved bundle. Missing settings require Human configuration;
+never silently replace these choices with catalog options. Changes affect future
+launches, not existing sessions.
 
-Saved profile settings are the runtime source for ordinary delegation. Repository
-catalogs do not override them. Changes to Human profiles apply to the next launch;
-existing agents retain their current session settings. The optional repository
-catalog and offline route helpers remain available for explicitly assigned catalog
-experiments or migrations; they are not prerequisites for profile-based tasks.
-Changing a profile or using an explicit alternative binding requires Human authority.
+## Peer pool (default)
 
-Installed persistent policy providers are slp-codex-{role} and slp-pi-{role}.
-For a Peer, both slp-codex-peer and slp-pi-peer load the same common/Peer policy.
-Codex app-server gets developer instructions; Pi gets --append-system-prompt at
-every process launch/resume, preserving Paseo's extension/MCP arguments. Retain
-profile features and modes only when valid for the target provider/model.
+Read the assigned repository's .paseo-slp/slp-routing.json with
+`node <installed>/bin/slp.mjs routes <absolute-repository>` before each delegation.
+Each option contains an id, provider family (pi/codex), model, optional modeId,
+thinkingOptionId/features, roles, enabled, availability, priority, suitableFor,
+avoidFor and notes. Human/onboarding establishes the pool and suitability under
+project setup authority; Lead chooses within it for each task and budget.
 
-Human may edit any of the three installed profiles' provider/model/thinking in
-Paseo Settings. Keep its ID and select a matching role provider. Changing a saved
-profile affects future sessions, not existing agents. When no model is selected,
-ask Human to select a discovered model in that profile before launch.
-Pi model IDs may include endpoint/provider prefixes and slashes; preserve the exact
-discovered ID. Discovery must verify the saved provider is usable.
+Choose an enabled, ready option with peer in roles. Explain suitability using the
+assignment and option descriptions; Engineer/Architect/Reviewer are dispositions,
+not fixed model mappings. Two Peers may use different models or providers while
+receiving the same Peer policy. Supervisor/Lead profiles need not match their family.
 
-## Launch and offline preparation
+Validate the exact model/settings against live provider capabilities. Refresh the
+catalog hash and use prepare with role=peer and route.optionId/catalogSha256 before
+calling Paseo create_agent. The selected pi/codex option maps to slp-pi-peer or
+slp-codex-peer, whose installed wrapper supplies common/Peer instructions.
+Record the option, hash, suitability reason, create arguments and actual settings.
 
-Use agent-scoped Paseo create_agent with the saved role profile as described in
-delegation.md. Installed wrappers supply role bytes; the initial prompt carries
-the neutral assignment/disposition. Record the exact profile and actual settings.
+No slp-peer saved profile is installed or required. Profile inventories may accompany
+prepare discovery but cannot override the selected Peer option. Missing/empty pool,
+no eligible option, stale hash or unavailable runtime blocks only the dependent
+Peer delegation: use paseo-slp-onboarding to complete project setup. Do not fall
+back to host/global/another repository's catalog, a saved Peer profile or inherited
+Lead settings. Unknown availability is not permission to launch.
 
-Optional bin/slp.mjs prepare accepts role, disposition, repository, workspaceId,
-assignment, and fresh profiles/providers inventories. With profiles supplied it
-uses the saved role profile and rejects inline binding or catalog/runtime overrides.
-It needs no repository catalog for this path and returns profileId plus create
-arguments. It never creates an agent; the parent still calls Paseo create_agent.
+## Preparation and role loading
 
-Explicit offline binding and catalog requests remain supported separately for
-Human-authorized experiments or handoffs. Catalog requests use route.optionId and
-catalogSha256 with providers, without profiles or binding; they read only the
-assigned repository's catalog, reject stale hashes and unavailable options, and
-cannot stand in for a test of saved profiles. Stock provider offline launches
-carry a role envelope in initialPrompt and also require explicit authority.
+Supervisor/Lead prepare requests use fresh profiles/providers, role, repository,
+workspaceId and assignment. Peer requests use the same task fields and providers,
+plus route.optionId/catalogSha256. Preparation reads only the assigned repository
+pool and emits arguments; it never creates an agent or chooses the option for Lead.
+Catalog hash validation is not atomic with host creation; record actual launches.
+
+Installed providers are slp-codex-{role} and slp-pi-{role}. Both Peer wrappers load
+the same policy. Codex receives developer instructions; Pi uses
+--append-system-prompt while preserving host extensions/MCP arguments. Pi model IDs
+may contain endpoint prefixes and slashes; preserve the exact discovered ID.
+
+Explicit binding requests remain an offline escape hatch for Human-authorized
+experiments/handoffs, not ordinary Peer routing or a missing-pool fallback.
+Historical profile/catalog experiments do not establish the current default path.
 
 ## Provider quota failure or requested switch
 

@@ -18,9 +18,9 @@ Local installation/transport checks do not constitute workflow acceptance.
 | src/references/monitoring.md | Supervisor/Lead event observation, heartbeat ownership and resource settlement. |
 | src/references/governance.md | Supervisor scope, causal notebook, authorized recovery and policy evolution. |
 | src/references/anti-patterns.md | All 20 guide §9 hypotheses with evidence, questions and bounded responses; reached on audit/drift triggers. |
-| src/references/provider-routing.md | Saved Human profile selection, provider validation and provider handoff procedure. |
+| src/references/provider-routing.md | Supervisor/Lead profile selection, Peer pool selection, validation and handoff procedure. |
 | src/routing.mjs | Read only the assigned repository's catalog; bind a Lead-selected option with fresh hash and availability checks. |
-| skills/paseo-slp-onboarding/SKILL.md | Installable repo tactics setup and saved-profile verification; project/global installation is independent from repo config initialization. |
+| skills/paseo-slp-onboarding/SKILL.md | Installable repo tactics and Peer pool setup, with Supervisor/Lead profile verification; project/global installation is independent from repo config initialization. |
 | src/templates/WORKSPACE_PROTOCOL.md | Repository tactics template with risk classes, routing, monitoring and proof gates; explicit init preserves existing files. |
 | src/binding.mjs | Every rule a Binding must satisfy: setting patterns, the route override deny-lists and the single provider-health check. Imports nothing from the package. |
 | src/role-bundle.mjs | Which policy bytes each role receives at session entry, and their order; the load-path contract traced in guide-coverage.md. |
@@ -38,10 +38,12 @@ exact bytes. A Paseo-integrated install also binds paseo-binding.json, containin
 only owned entries and the prior values of two MCP flags, never credentials.
 The shell installer and installed CLI share the same installation code.
 
-Only three managed profiles exist: slp-{supervisor,lead,peer}; providers use
-slp-codex-{role} and slp-pi-{role}. Peer disposition belongs to the assignment;
-it never maps to a specialized profile. Ordinary launches use the saved Human-configured role profiles in Paseo. Existing IDs must be
-removed before installing; unrelated configuration is preserved.
+Three roles remain Supervisor, Lead and Peer. Only two saved profiles are managed:
+slp-supervisor and slp-lead. All six providers remain slp-codex-{role} and
+slp-pi-{role}; Peer chooses runtime from the project pool, not a saved profile.
+Peer disposition belongs to the assignment, independent of pool option choice.
+Installation refuses collisions with owned provider and Supervisor/Lead profile
+IDs; unrelated configuration is preserved.
 
 Installation performs no agent creation. Reload changes host configuration for
 future launches. Uninstall requires unchanged managed entries and package files;
@@ -51,7 +53,7 @@ A repeat install of identical bytes preserves profile setting edits. Replacing a
 different candidate requires explicit upgrade into a new directory. Upgrade preserves
 current profile preferences and unrelated config, adds new bundles and rebinds owned
 providers to the new directory while retaining the old installation for active sessions.
-Owned legacy disposition profiles are removed from host profiles and archived exactly
+Owned slp-peer and legacy disposition profiles are removed from host profiles and archived exactly
 in paseo-binding.json retiredProfiles for review. Other profiles remain untouched.
 Host install/upgrade neither creates nor reads/writes routing catalogs; previous global
 catalogs stay untouched until an explicitly requested repo migration.
@@ -83,33 +85,41 @@ is added. Missing capabilities remain explicit before any fallback. See
 [guide coverage](guide-coverage.md) for requirement mapping, load paths and host gaps.
 
 Codex and Pi share role bytes through their respective adapters. Human configures
-slp-supervisor, slp-lead and slp-peer with matching SLP role providers in Paseo.
-Ordinary delegation refreshes list_profiles and copies the saved provider, model,
-modeId, thinkingOptionId and featureValues into create_agent arguments. Discovery
-validates availability/settings; it does not select a replacement model. Missing
-or incompatible profile settings require Human configuration before launch.
+slp-supervisor/slp-lead with matching role providers and chosen models/settings.
+Supervisor/Lead launches refresh these saved profiles and copy their complete
+provider/model/mode/thinking/features bundles. Missing or incompatible settings
+require Human configuration before the dependent launch.
 
-Optional prepare accepts fresh profiles/providers inventories and returns profileId
-plus exact create arguments. This path rejects explicit binding and route runtime
-or catalog overrides, and requires no repository catalog. It is not a mandatory
-step before agent-scoped Paseo create_agent. Stock provider bindings and catalog
-requests remain separate explicit offline paths for authorized experiments/handoffs.
-They do not qualify saved-profile acceptance.
+Peer delegation defaults to the assigned repository's .paseo-slp/slp-routing.json.
+Onboarding prepares a pool of complete provider/model/settings options with
+suitableFor, avoidFor, notes, priority and explicit eligibility. Lead reads the pool,
+selects an option per task/budget, explains why it fits and validates its fresh hash
+with prepare. Provider pi/codex maps to the matching installed Peer wrapper; policy
+and disposition stay separate from runtime choice. Neither the Lead's family nor
+a saved slp-peer limits the pool. Missing/empty/no-eligible pool blocks Peer
+creation until setup is completed, without profile/global/other-repo fallback.
 
-init preserves existing files and creates missing protocol plus an empty optional
-catalog at <repository>/.paseo-slp. Protocol holds repo tactics and budget. Ordinary
-profile-based tasks may leave the catalog empty. --routing-from and routes remain
-for explicitly assigned catalog experiments/migrations: no global or other-repo
-fallback, stale hash or disabled/unavailable option bypass. Catalog settings never
-override a saved-profile request. The helper validates supplied inventory at
-preparation time; host provenance, freshness and actual launch need live evidence.
+prepare accepts repository, workspaceId, assignment and role. Supervisor/Lead use
+fresh profiles/providers; Peer uses providers and route.optionId/catalogSha256.
+A profiles inventory can accompany Peer discovery but does not select its runtime.
+Catalog settings cannot be overlaid via route runtime/profile overrides. Explicit
+binding without profiles remains a separate Human-authorized offline/handoff path,
+not an ordinary missing-pool fallback. Helpers emit create arguments only; Paseo
+owns lifecycle and actual settings. Source selection is shared by prepare-handoff.
 
-New basic-codex/basic-pi manifests require runtimeSource=profiles and the corresponding
-provider family. Human configures all three profiles before testing; coordinator
-records raw inventories and never edits profiles to make a row launchable. begin
-validates settings.source/profiles/providers and derives the role bundles. U2
-compares all actor launches with those saved profiles. Old frozen manifests and
-reviews keep their original criteria; no past catalog run gains profile acceptance.
+init creates missing protocol and empty pool scaffold without overwriting existing
+files. Onboarding completes the project pool; empty init output is not ready for
+Peer delegation. --routing-from imports only an explicitly chosen catalog into a
+missing repo file. Host upgrade archives retired Peer profiles but neither creates
+nor edits project catalogs, so setup never silently imports host choices.
+
+New basic manifests use runtimeSource=profiles-and-peer-pool. Supervisor/Lead
+profiles and eligible Peer options match the selected basic family. begin records
+settings.roles for the two profiles and settings.peerPool for the proposed pool;
+Lead selects the actual Peer option, not the coordinator. U2 compares each launch
+with its relevant saved profile or option/hash. mixed-peer can use Pi and Codex
+Peer options under either Lead family without requiring extra saved profiles or
+both basic runs. Old frozen manifests retain their original criteria and results.
 
 Provider switching creates a new session: prepare-handoff requires old-owner settlement
 evidence and transfers state/resources without inventing new parentage or acceptance.

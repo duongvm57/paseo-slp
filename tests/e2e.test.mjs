@@ -13,8 +13,9 @@ import { hash } from '../src/package.mjs';
 const config = {
   operatorId: 'local-test-operator', authority: { source: 'local collector tests only; no live grant' },
   budget: { maxAgents: 4, maxWallTimeSeconds: 60 }, host: { id: 'test-only', version: 'fixture' },
-  settings: { source: 'profiles',
-    profiles: ['supervisor', 'lead', 'peer'].map(role => ({ id: `slp-${role}`, provider: `slp-codex-${role}`, model: `test-${role}` })),
+  settings: { source: 'profiles-and-peer-pool',
+    peerPool: { version: 1, policy: 'Synthetic test pool', options: [{ id: 'peer-test', provider: 'codex', roles: ['peer'], model: 'test-peer', enabled: true, availability: 'ready', priority: 1, suitableFor: ['tests'], avoidFor: [], notes: 'Synthetic only' }] },
+    profiles: ['supervisor', 'lead'].map(role => ({ id: `slp-${role}`, provider: `slp-codex-${role}`, model: `test-${role}` })),
     providers: ['supervisor', 'lead', 'peer'].map(role => ({ id: `slp-codex-${role}`, status: 'available' })),
   }, confirmer: { id: 'test-confirmer', evidence: 'synthetic test data, no live acceptance' },
 };
@@ -74,29 +75,38 @@ test('basic preflight requires Human profiles for the scenario family before cre
     const id = `basic-${family}`;
     const current = structuredClone(config);
     delete current.confirmer; // Basic flows launch without a paid prelaunch reviewer.
-    current.settings.profiles = ['supervisor', 'lead', 'peer'].map((role, i) => ({
+    current.settings.peerPool.options[0].provider = family;
+    current.settings.profiles = ['supervisor', 'lead'].map((role, i) => ({
       id: `slp-${role}`, provider: `slp-${family}-${role}`, model: `endpoint/model-${i}`,
       thinkingOptionId: i ? 'high' : 'medium', featureValues: { custom: i === 2 },
     }));
-    current.settings.providers = current.settings.profiles.map(profile => ({ id: profile.provider, status: 'available' }));
-    assert.throws(() => begin(run, id, { ...current, settings: {} }), /Human-configured agent profiles/);
-    for (const role of ['supervisor', 'lead', 'peer']) {
+    current.settings.providers = [...current.settings.profiles.map(profile => ({ id: profile.provider, status: 'available' })), { id: `slp-${family}-peer`, status: 'available' }];
+    assert.throws(() => begin(run, id, { ...current, settings: {} }), /profiles-and-peer-pool/);
+    for (const role of ['supervisor', 'lead']) {
       const wrong = structuredClone(current);
       const profile = wrong.settings.profiles.find(p => p.id === `slp-${role}`);
       profile.provider = `slp-${family === 'pi' ? 'codex' : 'pi'}-${role}`;
       wrong.settings.providers.push({ id: profile.provider, status: 'available' });
       assert.throws(() => begin(run, id, wrong), new RegExp(`Human must configure slp-${role}`));
     }
-    const missing = structuredClone(current); delete missing.settings.profiles[2].model;
-    assert.throws(() => begin(run, id, missing), /configure a model.*slp-peer/);
+    const missing = structuredClone(current); delete missing.settings.profiles[1].model;
+    assert.throws(() => begin(run, id, missing), /configure a model.*slp-lead/);
     const absent = structuredClone(current); absent.settings.profiles.pop();
-    assert.throws(() => begin(run, id, absent), /Missing Paseo profile slp-peer/);
+    assert.throws(() => begin(run, id, absent), /Missing Paseo profile slp-lead/);
     const unavailable = structuredClone(current); unavailable.settings.providers[0].status = 'unavailable';
     assert.throws(() => begin(run, id, unavailable), /Unverified provider/);
+    const noPeerProvider = structuredClone(current); noPeerProvider.settings.providers.pop();
+    assert.throws(() => begin(run, id, noPeerProvider), /Unverified provider Peer pool provider/);
+    const empty = structuredClone(current); empty.settings.peerPool.options = [];
+    assert.throws(() => begin(run, id, empty), /Peer pool needs an eligible/);
+    const wrongFamily = structuredClone(current); wrongFamily.settings.peerPool.options[0].provider = family === 'pi' ? 'codex' : 'pi';
+    assert.throws(() => begin(run, id, wrongFamily), /Peer pool needs an eligible/);
     assert.equal(existsSync(join(run, id)), false, 'Rejected preflight creates no attempt or fixture');
     const { attempt } = begin(run, id, current);
     const saved = JSON.parse(readFileSync(join(attempt, 'attempt.json'))).config.settings;
-    for (const role of ['supervisor', 'lead', 'peer']) {
+    assert.equal(saved.roles.peer, undefined, 'Coordinator does not preselect the Peer runtime');
+    assert.deepEqual(saved.peerPool, current.settings.peerPool);
+    for (const role of ['supervisor', 'lead']) {
       const profile = current.settings.profiles.find(p => p.id === `slp-${role}`);
       assert.equal(saved.roles[role].provider, profile.provider);
       assert.equal(saved.roles[role].model, profile.model);

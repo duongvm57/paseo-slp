@@ -52,19 +52,21 @@ candidate. Do not infer filesystem isolation from workspace IDs.
 
 ## Routing and skills
 
-Read the Human-configured slp-supervisor, slp-lead and slp-peer profiles from
-Paseo before each launch. Use their complete provider/model/settings bundles and
-validate them through provider discovery. Record required strengths, budget and
-constraints here; ask Human to adjust a profile if its settings do not fit.
-Use one slp-peer profile; Lead assigns disposition per task. Use fresh sessions
-for independent judgments even when the model is the same.
-Lead uses macro skills, Supervisor observation/governance skills, Peer task micro skills.
-Profile changes require Human authority. Record quota fallback authority and
-settlement boundaries; provider changes for existing work use a new-session handoff.
-A repository catalog is optional for explicitly assigned catalog experiments;
-ordinary tasks use saved profiles and do not need catalog runtime options.
-Use the installed paseo-slp-onboarding skill to update repo tactics while preserving
-Human profiles and existing repository files.
+Read slp-supervisor/slp-lead saved profiles for those roles. Peer delegation uses
+this repository's .paseo-slp/slp-routing.json pool by default. Onboarding populates
+Human-approved provider/model/settings options and suitability descriptions; an
+empty init catalog is a setup scaffold, not ready for Peer delegation.
+Lead selects a ready Peer option for each task using suitableFor, avoidFor, notes,
+priority and budget. Record the rationale, option ID/hash and actual launch bundle.
+Validate against fresh provider discovery; do not inherit a saved slp-peer profile
+or Lead settings. Fresh independent judgments use fresh sessions even with the
+same model. Missing pool/eligible runtime requires repo setup, not host fallback.
+
+Lead uses macro skills, Supervisor observation/governance skills, Peer task micro
+skills. Record allowed pool maintenance, cost limits, quota fallback authority and
+settlement boundaries. Provider changes for existing work require a new-session
+handoff; an eligible pool option does not itself grant replacement authority.
+Use paseo-slp-onboarding to update tactics and pool while preserving Human choices.
 
 ## Monitoring and heartbeat
 

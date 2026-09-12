@@ -38,33 +38,37 @@ function catalogFixture(dir) {
   return { path, catalog, route };
 }
 
-test('saved profile launches preserve each role bundle and reject runtime substitution', t => {
+test('Supervisor and Lead use saved profiles; Peer uses the project pool without profile fallback', t => {
   const { dir, installed } = fixture(t); install(root, installed);
-  const saved = ['supervisor', 'lead', 'peer'].map((role, i) => ({
+  const saved = ['supervisor', 'lead'].map((role, i) => ({
     id: `slp-${role}`, provider: `slp-pi-${role}`, model: `upstream/model-${i}`,
-    thinkingOptionId: i ? 'high' : 'medium', featureValues: { enabled: i === 2 },
+    thinkingOptionId: i ? 'high' : 'medium', featureValues: { enabled: true },
   }));
-  const inventory = saved.map(profile => ({ id: profile.provider, status: 'available' }));
+  const inventory = [...saved.map(profile => ({ id: profile.provider, status: 'available' })), ...providers];
   const launch = fields => launchPlan(installed, { ...request, repository: dir, profiles: saved, providers: inventory, ...fields });
-  assert.equal(existsSync(join(dir, '.paseo-slp/slp-routing.json')), false);
-  for (const role of ['supervisor', 'lead', 'peer']) {
+  for (const role of ['supervisor', 'lead']) {
     const selected = saved.find(p => p.id === `slp-${role}`);
     const plan = launch({ role });
     assert.equal(plan.profileId, selected.id);
     assert.equal(plan.create.provider, `${selected.provider}/${selected.model}`);
     assert.deepEqual(plan.create.settings, { thinkingOptionId: selected.thinkingOptionId, features: selected.featureValues });
-    assert.equal(plan.create.settings.modeId, undefined);
+    assert.throws(() => launch({ role, route: { model: 'other' } }), /Saved profile settings cannot be overridden/);
   }
-  const { route } = catalogFixture(dir);
-  assert.equal(launch({}).create.provider, 'slp-pi-peer/upstream/model-2', 'Even an existing catalog cannot replace a saved profile');
-  for (const override of [route('luna-code'), { provider: 'slp-codex-peer' }, { model: 'other' }, { modeId: 'full-access' }, { thinkingOptionId: 'low' }, { features: {} }]) {
-    assert.throws(() => launch({ route: override }), /Saved profile settings cannot be overridden/);
-  }
-  assert.throws(() => launch({ binding: { provider: 'pi', model: 'other' } }), /Choose saved profiles/);
-  const changed = structuredClone(saved); changed[2].model = 'different/model';
-  assert.equal(launch({ profiles: changed }).create.provider, 'slp-pi-peer/different/model');
-  delete changed[2].model;
-  assert.throws(() => launch({ profiles: changed }), /Human must configure a model/);
+  assert.throws(() => launch({}), /Peer requires a project routing option/);
+  const { path, catalog, route } = catalogFixture(dir);
+  const peer = launch({ route: route('glm-design') });
+  assert.equal(peer.profileId, undefined);
+  assert.equal(peer.create.provider, 'slp-pi-peer/opencode/glm-5.3-flash');
+  const staleProfiles = [...saved, { id: 'slp-peer', provider: 'slp-codex-peer', model: 'wrong/model' }];
+  assert.equal(launch({ profiles: staleProfiles, route: route('glm-design') }).create.provider, peer.create.provider);
+  assert.throws(() => launch({ profiles: staleProfiles }), /Peer requires a project routing option/);
+  assert.throws(() => launch({ route: { ...route('glm-design'), model: 'other' } }), /conflicting/);
+  assert.throws(() => launch({ route: { ...route('glm-design'), profileId: 'slp-peer' } }), /conflicting/);
+  catalog.options = [];
+  writeFileSync(path, json(catalog));
+  assert.throws(() => launch({ profiles: staleProfiles, route: route('glm-design') }), /Unknown routing option/);
+  rmSync(path);
+  assert.throws(() => launch({ route: { optionId: 'glm-design', catalogSha256: 'old' } }), /Missing repository routing catalog/);
 });
 
 test('Lead selects independent runtime bundles for one Peer role without a disposition mapping', t => {
@@ -125,7 +129,7 @@ test('installer registers both role transports and preserves user provider switc
   const path = join(home, 'config.json');
   const config = readJson(path);
   assert.equal(Object.keys(config.agents.providers).length, 6);
-  assert.equal(config.daemon.agentProfiles.length, 3);
+  assert.equal(config.daemon.agentProfiles.length, 2);
   assert.equal(config.agents.providers['slp-pi-peer'].extends, 'pi');
   assert.equal(config.agents.providers['slp-pi-lead'].command[1], join(installed, 'bin/pi-role.mjs'));
   Object.assign(config.daemon.agentProfiles.find(p => p.id === 'slp-lead'), { provider: 'slp-pi-lead', model: 'b-ai/glm-5.3-flash', thinkingOptionId: 'medium' });
@@ -171,6 +175,24 @@ test('quota handoff preserves evidence and old parentage, emits only new-session
   assert.equal(actual.create.provider, plan.create.provider);
 });
 
+test('Peer handoff resolves the new project option without a saved Peer profile', t => {
+  const { dir, installed } = fixture(t); install(root, installed);
+  const repository = join(dir, 'repo'); mkdirSync(repository);
+  execFileSync('git', ['init', '-q', repository]);
+  const { route } = catalogFixture(repository);
+  const current = { ...request, repository, profiles: profiles.filter(p => p.id !== 'slp-peer'),
+    route: route('glm-design'), disposition: 'engineer',
+    handoff: { previousAgentId: 'old-peer', reason: 'authorized runtime change',
+      authority: 'Human requests a new Peer from the project pool.', state: 'Old writer paused; proof pending.',
+      previousOwner: { settled: true, evidence: 'host cancellation receipt' }, resources: [] } };
+  const plan = handoffPlan(installed, current);
+  assert.equal(plan.profileId, undefined);
+  assert.equal(plan.routing.optionId, 'glm-design');
+  assert.equal(plan.create.provider, 'slp-pi-peer/opencode/glm-5.3-flash');
+  assert.equal(plan.handoff.previousAgentId, 'old-peer');
+  assert.throws(() => handoffPlan(installed, { ...current, route: undefined }), /Peer requires a project routing option/);
+});
+
 test('explicit upgrade preserves old three-profile preferences, config and live-session files', t => {
   const { dir, installed } = fixture(t), home = join(dir, 'home'); mkdirSync(home);
   installPaseo(root, installed, home, true);
@@ -178,7 +200,7 @@ test('explicit upgrade preserves old three-profile preferences, config and live-
   const bindingPath = join(installed, 'paseo-binding.json');
   const old = readJson(bindingPath);
   old.providers = Object.fromEntries(Object.entries(old.providers).filter(([id]) => id.startsWith('slp-codex-')));
-  old.profiles = old.profiles.filter(p => ['slp-supervisor', 'slp-lead', 'slp-peer'].includes(p.id));
+  old.profiles.push({ id: 'slp-peer', provider: 'slp-codex-peer', notes: 'Previous default Peer' });
   writeFileSync(bindingPath, json(old));
   const manifestPath = join(installed, 'installed.json');
   const manifest = readJson(manifestPath);
@@ -205,8 +227,9 @@ test('explicit upgrade preserves old three-profile preferences, config and live-
   verifyInstall(installed); verifyInstall(next);
   const after = readJson(configPath);
   assert.equal(after.humanPreference, 'preserve');
-  assert.equal(after.daemon.agentProfiles.length, 3);
-  assert.equal(after.daemon.agentProfiles.find(p => p.id === 'slp-peer').thinkingOptionId, 'high');
+  assert.equal(after.daemon.agentProfiles.length, 2);
+  assert.equal(after.daemon.agentProfiles.some(p => p.id === 'slp-peer'), false);
+  assert.deepEqual(readJson(join(next, 'paseo-binding.json')).retiredProfiles, [config.daemon.agentProfiles.find(p => p.id === 'slp-peer')]);
   assert.equal(after.agents.providers['slp-pi-lead'].command[1], join(next, 'bin/pi-role.mjs'));
   assert.throws(() => upgradePaseo(root, next, installed, true), /new destination/);
 });
@@ -293,8 +316,8 @@ test('upgrade archives owned disposition settings in binding without reading or 
   assert.deepEqual(readJson(path), catalog);
   upgradePaseo(root, next, installed, true);
   const after = readJson(configPath).daemon.agentProfiles;
-  assert.equal(after.length, 4);
-  assert.equal(after.filter(p => p.id.startsWith('slp-peer')).length, 1);
+  assert.equal(after.length, 3);
+  assert.equal(after.filter(p => p.id.startsWith('slp-peer')).length, 0);
   assert.ok(after.some(p => p.id === 'human-custom-peer'));
   assert.deepEqual(readJson(path), catalog);
   assert.deepEqual(readJson(join(next, 'paseo-binding.json')).retiredProfiles, specialized);

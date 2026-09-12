@@ -5,23 +5,31 @@ Read references/provider-routing.md before every delegation or quota fallback.
 1. Resolve project/task identity, repository root, authority and existing ownership.
    Inspect Paseo reachability, list_workspaces and relevant list_agents, plus Git
    changes in the target checkout. Establish baseline resources to preserve. Read
-   list_profiles and profile notes. Select slp-supervisor, slp-lead or slp-peer for
-   the child's role; disposition belongs to the assignment. Read this repository's
-   .paseo-slp/WORKSPACE_PROTOCOL.md for tactics and budget. Runtime provider, model,
-   mode, thinking and features come from the saved Human-configured agent profile.
-   Discover the selected provider's availability and supported models/settings.
-   Missing, incompatible or over-budget settings require a Human profile decision;
-   report the exact profile and mismatch. A task request for Pi or Codex does not
-   authorize rewriting profiles or substituting catalog settings.
+   the repository's .paseo-slp/WORKSPACE_PROTOCOL.md for tactics and budget.
+   Supervisor/Lead runtime settings come from slp-supervisor/slp-lead saved profiles.
+   Peer runtime settings come from this repository's .paseo-slp/slp-routing.json.
+   Disposition belongs to the assignment, not a fixed profile or option mapping.
+   Discover provider availability and exact model/settings for the selected bundle.
+   Missing setup goes through paseo-slp-onboarding; never invent a model or read
+   another repository's pool as fallback.
    Before parallel writers, use references/orchestration.md for isolation and
    integration ownership. Complete preflight with an owner map and available route,
    or report the exact missing prerequisite for the dependent branch.
-2. Refresh list_profiles immediately before creation and use the selected profile's
-   complete bundle. Set create_agent.provider to its role provider ID, followed by
-   `/` and its exact model ID, preserving any slashes within the model ID. Copy
-   modeId, thinkingOptionId and featureValues to settings.modeId,
-   settings.thinkingOptionId and settings.features, omitting absent settings.
-   Record the selected profile ID and exact profile bytes with the launch arguments.
+2. Before creating Supervisor/Lead, refresh list_profiles and copy the selected
+   role profile's complete bundle. Before creating a Peer, read routes for the
+   assigned repository, choose an enabled ready option eligible for peer using
+   suitableFor, avoidFor, notes, priority and the task budget. Record why it fits;
+   priority alone does not select a model. Refresh the catalog hash before launch.
+   Use prepare with role=peer, route.optionId, route.catalogSha256, repository,
+   workspaceId, assignment and fresh providers to validate the selection and obtain
+   create arguments. Profile inventory never overrides a Peer pool selection.
+   All catalog settings are complete; do not overlay model/effort/features from
+   slp-peer, the Lead or a different option. No saved slp-peer profile is required.
+   Map catalog provider pi/codex to slp-pi-peer/slp-codex-peer. Combine the wrapper
+   ID with the exact model ID, preserving embedded slashes. Copy modeId,
+   thinkingOptionId and features to settings, omitting absent fields; saved
+   profiles use featureValues as settings.features. Record selected profile ID or
+   catalog option ID/hash and exact bundle with the launch arguments.
    Use agent-scoped Paseo create_agent; it has no profile parameter.
    Pass the actual workspaceId, title and notifyOnFinish=true.
    initialPrompt contains the neutral assignment: project/task identifiers,

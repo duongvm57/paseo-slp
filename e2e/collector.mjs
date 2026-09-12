@@ -5,8 +5,9 @@ import { identity, files, hash, json, readJson, snapshot } from '../src/package.
 import { scenarios } from './scenarios.mjs';
 import { evidenceKinds, evidenceVersion, within, acceptEvidence, satisfiesEvidence } from './evidence.mjs';
 import { criterionIds, criterionEvidence } from './criteria.mjs';
-import { savedProfileBinding, roles, providerId } from '../src/profiles.mjs';
-import { bindingCheck } from '../src/binding.mjs';
+import { savedProfileBinding, roles, profileRoles, providerId } from '../src/profiles.mjs';
+import { validateCatalog } from '../src/routing.mjs';
+import { bindingCheck, verifyProvider } from '../src/binding.mjs';
 import { createFixture } from './fixture.mjs';
 
 export const sourceRoot = fileURLToPath(new URL('..', import.meta.url));
@@ -75,15 +76,23 @@ export function begin(directory, id, config) {
   if (loaded.scenario.prelaunchConfirmation !== 'coordinator') {
     requireValue(nonempty(config.confirmer?.id) && config.confirmer.id !== config.operatorId && nonempty(config.confirmer?.evidence), 'Independent prelaunch confirmer and evidence required');
   }
-  if (loaded.scenario.runtimeSource === 'profiles') {
-    requireValue(config.settings.source === 'profiles', 'Basic E2E requires Human-configured agent profiles; catalog or inline settings cannot substitute');
-    const bindings = Object.fromEntries(roles.map(role => {
+  const source = loaded.scenario.runtimeSource;
+  if (source === 'profiles' || source === 'profiles-and-peer-pool') {
+    requireValue(config.settings.source === source, `Basic E2E requires ${source} settings`);
+    const bindings = Object.fromEntries((source === 'profiles' ? roles : profileRoles).map(role => {
       const binding = savedProfileBinding(role, config.settings.profiles, config.settings.providers);
       requireValue(binding.provider === providerId(role, loaded.scenario.providerFamily),
         `Human must configure ${binding.profileId} with ${providerId(role, loaded.scenario.providerFamily)} for ${id}; observed ${binding.provider}`);
       bindingCheck(binding);
       return [role, binding];
     }));
+    if (source === 'profiles-and-peer-pool') {
+      const pool = validateCatalog(config.settings.peerPool);
+      const eligible = pool.options.filter(option => option.enabled && option.availability === 'ready' && option.roles.includes('peer') && option.provider === loaded.scenario.providerFamily);
+      requireValue(eligible.length > 0, `Peer pool needs an eligible ${loaded.scenario.providerFamily} option for ${id}`);
+      verifyProvider(config.settings.providers, providerId('peer', loaded.scenario.providerFamily),
+        () => loaded.scenario.providerFamily, 'Peer pool provider');
+    }
     config = { ...config, settings: { ...config.settings, roles: bindings } };
   }
   const parent = join(loaded.directory, id);

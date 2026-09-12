@@ -26,6 +26,11 @@ const bindingSources = [
 ];
 
 export function resolveBinding(role, request, disposition) {
+  if (role === 'peer' && request.binding == null) {
+    // Profile inventory may accompany discovery, but never selects a Peer runtime.
+    if (!request.route?.optionId) throw new Error('Peer requires a project routing option; run onboarding and select route.optionId with catalogSha256');
+    return catalogBinding(request.repository, role, request.providers, { ...request.route, disposition });
+  }
   const source = bindingSources.find(candidate => candidate.selects(request));
   if (!source) throw new Error('Binding source required: saved profiles, catalog routing or an explicit binding');
   if (request.binding != null && source.name !== 'an explicit binding') {

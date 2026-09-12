@@ -18,13 +18,12 @@ Installer tích hợp vào Paseo hiện có; không tải hay thay phiên bản 
 ```
 
 Lệnh này cài Markdown và CLI vào `~/.local/share/paseo-slp`, bổ sung sáu
-provider `slp-codex-{supervisor,lead,peer}` và `slp-pi-{supervisor,lead,peer}`, cùng ba profile vào
-`$PASEO_HOME/config.json` (mặc định `~/.paseo`), bật MCP injection, rồi reload
-cấu hình Paseo. Không tạo agent trong lúc cài. Không sửa AGENTS.md hay cấu hình
-Codex toàn cục. Ba profile Supervisor/Lead/Peer có mặc định tại **Settings → host → Agents → Agent profiles**.
-Runtime settings lấy từ ba agent profile Human đã lưu. Repo giữ tactics trong
-`.paseo-slp/WORKSPACE_PROTOCOL.md`; catalog là nhánh tùy chọn cho thử nghiệm routing
-được chỉ định riêng, không thay thế profile khi delegation thông thường.
+provider `slp-codex-{supervisor,lead,peer}` và `slp-pi-{supervisor,lead,peer}`, cùng
+hai saved profile **SLP Supervisor** và **SLP Lead** vào `$PASEO_HOME/config.json`
+(mặc định `~/.paseo`), bật MCP injection rồi reload. Không tạo agent trong lúc cài.
+Ba role vẫn giữ nguyên; **Peer không cần saved profile**. Lead chọn runtime Peer
+từ pool theo project trong `.paseo-slp/slp-routing.json`. Repo giữ tactics trong
+`.paseo-slp/WORKSPACE_PROTOCOL.md`; onboarding hướng dẫn cấu hình cả hai file.
 
 Đổi nơi cài bằng `SLP_HOME=/absolute/path`; đổi host config bằng
 `PASEO_HOME=/absolute/home`. Chạy installer trên máy của daemon. Cài lại cùng
@@ -38,9 +37,11 @@ node bin/slp.mjs upgrade "$HOME/.local/share/paseo-slp.next" \
 ```
 
 Bỏ `--apply --reload` để xem trước. Các session cũ vẫn dùng provider process cũ;
-profile mới áp dụng cho launch sau. Nếu bản trước có bốn profile disposition do
-SLP tạo, upgrade giữ settings của chúng trong `paseo-binding.json` → `retiredProfiles`,
-rồi gỡ bốn profile.
+profile mới áp dụng cho launch sau. Upgrade lưu nguyên settings hiện tại của
+`slp-peer` và các profile disposition cũ do SLP sở hữu trong
+`paseo-binding.json` → `retiredProfiles`, rồi gỡ chúng khỏi profiles đang dùng.
+Hai profile Supervisor/Lead giữ nguyên lựa chọn; project pool không bị sửa hay
+tự động điền từ profile cũ.
 Catalog đã có và profile cá nhân không thuộc bản cài được giữ.
 Bản cũ được giữ để bạn quản
 lý sau khi các session phụ thuộc đã kết thúc; không dùng uninstall bản cũ để gỡ
@@ -65,12 +66,12 @@ objective và phạm vi quyền bình thường, ví dụ: “Sửa lỗi hiển
 Để đặt model và reasoning riêng cho từng role:
 
 1. Mở **Settings → host chạy công việc → Agents → Agent profiles**.
-2. Sửa **SLP Supervisor**, **SLP Lead** hoặc **SLP Peer**.
+2. Sửa **SLP Supervisor** hoặc **SLP Lead**.
 3. Chọn provider `slp-codex-{role}` hoặc `slp-pi-{role}` tương ứng, rồi chọn
    **Model**, **Thinking**, **Mode** nếu provider có và features rồi **Save**.
-4. Khi tạo session trực tiếp, chọn profile đã lưu trong model picker. Khi Lead tự
-   spawn Peer, Lead đọc mới profile `slp-peer` và truyền nguyên provider/model/settings
-   đã lưu vào `create_agent`; không kế thừa settings của Lead hay lấy từ catalog.
+4. Khi tạo session trực tiếp, chọn profile đã lưu trong model picker. Với Peer,
+   dùng onboarding để thiết lập pool trong repo; Lead tự chọn option phù hợp từ
+   pool rồi truyền đúng provider/model/settings đó vào `create_agent`.
 
 **Thinking** là reasoning effort; **Mode** là quyền/approval, hai thiết lập khác
 nhau. Chọn giá trị do provider/model thực tế cung cấp. Agent dùng `list_profiles`,
@@ -91,7 +92,7 @@ node "$HOME/.local/share/paseo-slp/bin/slp.mjs" init /absolute/job-repo --apply
 Lệnh chỉ tạo hai file cấu hình còn thiếu và giữ nguyên từng file đã có:
 
 - `.paseo-slp/WORKSPACE_PROTOCOL.md`: quy trình, mức rủi ro, proof gate, budget và quyền fallback.
-- `.paseo-slp/slp-routing.json`: catalog tùy chọn cho thử nghiệm routing; để rỗng khi dùng agent profiles.
+- `.paseo-slp/slp-routing.json`: pool runtime của Peer. Init để rỗng; onboarding cần điền option hợp lệ trước delegation.
 
 Skill onboarding được cài riêng để agent có thể auto-trigger. Từ repo muốn dùng,
 cài project-local (tạo `.agents/skills/paseo-slp-onboarding` và có thể commit cùng repo):
@@ -119,8 +120,8 @@ Xem [skill nguồn](skills/paseo-slp-onboarding/SKILL.md).
 
 Hai file tách riêng: protocol là hướng dẫn vận hành, JSON là dữ liệu có thể kiểm
 tra tự động và đổi thường xuyên. Cả hai thuộc repo và có thể version cùng code;
-không nhúng JSON vào Markdown. Lead đọc protocol và profile đã lưu, rồi truyền constraint liên quan vào
-assignment cho Peer; catalog chỉ đọc khi có assignment riêng cho nhánh đó. Worktree mới cần các file trong base candidate hoặc bản copy
+không nhúng JSON vào Markdown. Lead đọc protocol và pool trước mỗi Peer delegation, chọn option theo task/budget,
+rồi truyền constraint liên quan vào assignment. Worktree mới cần các file trong base candidate hoặc bản copy
 được cho phép; mỗi worktree đọc cấu hình của chính nó.
 
 Nếu đã có bảng global từ bản trước, import một lần vào repo muốn dùng:
@@ -135,7 +136,7 @@ với file nguồn. Sau đó Human chỉnh bản trong repo. Thiếu catalog kh�
 
 Protocol chọn topology và proof gate theo risk: task nhỏ có thể dùng một Engineer;
 việc nhạy về architecture/lifecycle có Architect, independent Reviewer hoặc nhiều
-lane. Một profile Peer nhận disposition qua assignment. Lead giữ integration và
+lane. Role Peer nhận disposition qua assignment, độc lập với option runtime. Lead giữ integration và
 technical acceptance; Supervisor giữ quan sát và relay quyết định của Human.
 
 Supervisor/Lead dùng event trước, heartbeat làm safety net khi task cần và có
@@ -145,15 +146,18 @@ kèm hướng dẫn tạo/xóa heartbeat của đúng session, ghi causal notebo
 constraint liên quan qua assignment. Đây là policy cho agent sử dụng primitive Paseo,
 không có detector hay monitoring daemon riêng trong package.
 
-**Nguồn runtime:** Human cấu hình ba agent profiles trong Paseo. Trước mỗi spawn,
-Supervisor/Lead đọc mới profile của role con, kiểm tra provider/model/settings qua
-discovery và ghi lại profile cùng launch arguments. Thiếu model hoặc settings không
-hợp lệ thì báo Human chỉnh profile; không tự chọn model thay thế.
+**Nguồn runtime:** Supervisor/Lead dùng hai saved profile Human cấu hình trong
+Paseo. Peer dùng pool `.paseo-slp/slp-routing.json` của repo. Mỗi option có provider
+`pi`/`codex`, model, settings, `suitableFor`, `avoidFor`, `notes`, `priority` và
+trạng thái `enabled`/`availability`. Lead chọn theo công việc, không gán cứng
+Engineer/Architect/Reviewer vào model. Hai Peer có thể khác provider/model/effort
+mà không thêm saved profile. Xem [catalog mẫu](examples/slp-routing.json); các model
+trong mẫu cần được discovery trước khi đánh dấu `ready`.
 
-Catalog `.paseo-slp/slp-routing.json` và lệnh `routes` vẫn có cho thử nghiệm catalog
-hoặc migration được Human chỉ định riêng. Nhánh này không phải đường delegation
-mặc định và không dùng để thay profile trong `basic-codex`/`basic-pi`. `init` tạo
-catalog rỗng để tương thích; việc dùng profile không yêu cầu điền catalog.
+Lead đọc pool mới, ghi lý do chọn và kiểm tra option/hash bằng `prepare` trước khi
+launch. Không có pool/option hợp lệ thì hoàn thiện onboarding; không fallback sang
+`slp-peer`, settings của Lead hay catalog global. `priority` là gợi ý lựa chọn,
+không thay thế đánh giá suitability và budget.
 
 **Đổi Lead sang Pi khi Codex hết quota:** đổi provider của **SLP Lead** thành
 `slp-pi-lead`, chọn model/thinking tương ứng và Save cho các launch sau. Để chuyển
@@ -171,12 +175,13 @@ tự động chọn provider dự phòng, ghi trước fallback và budget/autho
 chỉ lỗi quota không tự cấp quyền đổi provider. Đổi model/thinking trong cùng provider
 có thể dùng `update_agent`, tùy capability của provider.
 
-Đường offline tùy chọn: `prepare` nhận role, repository, workspaceId, assignment và
-inventory `profiles`/`providers` mới đọc từ Paseo. Nó lấy nguyên settings của profile
-role, trả `profileId` cùng `create` arguments; không cần catalog. Khi có `profiles`,
-lệnh từ chối `binding` và runtime/catalog overrides. Model Pi chứa `/` được giữ nguyên.
-Các request `binding` hoặc catalog không có `profiles` còn được hỗ trợ riêng cho
-thử nghiệm/handoff được Human cho phép; chúng không chứng minh launch theo profile.
+Đường offline tùy chọn: `prepare` nhận role, repository, workspaceId, assignment.
+Supervisor/Lead thêm inventory `profiles`/`providers`; Peer thêm `providers` và
+`route: {optionId, catalogSha256}` lấy từ `routes`. Có thể kèm profiles khi chuẩn bị
+Peer, nhưng chúng không thay thế pool. Option quyết định nguyên bundle và map sang
+`slp-pi-peer`/`slp-codex-peer`; model chứa `/` được giữ nguyên. `binding` tường minh
+không kèm profiles còn hỗ trợ cho thử nghiệm/handoff được Human cho phép, không
+phải fallback khi thiếu pool.
 `prepare-handoff <request.json>` thêm snapshot và handoff vào create_agent arguments;
 xem [ví dụ handoff](examples/provider-handoff.request.json). Hai lệnh chỉ chuẩn bị
 arguments; Supervisor/Lead dùng Paseo để thực sự tạo agent.
@@ -217,15 +222,12 @@ hỗ trợ fixture/evidence/verdict được mô tả trong [hướng dẫn E2E]
 Bộ hỗ trợ này chưa có live acceptance; việc thêm entrypoint không đổi các trạng thái
 E2E chưa được kiểm chứng ở trên.
 
-Để chạy `basic-codex` hoặc `basic-pi`, Human mở **Agent profiles**, đặt cả ba
-`slp-supervisor`, `slp-lead`, `slp-peer` sang provider `slp-codex-{role}` hoặc
-`slp-pi-{role}` tương ứng, rồi chọn model/effort/mode/features cho từng role và Save.
-Sau đó yêu cầu chạy scenario. Coordinator kiểm tra profiles trước khi tạo confirmer
-hay task actors; thiếu/sai cấu hình thì báo Human chỉnh, không tự sửa host.
-Session chuẩn bị fixture protocol và baseline; Supervisor/Lead đọc profile con
-khi delegation. U2 đối chiếu từng launch với profile đã lưu. Chạy cả hai family cần
-Human đổi profile giữa hai lượt hoặc host cô lập đã được Human cấu hình phù hợp.
-Các scenario ngoài phạm vi giữ NOT_RUN.
+Để chạy `basic-codex` hoặc `basic-pi`, cấu hình hai profile Supervisor/Lead và
+pool Peer của fixture theo family tương ứng. Coordinator chuẩn bị fixture/protocol,
+pool và baseline; Supervisor tạo Lead theo saved profile, Lead tự chọn Peer option.
+Không có confirmer trước launch cho basic. U2 đối chiếu profiles cho Supervisor/Lead
+và option/hash cho Peer. `mixed-peer` kiểm tra pool có cả Codex/Pi, không cần thêm
+saved profile hay ép family của Lead theo mỗi Peer. Các scenario ngoài scope giữ NOT_RUN.
 
 Đường offline vẫn có: `install <dir> --apply` không có `--paseo-home` chỉ stage
 package; `prepare <request.json>` xuất create_agent arguments có role envelope.

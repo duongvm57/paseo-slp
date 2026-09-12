@@ -52,7 +52,7 @@ Targets refer to the linked materials above and their named sections.
 | G07 · §3.1 | I | Paseo owns lifecycle/workspace/parentage/follow-up/timeline; no Peer orchestration. | Covered as policy | Policy covered: Common, Peer, Delegation. Native-subagent disabling/tool filtering is not implemented; see H06. |
 | G08 · §3.2 | I/C | Independent sessions, neutral briefs and sealed boundaries when needed. | Partial | Policy covered: Delegation step 3; Orchestration → Independent design and council; Peer read-only/sealed handback. |
 | G09 · §3.3 | I/C | One writer per moving scope, real isolation, explicit transfer and frozen review. | Restricted to one writer total | Policy covered: Common; Orchestration → Ownership, isolation and integration. Host worktree creation is conditional. |
-| G10 · §3.4, §6.3 | I/T | Discover providers/models; route by risk/budget; no stale model ID prescriptions. | Partial | Policy and implementation covered: `.paseo-slp/WORKSPACE_PROTOCOL.md` specifies repo criteria/budget; adjacent `slp-routing.json` describes options/quota for that repo. Lead selects each runtime bundle independently of disposition, with fresh hash/eligibility checks in prepare and live discovery in Delegation. No host/global fallback; only three managed profiles. |
+| G10 · §3.4, §6.3 | I/T | Discover providers/models; route by risk/budget; no stale model ID prescriptions. | Partial | Policy and implementation covered: `.paseo-slp/WORKSPACE_PROTOCOL.md` specifies repo criteria/budget; adjacent `slp-routing.json` describes options/quota for that repo. Lead selects each runtime bundle independently of disposition, with fresh hash/eligibility checks in prepare and live discovery in Delegation. No host/global fallback; two managed profiles and a project Peer pool. |
 | G11 · §3.5 | I | Exact artifact, identity, real checks, independent review when required, correct acceptance owner. | Partial: no independent lane | Policy covered: Lead; Orchestration → Proof and acceptance; Peer review disposition. |
 | G12 · §3.6, §5.1 | I/T | Explicit edit/commit/push/deploy, scope, important architecture, cost and acceptance boundaries. | Partial | Policy covered: Common, Supervisor, Protocol → Decision boundaries; assignment supplies actual grants. |
 | G13 · §4 | I | Profile = invariant; protocol = repo tactic; prompt = bounded assignment. | Mixed: global bounded topology | Policy covered: Common; role restrictions removed; tactics located in Protocol; Delegation step 2 carries task fields. |
@@ -142,7 +142,7 @@ observations, not proof that a future role session has identical tools or permis
 | H07 | create_schedule creates new agents with a different argument surface from create_agent. | Separate recurring-work assignment and discovery required; schedule role/settings/parentage path unqualified, no automatic adapter added. |
 | H08 | send_agent_prompt exposes async/background notifications; ancestor/report routing permissions not exercised. | Agree material-report recipient and verify available routing; use timeline/wake fallback within authority, otherwise report observation gap. |
 | H09 | No package-owned durable notebook database; installed files are integrity-bound policy. | Authorized repo notebook or retrievable indexed timeline; missing durable access reported. Never write operational notes into installation. |
-| H10 | Risk: fixed disposition routes, stale model/quota preferences, or fallback losing policy/parentage. | Three saved Human-configured role profiles supply ordinary launch settings; profile-based prepare rejects runtime/catalog overrides. Separate explicit catalog experiments retain hash/eligibility checks; role-matched Codex/Pi transports and handoff preserve policy/evidence. Actual model/effort/quota discovery and the interval between prepare and create_agent remain host/procedure responsibilities, not an atomic runtime gate. |
+| H10 | Risk: fixed disposition routes, stale model/quota preferences, or fallback losing policy/parentage. | Supervisor/Lead saved profiles supply their launch settings; Peer uses project pool options by default with hash/eligibility checks and no profile fallback; role-matched Codex/Pi transports and handoff preserve policy/evidence. Actual model/effort/quota discovery and the interval between prepare and create_agent remain host/procedure responsibilities, not an atomic runtime gate. |
 
 Follow-up clarification (2026-09-09): the earlier 44/48 ≈ 92% figure counted textual
 groups equally and overstated routing readiness. G10 now distinguishes implemented
@@ -185,7 +185,7 @@ coverage. Independent live acceptance remains outside this textual trace.
 
 Routing follow-up: the fifth reference is reached on every delegation. Local routing
 checks cover independent choices for the same disposition, quota edits/stale hashes,
-role/settings validation, mutable catalog preservation and migration to three profiles.
+role/settings validation, mutable catalog preservation and migration to two profiles with retired Peer preferences archived.
 These checks establish selector/installer behavior, not Lead judgment or E2E compliance.
 
 Repo-scope follow-up: routes takes an explicit repo root and prepare uses request.repository.
