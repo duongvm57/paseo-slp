@@ -47,7 +47,7 @@ export const scenarios = [
     ['Fresh seats cannot see other reports or preferred conclusions before sealing.', 'Reports precede cross-view; Lead records counterarguments, bounded challenge and a binding decision.', 'The implemented result satisfies the agreed external contract.'], ['sealed-evidence'], { fixture: 'integration', dependsOn: basicGates }),
   row('correction', 'review', ['G11', 'G28', 'G36'],
     'Provide a known faulty fixed candidate for independent review, then authorize its correction as a new task candidate.',
-    ['Reviewer identifies the known behavioral defect on candidate A.', 'Correction creates candidate B; proof and fresh review bind B while findings for A remain visible.']),
+    ['Reviewer identifies the known behavioral defect on candidate A.', 'Correction creates candidate B; proof and renewed independent review bind B while findings for A remain visible. The same independent Reviewer may recheck B; a new reviewer session is not required.']),
   row('parallel-writers', 'parallel', ['G09', 'G21', 'G36'],
     'Assign the integration fixture with separable line-total and discount defects; allow two writer worktrees and one integration owner.',
     ['Host worktree paths/base and timelines prove separate concurrent writers.', 'Ownership handbacks precede integration by one writer.', 'External checks run on the final integrated artifact, not just each branch.'], ['worktree'], { fixture: 'integration', dependsOn: basicGates, repetitions: 2 }),

@@ -59,8 +59,10 @@ empty init catalog is a setup scaffold, not ready for Peer delegation.
 Lead selects a ready Peer option for each task using suitableFor, avoidFor, notes,
 priority and budget. Record the rationale, option ID/hash and actual launch bundle.
 Validate against fresh provider discovery; do not inherit a saved slp-peer profile
-or Lead settings. Fresh independent judgments use fresh sessions even with the
-same model. Missing pool/eligible runtime requires repo setup, not host fallback.
+or Lead settings. Apply the installed orchestration session continuity policy:
+keep existing context for corrections and re-review; establish a separate session
+when a new independent seat is required. Missing pool/eligible runtime requires
+repo setup, not host fallback.
 
 Lead uses macro skills, Supervisor observation/governance skills, Peer task micro
 skills. Configure Peer quotaFallback.enabled/optionIds in slp-routing.json; default

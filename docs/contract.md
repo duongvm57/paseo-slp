@@ -76,7 +76,13 @@ directory. The recursive install unit includes all those references; the full
 operating guide stays a source document, not a prompt broadcast to every role.
 Protocol defaults select tactics; global roles no longer impose a single Engineer
 or prohibit heartbeat for every assignment. Assignment supplies Peer disposition,
-read/write authority and output; independent review uses fresh sessions and exact candidates.
+read/write authority and output; independent review uses sessions separate from
+implementation and exact candidates. Within one assignment, Lead normally reuses
+the Engineer for corrections and the independent Reviewer for re-review on the new
+stable candidate. New independent seats and recovery remain explicit choices.
+Lead builds relevant project context from repository evidence and maintains a
+decision/ownership checkpoint across handbacks and resume; Peers receive only
+the context needed for their bounded assignments.
 
 The policy describes monitoring, council, recovery and parallel ownership, but these
 paths are not E2E-qualified by this revision. Heartbeat uses discovered host wake

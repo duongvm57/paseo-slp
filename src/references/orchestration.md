@@ -1,13 +1,25 @@
 # Topology, independent judgment and handback
 
-Lead reads this procedure before topology selection, independent review, design
-reconciliation or dependency splitting. Repository thresholds and routing belong
+Lead reads this procedure for project framing, session continuity, topology,
+independent review, design reconciliation or dependency splitting. Repository thresholds and routing belong
 to .paseo-slp/WORKSPACE_PROTOCOL.md; these branches describe how to execute a selected method.
 All creation uses the installed delegation procedure and current task authority.
 
 ## Frame and select
 
 Establish outcome, ownership, exclusions, evidence standard and open decisions.
+Build project context from the assignment and relevant repository evidence:
+product objective, current behavior, architecture and module boundaries, recorded
+decisions, dependencies, existing work and authority. Read the relevant docs/code
+before delegating; distinguish verified facts from assumptions and unresolved
+questions. An unclear boundary blocks only the work that depends on that decision.
+Keep a concise project checkpoint in the task's permitted notes or session:
+decisions and rationale, evidence paths, candidate, owner/agent IDs, dependencies,
+open findings and next actions. Update it at material decisions and handbacks;
+after resume/compaction reconcile it with current repository and actor state.
+Pass each Peer the relevant objective, contracts and constraints, plus evidence
+references; retain project-wide integration context in Lead. Context gathering
+does not authorize implementation, broaden scope or require reading the whole repo.
 For foundation work in an unfamiliar domain, expose missing domain framing and
 owner boundaries before committing to a representation. Human may use an advisory
 session to clarify them. Keep file/API plans provisional as vertical slices reveal
@@ -23,11 +35,30 @@ Use the smallest topology that supplies the required independent judgment:
 | Multiple plausible foundations or costly lock-in | Independent design lenses or sealed council; Lead reconciles material propositions before implementation. |
 | Large dependency branch | Bounded Peer/lane or dependency Lead, with scope and handback separate from the main objective. |
 
-Engineer, Architect, Reviewer and Scout use the same Peer profile. Assign each a
+Engineer, Architect, Reviewer and Scout use the same Peer role. Assign each a
 self-contained question and disposition-specific output (defined in Peer policy).
 Read-only reports stay in the session unless a separate report write scope is
 granted. A protocol can make review gates stricter; inability to supply a required
 gate is BLOCKED, not permission to skip it.
+
+## Session continuity
+
+Within an ongoing assignment, reuse a suitable existing Peer to preserve its
+context. Send authorized corrections to the same Engineer. Ask the same independent
+Reviewer to recheck the new stable candidate and affected findings; reviewing an
+earlier version does not make that Reviewer its implementer. Supply the new
+candidate identity, changes and prior findings, and require current evidence for
+closure and regression assessment. Prior approval never transfers automatically.
+
+Before reuse, verify the Peer ID, owned scope, availability, authority and current
+runtime against the project routing policy. Resume through Paseo follow-up; reuse
+does not authorize a model switch or bypass quota fallback/ownership settlement.
+Record why a new session is needed: a new independent lens or sealed seat,
+implementation involvement that invalidates review independence, a distinct scope
+needing separate ownership, or an authorized recovery. Scope changes require an
+explicit assignment; they do not automatically require discarding useful context.
+An Engineer cannot become the independent Reviewer of its own changes. Lead owns
+the reuse/new-session choice within protocol, budget and Human constraints.
 
 ## Independent design and council
 
@@ -95,8 +126,7 @@ Submodules require a separately agreed identity method; the helper cannot cover 
 Keep candidate writers paused during review and verification. A before/after identity
 change invalidates that acceptance attempt. Reviewers report severity, evidence,
 checks and APPROVE/FINDINGS; Engineer supplies proof; Lead issues the project verdict.
-Corrections normally return to the same Engineer session, followed by a new stable
-candidate and review of affected findings. Keep unresolved findings visible.
+Follow Session continuity for corrections and re-review. Keep unresolved findings visible.
 
 Evidence must address real failure mechanisms and the Human outcome. Use integration,
 migration, cancellation, performance or Human product/visual/playtest evidence as

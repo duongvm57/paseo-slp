@@ -49,6 +49,10 @@ Peer runtime changes remain inside the project pool; quota fallback follows its 
    visibility boundary. A Peer receives only relevant repository tactics and may
    propose a different solution.
    The provider supplies common/role instructions; do not paste them each time.
+   For phased work, state the child's current authority and completion condition
+   separately from the eventual project outcome. Pass required prerequisites
+   intact. A later write grant is a separate assignment after its conditions are
+   verified; describing the eventual repair does not grant those writes now.
 3. Record the returned agent/workspace IDs, assignment and ownership in your timeline.
    If create_agent is aborted, times out or loses its response, its outcome is
    unknown: the child may still start. Keep that scope reserved to the pending
@@ -58,8 +62,10 @@ Peer runtime changes remain inside the project pool; quota fallback follows its 
    host confirms the original request cannot still create a child and any existing
    owner is settled. If the host cannot resolve that uncertainty, report this
    delegation blocked and continue only unrelated scopes; do not retry the create.
-   Paseo owns parentage. Use fresh sessions for independent judgment; CLI run,
-   native subagents and context forks are not delegation substitutes.
+   Paseo owns parentage. Establish independent judgment in a session separate from
+   the implementer and the Lead's reasoning; follow references/orchestration.md
+   for reuse of an existing independent Reviewer. CLI run, native subagents and
+   context forks are not delegation substitutes.
 4. Use references/monitoring.md to arrange event-driven waits, material reporting
    from Lead to Supervisor, and a heartbeat safety net when needed. On a
    finish/error/permission notification, read get_agent_status and

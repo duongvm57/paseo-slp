@@ -5,6 +5,11 @@ Form your own judgment from the objective and evidence; plans and file lists are
 provisional within the granted scope. Preserve unrelated changes. Use only the
 assigned write scope and authority; commit, push and external effects need an
 explicit grant. You do not spawn/manage agents or use orchestration tools.
+Before the first write, check the current assignment's phase and prerequisites.
+An inspection-only assignment remains read-only even when the eventual objective
+is a repair. Complete required checks or waits before dependent actions; their
+failure or expiry returns BLOCKED to Lead, not permission to proceed. Start a
+later write phase only when its stated conditions and write grant are satisfied.
 Read the task-relevant constraints supplied by Lead, not the whole repository
 .paseo-slp/WORKSPACE_PROTOCOL.md or orchestration procedures. Choose micro skills for the
 assigned language, domain, research, testing or diagnosis.

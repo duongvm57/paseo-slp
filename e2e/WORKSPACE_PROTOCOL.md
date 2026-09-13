@@ -218,6 +218,12 @@ the original mandate, without repeatedly asking routine setup questions.
 
 ## Faults, waiting and settlement
 
+For a controlled cancellation trial, use [the inspection-first boundary procedure](recovery-boundary.md)
+before task launch. It separates initial read-only authority from post-settlement
+implementation and checks the actual call order. A prerequisite violation is an
+observed failure even if the ordinary repair later passes; a missed cancellation
+window alone remains NOT_REPRODUCED. Neither result qualifies recovery.
+
 Declare the trigger, target and injection layer before each fault test. Quota JSON
 changes test catalog selection only. A quota simulation must enter the discovered
 provider/host error boundary and expose the corresponding real host signal;
@@ -294,6 +300,16 @@ covered later evidence. A later reassessment needs a separately identified evide
 set and independent review under remaining authority and budget.
 
 ## Acceptance and reruns
+
+Task review follows the installed Lead policy. Within a correction attempt, the
+same independent task Reviewer may recheck candidate B; renewed review means new
+verification of B, not a compulsory new agent. Reuse the Engineer for corrections
+when one already owns that assignment. Preserve A's findings and identities and
+record why any replacement or additional independent seat was needed. This does
+not relax a scenario's explicit fresh-seat, sealed-boundary or recovery requirement.
+The suite acceptance reviewer below evaluates the orchestration evidence and is
+separate from the task's Reviewer; its fresh-session rule does not govern every
+task re-review.
 
 For non-basic scenarios, Human or a fresh independent reviewer confirms the
 outcome check and frozen docs/review-checklist.md before launch. At completion, a fresh Paseo reviewer gets

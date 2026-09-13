@@ -6,8 +6,12 @@ description: Run or resume Paseo SLP live E2E dogfood from one coordinating sess
 # Run Paseo SLP E2E
 
 The Human can say “run E2E package”. Own the whole run from this
-conversation through a consolidated report. Use fresh Paseo children for scenario
-actors and independent reviewers. One user-facing session does not mean one actor.
+conversation through a consolidated report. Start each new scenario attempt with
+fresh Paseo task actors so prior-run coaching does not carry over. Within that
+attempt, let Lead reuse Peers under the installed session continuity policy;
+correction and re-review do not require new actors merely because the candidate
+changed. Explicit scenario requirements for independent seats, replacement or
+transport resume still apply. One user-facing session does not mean one actor.
 
 Locate the paseo-slp source checkout from the assignment/current workspace. Read
 its AGENTS.md, docs/contract.md, docs/review-checklist.md and
