@@ -146,6 +146,20 @@ test('stock Pi offline preparation accepts catalog model IDs and no mode', t => 
   assert.equal(plan.create.settings.modeId, undefined);
 });
 
+test('every binding source rejects non-object features before create.settings', t => {
+  const { installed } = fixture(t); install(root, installed);
+  const base = { ...request, profiles: undefined, role: 'lead' };
+  const handoff = { previousAgentId: 'old-lead', reason: 'quota', authority: 'Human requests replacement', state: 'paused on snapshot',
+    previousOwner: { settled: true, evidence: 'cancel receipt' }, resources: [] };
+  for (const features of [[], 'fast_mode', true, 42]) {
+    const binding = { provider: 'pi', model: 'opencode/glm-5.3-flash', features };
+    assert.throws(() => launchPlan(installed, { ...base, binding }), /Invalid features/);
+    assert.throws(() => handoffPlan(installed, { ...base, binding, handoff }), /Invalid features/);
+  }
+  const plan = launchPlan(installed, { ...base, binding: { provider: 'pi', model: 'opencode/glm-5.3-flash', features: { fast_mode: true } } });
+  assert.deepEqual(plan.create.settings.features, { fast_mode: true });
+});
+
 test('installer registers both role transports and preserves user provider switches and model edits', t => {
   const { dir, installed } = fixture(t), home = join(dir, 'home'); mkdirSync(home);
   installPaseo(root, installed, home, true);

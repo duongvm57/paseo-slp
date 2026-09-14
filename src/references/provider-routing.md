@@ -10,7 +10,9 @@ Read the repository protocol for authority/tactics/budget. Refresh list_profiles
 and select slp-supervisor or slp-lead. Verify the matching installed role provider,
 exact model and optional mode/thinking/features with live provider discovery.
 Copy the complete saved bundle. Missing settings require Human configuration;
-never silently replace these choices with catalog options. Changes affect future
+never silently replace these choices with catalog options. A pool option can
+still serve Supervisor/Lead when the Human tags that role in option.roles —
+that is a declared choice, not an agent substitution. Changes affect future
 launches, not existing sessions.
 
 ## Peer pool (default)

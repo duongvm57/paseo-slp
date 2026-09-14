@@ -34,4 +34,6 @@ export function bindingCheck(binding) {
   if (binding.modeId != null && (typeof binding.modeId !== 'string' || !settingIdPattern.test(binding.modeId))) throw new Error('Invalid mode');
   if (typeof binding.model !== 'string' || !binding.model || unsafeModelPattern.test(binding.model)) throw new Error('Explicit model required');
   if (binding.thinkingOptionId != null && (typeof binding.thinkingOptionId !== 'string' || !settingIdPattern.test(binding.thinkingOptionId))) throw new Error('Invalid thinking option');
+  // create_agent declares features an object; an absent value becomes {} at launch.
+  if (binding.features != null && (typeof binding.features !== 'object' || Array.isArray(binding.features))) throw new Error('Invalid features');
 }
