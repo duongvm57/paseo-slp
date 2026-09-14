@@ -41,6 +41,48 @@
       "suitableFor": ["architect", "review", "alternative-design"],
       "avoidFor": [],
       "notes": "Requested Pi option for another design/review perspective. Human evaluates suitability for difficult code before using it as a coding fallback. Quota and credentials belong to this Pi model endpoint."
+    },
+    {
+      "id": "swe2-medium",
+      "provider": "devin",
+      "roles": ["peer"],
+      "model": "swe-2-medium",
+      "modeId": "bypass",
+      "features": { "auto_accept": true },
+      "enabled": true,
+      "availability": "unknown",
+      "priority": 20,
+      "suitableFor": ["coding", "engineer", "bounded-fix"],
+      "avoidFor": ["unresolved-architecture"],
+      "notes": "Devin swe-2 medium tier for clear, well-scoped tasks with a known implementation path. Mirrors the Human's Devin SWE-2 Medium profile; devin options accept swe-2 models only."
+    },
+    {
+      "id": "swe2-high",
+      "provider": "devin",
+      "roles": ["peer"],
+      "model": "swe-2-high",
+      "modeId": "bypass",
+      "features": { "auto_accept": true },
+      "enabled": true,
+      "availability": "unknown",
+      "priority": 15,
+      "suitableFor": ["exploration", "root-cause", "approach-selection", "review"],
+      "avoidFor": ["routine-inventory"],
+      "notes": "Devin swe-2 high tier for codebase exploration, root-cause analysis and choosing between approaches. Mirrors the Human's Devin SWE-2 High profile."
+    },
+    {
+      "id": "swe2-max",
+      "provider": "devin",
+      "roles": ["peer"],
+      "model": "swe-2-max",
+      "modeId": "bypass",
+      "features": { "auto_accept": true },
+      "enabled": true,
+      "availability": "unknown",
+      "priority": 10,
+      "suitableFor": ["ambiguous", "critical", "deep-investigation", "verification"],
+      "avoidFor": ["routine-inventory", "bounded-fix"],
+      "notes": "Devin swe-2 max tier for ambiguous or critical tasks with large blast radius or failed prior attempts. Mirrors the Human's Devin SWE-2 Max profile; reserve for work that justifies the strongest tier."
     }
   ]
 }

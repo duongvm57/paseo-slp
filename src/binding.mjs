@@ -7,6 +7,16 @@ export const settingIdPattern = /^[a-zA-Z0-9._-]+$/;
 export const unsafeModelPattern = /[\s\x00-\x1f\x7f]/;
 export const dispositionPattern = /^[a-z][a-z0-9-]*$/i;
 
+// Paseo resolves an installed wrapper through its `extends` base adapter.
+// Devin itself is a derived ACP provider (`extends: acp`), so slp-devin-*
+// wrappers must extend the acp adapter; codex/pi extend their own builtins.
+export const providerTransports = { codex: 'codex', pi: 'pi', devin: 'acp' };
+export const transportOf = family => providerTransports[family] ?? family;
+
+// Devin bindings run swe-2 models only (host policy for this provider family).
+export const devinProviderPattern = /^(devin|slp-devin-[a-z-]+)$/;
+export const swe2ModelPattern = /^swe-2($|-)/;
+
 // Route keys a caller may never use to override a chosen runtime bundle.
 export const runtimeSettingKeys = ['provider', 'model', 'modeId', 'thinkingOptionId', 'features'];
 // Keys that only mean something on the catalog path...
@@ -25,7 +35,7 @@ export function verifyProvider(inventory, id, familyFor, label = id) {
   const observed = inventory?.find(item => item.id === id);
   if (!observed || observed.enabled === false || observed.status === 'unavailable') throw new Error(`Unverified provider ${label}`);
   const family = familyFor(observed.id);
-  if (observed.extends != null && observed.extends !== family) throw new Error(`Unverified provider family ${label}`);
+  if (observed.extends != null && observed.extends !== transportOf(family)) throw new Error(`Unverified provider family ${label}`);
   return { observed, family };
 }
 
@@ -33,6 +43,7 @@ export function bindingCheck(binding) {
   if (!binding || typeof binding.provider !== 'string' || !settingIdPattern.test(binding.provider)) throw new Error('Provider required');
   if (binding.modeId != null && (typeof binding.modeId !== 'string' || !settingIdPattern.test(binding.modeId))) throw new Error('Invalid mode');
   if (typeof binding.model !== 'string' || !binding.model || unsafeModelPattern.test(binding.model)) throw new Error('Explicit model required');
+  if (devinProviderPattern.test(binding.provider) && !swe2ModelPattern.test(binding.model)) throw new Error('Devin bindings require a swe-2 model');
   if (binding.thinkingOptionId != null && (typeof binding.thinkingOptionId !== 'string' || !settingIdPattern.test(binding.thinkingOptionId))) throw new Error('Invalid thinking option');
   // create_agent declares features an object; an absent value becomes {} at launch.
   if (binding.features != null && (typeof binding.features !== 'object' || Array.isArray(binding.features))) throw new Error('Invalid features');

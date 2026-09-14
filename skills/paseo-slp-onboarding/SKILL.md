@@ -23,7 +23,7 @@ saved Supervisor/Lead profiles use matching installed role providers and selecte
 models. Ask Human to configure missing/incompatible fields in Paseo Agent profiles;
 report exact IDs/mismatches. Do not create or require slp-peer.
 
-For the Peer pool, discover slp-pi-peer/slp-codex-peer and their exact models,
+For the Peer pool, discover slp-pi-peer/slp-codex-peer/slp-devin-peer and their exact models,
 thinking/mode/features. Resolve allowed options, task suitability, budget and quota
 fallback from Human instructions and existing project configuration. Within granted
 setup authority, populate those choices; otherwise present discovered options and
@@ -41,7 +41,8 @@ allowed operations, escalation and settlement. Keep role bytes out of the protoc
 
 Populate the project catalog before Peer delegation. Every option has:
 
-- id: unique lowercase identifier; provider: pi or codex; exact discovered model.
+- id: unique lowercase identifier; provider: pi, codex or devin; exact discovered
+  model. Devin options accept swe-2 models only.
 - roles: ["peer"]; enabled: boolean; availability: ready, paused, quota-exhausted
   or unknown. Only enabled/ready options may launch.
 - Optional thinkingOptionId, modeId and features, verified for that runtime.

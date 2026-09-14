@@ -26,7 +26,7 @@ const profiles = [
   { id: 'slp-lead', provider: 'slp-codex-lead', model: 'gpt-5.6-luna', modeId: 'full-access', thinkingOptionId: 'high', featureValues: { fast_mode: true } },
 ];
 // list_providers returns availability but need not return the extends field.
-const providers = ['slp-codex-peer', 'slp-pi-peer', 'slp-codex-lead', 'slp-pi-lead', 'pi'].map(id => ({ id, enabled: true, status: 'available' }));
+const providers = ['slp-codex-peer', 'slp-pi-peer', 'slp-devin-peer', 'slp-codex-lead', 'slp-pi-lead', 'slp-devin-lead', 'pi', 'devin'].map(id => ({ id, enabled: true, status: 'available' }));
 const request = { role: 'peer', repository: root, workspaceId: 'workspace', assignment: 'Inspect cancellation ownership; no code writes.', profiles, providers };
 function catalogFixture(dir) {
   mkdirSync(join(dir, '.paseo-slp'), { recursive: true });
@@ -160,15 +160,41 @@ test('every binding source rejects non-object features before create.settings', 
   assert.deepEqual(plan.create.settings.features, { fast_mode: true });
 });
 
+test('devin bindings accept swe-2 models only and map catalog options to the acp wrapper', t => {
+  const { dir, installed } = fixture(t); install(root, installed);
+  const { path, catalog, route } = catalogFixture(dir);
+  const lead = { ...request, profiles: undefined, repository: dir, role: 'lead' };
+  for (const provider of ['devin', 'slp-devin-lead']) {
+    assert.throws(() => launchPlan(installed, { ...lead, binding: { provider, model: 'gpt-5.6-luna' } }), /swe-2/);
+    const plan = launchPlan(installed, { ...lead, binding: { provider, model: 'swe-2-high', modeId: 'bypass', features: { auto_accept: true } } });
+    assert.equal(plan.create.provider, `${provider}/swe-2-high`);
+    assert.deepEqual(plan.create.settings, { modeId: 'bypass', features: { auto_accept: true } });
+  }
+  // Stock devin carries the role policy in the prompt; the wrapper injects it.
+  assert.ok(launchPlan(installed, { ...lead, binding: { provider: 'devin', model: 'swe-2-high' } })
+    .create.initialPrompt.includes(readFileSync(join(installed, 'src/roles/lead.md'), 'utf8')));
+  assert.ok(!launchPlan(installed, { ...lead, binding: { provider: 'slp-devin-lead', model: 'swe-2-high' } })
+    .create.initialPrompt.includes(readFileSync(join(installed, 'src/roles/lead.md'), 'utf8')));
+  const peer = launchPlan(installed, { ...request, repository: dir, profiles: undefined, providers, route: route('swe2-medium') });
+  assert.equal(peer.create.provider, 'slp-devin-peer/swe-2-medium');
+  assert.deepEqual(peer.create.settings, { modeId: 'bypass', features: { auto_accept: true } });
+  catalog.options.find(option => option.id === 'swe2-medium').model = 'claude-opus-5-max';
+  writeFileSync(path, json(catalog));
+  assert.throws(() => readCatalog(dir), /swe-2/);
+});
+
 test('installer registers both role transports and preserves user provider switches and model edits', t => {
   const { dir, installed } = fixture(t), home = join(dir, 'home'); mkdirSync(home);
   installPaseo(root, installed, home, true);
   const path = join(home, 'config.json');
   const config = readJson(path);
-  assert.equal(Object.keys(config.agents.providers).length, 6);
+  assert.equal(Object.keys(config.agents.providers).length, 9);
   assert.equal(config.daemon.agentProfiles.length, 2);
   assert.equal(config.agents.providers['slp-pi-peer'].extends, 'pi');
   assert.equal(config.agents.providers['slp-pi-lead'].command[1], join(installed, 'bin/pi-role.mjs'));
+  // Devin has no builtin client factory; its wrappers derive from the acp adapter.
+  assert.equal(config.agents.providers['slp-devin-peer'].extends, 'acp');
+  assert.equal(config.agents.providers['slp-devin-peer'].command[1], join(installed, 'bin/devin-role.mjs'));
   Object.assign(config.daemon.agentProfiles.find(p => p.id === 'slp-lead'), { provider: 'slp-pi-lead', model: 'b-ai/glm-5.3-flash', thinkingOptionId: 'medium' });
   writeFileSync(path, json(config));
   const bytes = readFileSync(path, 'utf8');
@@ -194,6 +220,34 @@ test('Pi wrapper appends role while preserving RPC bytes, resume, model, thinkin
   }
   assert.deepEqual(piRoleArgs(['--version'], 'policy'), ['--version']);
   assert.deepEqual(piRoleArgs(['--', '--version'], 'policy'), ['--append-system-prompt', 'policy', '--', '--version']);
+});
+
+test('Devin wrapper prepends role policy to the first session prompt of each session', t => {
+  const { dir, installed } = fixture(t); install(root, installed);
+  const fake = join(dir, 'fake-devin');
+  writeFileSync(fake, `#!${process.execPath}\nimport fs from 'node:fs'; fs.writeFileSync(process.env.SLP_TEST_RECEIPT, JSON.stringify(process.argv.slice(2))); process.stdin.pipe(process.stdout);\n`);
+  chmodSync(fake, 0o755);
+  const prompt = (id, sessionId, text) => JSON.stringify({ jsonrpc: '2.0', id, method: 'session/prompt', params: { sessionId, prompt: [{ type: 'text', text }] } });
+  const input = [
+    JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'session/new', params: { cwd: '/repo' } }),
+    prompt(1, 's1', 'first task'),
+    prompt(2, 's1', 'follow up'),
+    prompt(3, 's2', 'other session'),
+    JSON.stringify({ jsonrpc: '2.0', id: 4, method: 'session/load', params: { sessionId: 's1' } }),
+    prompt(5, 's1', 'after reload'),
+  ].join('\n') + '\n';
+  const output = execFileSync(process.execPath, [join(installed, 'bin/devin-role.mjs'), 'peer'], { env: { ...process.env, SLP_DEVIN_BIN: fake, SLP_TEST_RECEIPT: join(dir, 'argv.json') }, input, encoding: 'utf8', timeout: 5000 });
+  assert.deepEqual(readJson(join(dir, 'argv.json')), ['acp']);
+  const lines = output.trim().split('\n').map(line => JSON.parse(line));
+  const instruction = roleInstructions(installed, 'peer');
+  const blocks = id => lines.find(m => m.id === id).params.prompt;
+  assert.equal(blocks(1)[0].type, 'text');
+  assert.equal(blocks(1)[0].text, instruction);
+  assert.equal(blocks(1)[1].text, 'first task');
+  assert.equal(blocks(2).length, 1);
+  assert.equal(blocks(3)[0].text, instruction);
+  assert.equal(lines.find(m => m.id === 4).method, 'session/load');
+  assert.equal(blocks(5)[0].text, instruction);
 });
 
 test('quota handoff preserves evidence and old parentage, emits only new-session arguments', t => {

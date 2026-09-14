@@ -17,8 +17,9 @@ Installer tích hợp vào Paseo hiện có; không tải hay thay phiên bản 
 # hoặc: npm run install:slp
 ```
 
-Lệnh này cài Markdown và CLI vào `~/.local/share/paseo-slp`, bổ sung sáu
-provider `slp-codex-{supervisor,lead,peer}` và `slp-pi-{supervisor,lead,peer}`, cùng
+Lệnh này cài Markdown và CLI vào `~/.local/share/paseo-slp`, bổ sung chín
+provider `slp-codex-{supervisor,lead,peer}`, `slp-pi-{supervisor,lead,peer}` và
+`slp-devin-{supervisor,lead,peer}`, cùng
 hai saved profile **SLP Supervisor** và **SLP Lead** vào `$PASEO_HOME/config.json`
 (mặc định `~/.paseo`), bật MCP injection rồi reload. Không tạo agent trong lúc cài.
 Ba role vẫn giữ nguyên; **Peer không cần saved profile**. Lead chọn runtime Peer
@@ -67,7 +68,7 @@ objective và phạm vi quyền bình thường, ví dụ: “Sửa lỗi hiển
 
 1. Mở **Settings → host chạy công việc → Agents → Agent profiles**.
 2. Sửa **SLP Supervisor** hoặc **SLP Lead**.
-3. Chọn provider `slp-codex-{role}` hoặc `slp-pi-{role}` tương ứng, rồi chọn
+3. Chọn provider `slp-codex-{role}`, `slp-pi-{role}` hoặc `slp-devin-{role}` tương ứng, rồi chọn
    **Model**, **Thinking**, **Mode** nếu provider có và features rồi **Save**.
 4. Khi tạo session trực tiếp, chọn profile đã lưu trong model picker. Với Peer,
    dùng onboarding để thiết lập pool trong repo; Lead tự chọn option phù hợp từ
@@ -148,7 +149,7 @@ không có detector hay monitoring daemon riêng trong package.
 
 **Nguồn runtime:** Supervisor/Lead dùng hai saved profile Human cấu hình trong
 Paseo. Peer dùng pool `.paseo-slp/slp-routing.json` của repo. Mỗi option có provider
-`pi`/`codex`, model, settings, `suitableFor`, `avoidFor`, `notes`, `priority` và
+`pi`/`codex`/`devin`, model, settings, `suitableFor`, `avoidFor`, `notes`, `priority` và
 trạng thái `enabled`/`availability`. Lead chọn theo công việc, không gán cứng
 Engineer/Architect/Reviewer vào model. Hai Peer có thể khác provider/model/effort
 mà không thêm saved profile. Xem [catalog mẫu](examples/slp-routing.json); các model
@@ -200,7 +201,7 @@ repo và disposition hiển thị `General`. Resume giữ tên; session handoff 
 Supervisor/Lead thêm inventory `profiles`/`providers`; Peer thêm `providers` và
 `route: {optionId, catalogSha256}` lấy từ `routes`. Có thể kèm profiles khi chuẩn bị
 Peer, nhưng chúng không thay thế pool. Option quyết định nguyên bundle và map sang
-`slp-pi-peer`/`slp-codex-peer`; model chứa `/` được giữ nguyên. `binding` tường minh
+`slp-pi-peer`/`slp-codex-peer`/`slp-devin-peer`; model chứa `/` được giữ nguyên. `binding` tường minh
 không kèm profiles chỉ hỗ trợ Supervisor/Lead khi được Human cho phép. Peer luôn
 phải chọn option trong pool, kể cả handoff và recovery.
 `prepare-handoff <request.json>` thêm snapshot và handoff vào create_agent arguments;

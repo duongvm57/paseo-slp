@@ -3,7 +3,7 @@ import { dispositionPattern, rejectRouteKeys, verifyProvider,
 
 export const roles = ['supervisor', 'lead', 'peer'];
 export const profileRoles = ['supervisor', 'lead'];
-export const families = ['codex', 'pi'];
+export const families = ['codex', 'pi', 'devin'];
 const profilePrefix = 'slp-';
 export const profileId = role => `${profilePrefix}${role}`;
 // Inverse of profileId. Only Peer ever had legacy `slp-peer-<disposition>` profiles.
@@ -14,7 +14,7 @@ export const providerId = (role, family = 'codex') => `slp-${family}-${role}`;
 export function roleProvider(role, provider) {
   if (!roles.includes(role)) throw new Error('Unknown role');
   const family = families.find(f => provider === f || provider === providerId(role, f));
-  if (!family) throw new Error(`Provider must be stock codex/pi or a matching SLP ${role} provider`);
+  if (!family) throw new Error(`Provider must be a stock family (${families.join('/')}) or a matching SLP ${role} provider`);
   return family;
 }
 

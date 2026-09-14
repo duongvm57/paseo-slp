@@ -40,8 +40,9 @@ only owned entries and the prior values of two MCP flags, never credentials.
 The shell installer and installed CLI share the same installation code.
 
 Three roles remain Supervisor, Lead and Peer. Only two saved profiles are managed:
-slp-supervisor and slp-lead. All six providers remain slp-codex-{role} and
-slp-pi-{role}; Peer chooses runtime from the project pool, not a saved profile.
+slp-supervisor and slp-lead. The nine providers remain slp-codex-{role},
+slp-pi-{role} and slp-devin-{role}; Peer chooses runtime from the project pool,
+not a saved profile. Devin bindings accept swe-2 models only.
 Peer disposition belongs to the assignment, independent of pool option choice.
 Installation refuses collisions with owned provider and Supervisor/Lead profile
 IDs; unrelated configuration is preserved.
@@ -101,7 +102,7 @@ Peer delegation defaults to the assigned repository's .paseo-slp/slp-routing.jso
 Onboarding prepares a pool of complete provider/model/settings options with
 suitableFor, avoidFor, notes, priority and explicit eligibility. Lead reads the pool,
 selects an option per task/budget, explains why it fits and validates its fresh hash
-with prepare. Provider pi/codex maps to the matching installed Peer wrapper; policy
+with prepare. Provider pi/codex/devin maps to the matching installed Peer wrapper; policy
 and disposition stay separate from runtime choice. Neither the Lead's family nor
 a saved slp-peer limits the pool. Missing/empty/no-eligible pool blocks Peer
 creation until setup is completed, without profile/global/other-repo fallback.

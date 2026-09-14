@@ -24,3 +24,20 @@ export function injectRole(message, instruction) {
   }
   return result;
 }
+
+// Generic ACP has no system-instruction channel; the role policy leads the
+// first session/prompt of each session as a text block. `seen` tracks injected
+// sessionIds; loading/resuming/forking a session re-arms its next prompt.
+export function acpRolePrompt(message, instruction, seen) {
+  const sessionId = message?.params?.sessionId;
+  if (['session/load', 'session/resume', 'session/fork'].includes(message?.method)) {
+    if (typeof sessionId === 'string') seen.delete(sessionId);
+    return message;
+  }
+  if (message?.method !== 'session/prompt' || typeof sessionId !== 'string' || seen.has(sessionId)
+      || !Array.isArray(message.params.prompt)) return message;
+  seen.add(sessionId);
+  const result = structuredClone(message);
+  result.params.prompt = [{ type: 'text', text: instruction }, ...result.params.prompt];
+  return result;
+}

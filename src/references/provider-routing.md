@@ -19,7 +19,7 @@ launches, not existing sessions.
 
 Read the assigned repository's .paseo-slp/slp-routing.json with
 `node <installed>/bin/slp.mjs routes <absolute-repository>` before each delegation.
-Each option contains an id, provider family (pi/codex), model, optional modeId,
+Each option contains an id, provider family (pi/codex/devin), model, optional modeId,
 thinkingOptionId/features, roles, enabled, availability, priority, suitableFor,
 avoidFor and notes. Human/onboarding establishes the pool and suitability under
 project setup authority; Lead chooses within it for each task and budget.
@@ -31,8 +31,9 @@ receiving the same Peer policy. Supervisor/Lead profiles need not match their fa
 
 Validate the exact model/settings against live provider capabilities. Refresh the
 catalog hash and use prepare with role=peer and route.optionId/catalogSha256 before
-calling Paseo create_agent. The selected pi/codex option maps to slp-pi-peer or
-slp-codex-peer, whose installed wrapper supplies common/Peer instructions.
+calling Paseo create_agent. The selected pi/codex/devin option maps to
+slp-pi-peer, slp-codex-peer or slp-devin-peer, whose installed wrapper supplies
+common/Peer instructions.
 Record the option, hash, suitability reason, create arguments and actual settings.
 
 No slp-peer saved profile is installed or required. Profile inventories may accompany
@@ -84,10 +85,13 @@ seat. prepare renders the naming convention from delegation.md; omitted taskLabe
 uses the repository directory name, and omitted Peer disposition displays General.
 Catalog hash validation is not atomic with host creation; record actual launches.
 
-Installed providers are slp-codex-{role} and slp-pi-{role}. Both Peer wrappers load
-the same policy. Codex receives developer instructions; Pi uses
---append-system-prompt while preserving host extensions/MCP arguments. Pi model IDs
-may contain endpoint prefixes and slashes; preserve the exact discovered ID.
+Installed providers are slp-codex-{role}, slp-pi-{role} and slp-devin-{role}.
+Every Peer wrapper loads the same policy. Codex receives developer instructions;
+Pi uses --append-system-prompt while preserving host extensions/MCP arguments;
+Devin runs a generic ACP adapter, so its wrapper prepends the role policy to the
+first session prompt of each session. Devin bindings accept swe-2 models only.
+Pi model IDs may contain endpoint prefixes and slashes; preserve the exact
+discovered ID.
 
 Explicit bindings are for separately authorized Supervisor/Lead experiments. Peer quota
 recovery always uses the project pool and its quotaFallback configuration.

@@ -3,7 +3,7 @@ import { isAbsolute, join } from 'node:path';
 import { hash } from './package.mjs';
 import { families, roles, providerId } from './profiles.mjs';
 import { settingIdPattern, unsafeModelPattern, rejectRouteKeys, verifyProvider,
-  runtimeSettingKeys, profileRouteKeys } from './binding.mjs';
+  runtimeSettingKeys, profileRouteKeys, swe2ModelPattern } from './binding.mjs';
 
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const nonempty = value => typeof value === 'string' && value.trim().length > 0;
@@ -16,10 +16,11 @@ export function validateCatalog(catalog) {
   for (const option of catalog.options) {
     if (!record(option) || !nonempty(option.id) || !/^[a-z][a-z0-9-]*$/.test(option.id) || ids.has(option.id)) throw new Error('Invalid or duplicate routing option id');
     ids.add(option.id);
-    if (!families.includes(option.provider)) throw new Error(`Routing option ${option.id}: provider must be codex or pi`);
+    if (!families.includes(option.provider)) throw new Error(`Routing option ${option.id}: provider must be one of ${families.join(', ')}`);
     if (!Array.isArray(option.roles) || !option.roles.length || option.roles.some(role => !roles.includes(role))) throw new Error(`Routing option ${option.id}: invalid roles`);
     if (typeof option.enabled !== 'boolean' || !statuses.includes(option.availability)) throw new Error(`Routing option ${option.id}: explicit enabled and availability required`);
     if (typeof option.model !== 'string' || (option.enabled && !option.model) || unsafeModelPattern.test(option.model)) throw new Error(`Routing option ${option.id}: invalid model`);
+    if (option.provider === 'devin' && !swe2ModelPattern.test(option.model)) throw new Error(`Routing option ${option.id}: devin options require a swe-2 model`);
     for (const key of ['thinkingOptionId', 'modeId']) {
       if (option[key] != null && (typeof option[key] !== 'string' || !settingIdPattern.test(option[key]))) throw new Error(`Routing option ${option.id}: invalid ${key}`);
     }
