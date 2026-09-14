@@ -3,7 +3,7 @@ import { resolve, join, dirname, basename, relative, isAbsolute } from 'node:pat
 import { fileURLToPath } from 'node:url';
 import { identity, files, hash, json, readJson, snapshot } from '../src/package.mjs';
 import { scenarios } from './scenarios.mjs';
-import { evidenceKinds, evidenceVersion, within, acceptEvidence, satisfiesEvidence } from './evidence.mjs';
+import { evidenceKinds, evidenceVersion, within, acceptEvidence, dischargesEvidence } from './evidence.mjs';
 import { criterionIds, criterionEvidence } from './criteria.mjs';
 import { savedProfileBinding, roles, profileRoles, providerId } from '../src/profiles.mjs';
 import { validateCatalog } from '../src/routing.mjs';
@@ -132,7 +132,7 @@ export function collect(attempt, kind, path) {
   requireValue(loaded.frozen.evidenceKinds.includes(kind), 'Unknown evidence kind');
   requireValue(!existsSync(join(loaded.attempt, 'report.json')), 'Attempt sealed');
   // Raw capture: an invalid payload stays visible in the ledger. seal() is the gate.
-  return storeEvidence(loaded, kind, path, readFileSync(path));
+  return storeEvidence(loaded, kind, path, readFileSync(path), 'raw');
 }
 export function collectCoordinator(attempt, path, sessionId) {
   const loaded = loadAttempt(attempt);
@@ -145,7 +145,7 @@ export function collectCoordinator(attempt, path, sessionId) {
   const bytes = Buffer.from(json({ operatorId: loaded.data.config.operatorId, sessionId, source,
     transcript, transcriptSha256: hash(Buffer.from(transcript)) }));
   acceptEvidence('coordinator', bytes, evidenceContext(loaded));
-  return storeEvidence(loaded, 'coordinator', source, bytes);
+  return storeEvidence(loaded, 'coordinator', source, bytes, 'verified');
 }
 export function collectResources(attempt, path) {
   const loaded = loadAttempt(attempt);
@@ -154,10 +154,10 @@ export function collectResources(attempt, path) {
   acceptEvidence('resources', bytes, evidenceContext(loaded));
   return storeEvidence(loaded, 'resources', path, bytes);
 }
-function storeEvidence(loaded, kind, path, bytes) {
+function storeEvidence(loaded, kind, path, bytes, capture = 'raw') {
   const records = readdirSync(join(loaded.attempt, 'evidence'));
   const name = `${String(records.length + 1).padStart(4, '0')}-${kind}.json`;
-  const record = { kind, capturedAt: now(), source: resolve(path), sha256: hash(bytes), encoding: 'base64', bytes: bytes.toString('base64') };
+  const record = { kind, capturedAt: now(), source: resolve(path), sha256: hash(bytes), encoding: 'base64', bytes: bytes.toString('base64'), capture };
   put(join(loaded.attempt, 'evidence', name), record);
   return { path: `evidence/${name}`, kind, sha256: hash(json(record)), payloadSha256: record.sha256 };
 }
@@ -169,13 +169,14 @@ function evidenceIndex(attempt) {
     return { path, kind: record.kind, sha256: hash(bytes) };
   });
 }
-const evidenceContext = loaded => ({ operatorId: loaded.data.config.operatorId, runDirectory: loaded.directory });
+const evidenceContext = loaded => ({ operatorId: loaded.data.config.operatorId, runDirectory: loaded.directory,
+  evidenceVersion: loaded.frozen.evidenceVersion });
 function missingEvidence(loaded, evidence) {
   const context = evidenceContext(loaded);
   return loaded.frozen.evidenceKinds.filter(kind => !evidence.some(item => {
     if (item.kind !== kind) return false;
     const record = readJson(join(loaded.attempt, item.path));
-    return satisfiesEvidence(kind, Buffer.from(record.bytes, 'base64'), context);
+    return dischargesEvidence(kind, record, context);
   }));
 }
 export function seal(attempt, { gaps = [] } = {}) {

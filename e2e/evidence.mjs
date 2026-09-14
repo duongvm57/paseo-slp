@@ -4,7 +4,7 @@ import { hash } from '../src/package.mjs';
 // One contract per evidence kind. The ledger keeps a registry; it does not know
 // what a Paseo coordinator transcript or a host resource inventory looks like.
 // Bumped whenever any validator below changes meaning.
-export const evidenceVersion = 3;
+export const evidenceVersion = 4;
 
 const nonempty = value => typeof value === 'string' && value.trim().length > 0;
 
@@ -51,12 +51,16 @@ function settledResources(bytes) {
   if (payload.taskActors.length === 0) {
     return payload.settlement.noActorsCreated === true && nonempty(payload.settlement.noActorsReason);
   }
-  // A live-sounding label is not a terminal state, whatever the actor reports.
+  // A live-sounding label is not a terminal state, and neither is one the host
+  // never declared: every status segment must name a terminal state.
   return payload.taskActors.every(actor => nonempty(actor?.id) && nonempty(actor?.role)
     && nonempty(actor?.status) && Array.isArray(actor.pendingPermissions)
     && actor.pendingPermissions.length === 0
-    && !/(^|\/)(running|working|pending|unknown)(\/|$)/i.test(actor.status));
+    && actor.status.toLowerCase().split(/[\s/_,-]+/).every(segment => terminalActorStatus.has(segment)));
 }
+
+const terminalActorStatus = new Set(['idle', 'closed', 'completed', 'finished', 'failed', 'error',
+  'stopped', 'archived', 'exited', 'retained', 'interrupted', 'cancelled', 'canceled', 'settled', 'done', 'terminated']);
 
 const capturedBytes = bytes => bytes.length > 0;
 // accept: gate at collection time, with the message a coordinator sees.
@@ -70,6 +74,9 @@ const registry = {
     accept: validCoordinatorTranscript,
     message: 'Coordinator transcript must contain nonempty JSONL object records and the native session marker',
     satisfies: validCoordinatorTranscript,
+    // A self-authored envelope can satisfy every payload rule; only the
+    // dedicated capture verifies the native source exists outside the run.
+    sourceVerified: true,
   },
   artifacts: { satisfies: capturedBytes },
   checks: { satisfies: capturedBytes },
@@ -96,4 +103,15 @@ export function acceptEvidence(kind, bytes, context = {}) {
 export function satisfiesEvidence(kind, bytes, context = {}) {
   const entry = registry[kind];
   return Boolean(entry) && attempt(entry.satisfies, bytes, context);
+}
+
+// Whether a ledger record discharges its kind: the payload rule, plus capture
+// provenance for kinds whose evidence only exists outside the run. Records
+// frozen before the provenance rule keep their historical reading.
+export function dischargesEvidence(kind, record, context = {}) {
+  const entry = registry[kind];
+  if (!entry) return false;
+  const bytes = Buffer.from(record.bytes, 'base64');
+  if (!attempt(entry.satisfies, bytes, context)) return false;
+  return !entry.sourceVerified || context.evidenceVersion < 4 || record.capture === 'verified';
 }

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { initialize, begin, fixture, collect, collectCoordinator, collectResources, seal, review, reviewAddendum, defer, summary, sourceRoot } from '../e2e/collector.mjs';
 import { scenarios } from '../e2e/scenarios.mjs';
-import { evidenceKinds } from '../e2e/evidence.mjs';
+import { evidenceKinds, satisfiesEvidence } from '../e2e/evidence.mjs';
 import { criterionIds as criteria, criterionEvidence } from '../e2e/criteria.mjs';
 import { createFixture } from '../e2e/fixture.mjs';
 import { hash } from '../src/package.mjs';
@@ -245,6 +245,69 @@ test('seal requires coordinator evidence even when all other evidence kinds exis
   assert.throws(() => seal(data.attempt), /Missing required evidence: coordinator/);
   collectCoordinator(data.attempt, coordinatorTranscript(data), 'synthetic-session');
   assert.doesNotThrow(() => seal(data.attempt));
+});
+test('a coordinator envelope only discharges the kind through verified capture', t => {
+  const data = setup(t);
+  for (const kind of evidenceKinds.filter(kind => kind !== 'coordinator')) {
+    if (kind === 'resources') { collectResources(data.attempt, resourceSettlement(data)); continue; }
+    const path = join(data.dir, `${kind}.txt`);
+    writeFileSync(path, 'Synthetic collector test payload; not live evidence.\n');
+    collect(data.attempt, kind, path);
+  }
+  const transcript = `${JSON.stringify({ type: 'session_meta', payload: { id: 'synthetic-session' } })}\n`;
+  const outside = join(data.dir, 'rollout-synthetic-session.jsonl');
+  writeFileSync(outside, transcript);
+  // A self-authored envelope satisfies every payload rule — real source outside
+  // the run, session marker, matching hash — yet stays a raw capture and cannot
+  // discharge the kind.
+  const envelope = join(data.dir, 'envelope.json');
+  writeFileSync(envelope, JSON.stringify({ operatorId: config.operatorId, sessionId: 'synthetic-session',
+    source: outside, transcript, transcriptSha256: hash(Buffer.from(transcript)) }));
+  collect(data.attempt, 'coordinator', envelope);
+  assert.throws(() => seal(data.attempt), /Missing required evidence: coordinator/);
+  collectCoordinator(data.attempt, outside, 'synthetic-session');
+  assert.doesNotThrow(() => seal(data.attempt));
+});
+test('coordinator evidence recorded before the provenance rule keeps its historical reading', t => {
+  const data = setup(t, 'basic-codex', manifest => { manifest.evidenceVersion = 3; });
+  for (const kind of evidenceKinds.filter(kind => kind !== 'coordinator')) {
+    if (kind === 'resources') { collectResources(data.attempt, resourceSettlement(data)); continue; }
+    const path = join(data.dir, `${kind}.txt`);
+    writeFileSync(path, 'Synthetic collector test payload; not live evidence.\n');
+    collect(data.attempt, kind, path);
+  }
+  const transcript = `${JSON.stringify({ type: 'session_meta', payload: { id: 'synthetic-session' } })}\n`;
+  const outside = join(data.dir, 'rollout-synthetic-session.jsonl');
+  writeFileSync(outside, transcript);
+  const envelope = join(data.dir, 'envelope.json');
+  writeFileSync(envelope, JSON.stringify({ operatorId: config.operatorId, sessionId: 'synthetic-session',
+    source: outside, transcript, transcriptSha256: hash(Buffer.from(transcript)) }));
+  collect(data.attempt, 'coordinator', envelope);
+  assert.doesNotThrow(() => seal(data.attempt), 'Records frozen before the rule keep their reading');
+});
+test('resource settlement needs declared terminal states, not merely absent live labels', t => {
+  const settlement = status => Buffer.from(JSON.stringify({
+    version: 1, capturedAt: new Date().toISOString(), workspace: { status: 'retained' },
+    taskActors: [{ id: 'actor-1', role: 'supervisor', status, pendingPermissions: [] }],
+    settlement: { observed: 'Synthetic reread', actions: ['status reread'], unresolved: [] },
+  }));
+  for (const status of ['running', 'working', 'pending', 'unknown', 'initializing', 'awaiting-input', 'waiting-for-callback', 'in_progress']) {
+    assert.equal(satisfiesEvidence('resources', settlement(status)), false, status);
+  }
+  for (const status of ['idle', 'closed', 'completed', 'failed', 'finished/retained', 'settled-error']) {
+    assert.equal(satisfiesEvidence('resources', settlement(status)), true, status);
+  }
+  const data = setup(t);
+  for (const kind of evidenceKinds.filter(kind => kind !== 'resources')) {
+    const path = join(data.dir, `${kind}.txt`);
+    writeFileSync(path, 'Synthetic collector test payload; not live evidence.\n');
+    if (kind === 'coordinator') collectCoordinator(data.attempt, coordinatorTranscript(data), 'synthetic-session');
+    else collect(data.attempt, kind, path);
+  }
+  const pending = join(data.dir, 'resources-pending.json');
+  writeFileSync(pending, settlement('awaiting-input'));
+  collectResources(data.attempt, pending);
+  assert.throws(() => seal(data.attempt), /Missing required evidence: resources/);
 });
 test('explicit evidence gaps preserve incomplete attempts but cannot receive PASS', t => {
   const data = setup(t);

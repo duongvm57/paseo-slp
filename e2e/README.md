@@ -112,13 +112,19 @@ For `onboarding-*` rows, let the fresh setup actor create/update the files inste
 
 `collect <attempt> <kind> <source-file>` copies the exact bytes into a new record
 under `evidence/`, base64 encoded with a content hash and capture timestamp.
-It is a point-in-time copy: later events in the original transcript do not appear
-in that record. After final handback and settlement, collect fresh transcript
-copies and identify them as final in the evidence index; retain earlier checkpoints.
+Each record also marks its capture path: `raw` for generic `collect`, `verified`
+for a dedicated collector that checked its source. It is a point-in-time copy:
+later events in the original transcript do not appear in that record. After
+final handback and settlement, collect fresh transcript copies and identify them
+as final in the evidence index; retain earlier checkpoints.
 For coordinator evidence use `collect-coordinator <attempt>
 <native-session.jsonl> <native-session-id>`. Version 2 requires a real path outside
 the E2E run directory, the session ID in the filename, and the same session marker
-inside the JSONL records. It copies the transcript text into an envelope with the
+inside the JSONL records. Version 4 also requires the `verified` capture mark: the
+dedicated collector is the only path that checked the native source existed outside
+the run at capture, so a self-authored envelope — even with a correct shape, marker
+and hash — stays in the ledger for audit but cannot discharge the kind. The
+dedicated collector copies the transcript text into an envelope with the
 attempt's operator ID, source path, native session ID and computed transcript hash.
 The collector does not redact input or discover the session for you. Use a fresh,
 run-only coordinator context so its native transcript is safe to freeze. If a native
@@ -149,9 +155,10 @@ Collect each resource receipt as soon as it is returned. Before sealing, write t
 final version 1 settlement and use `collect-resources <attempt> <settlement.json>`.
 It contains `capturedAt`, `workspace.status`, `taskActors`, and `settlement` with
 `observed`, `actions`, and an empty `unresolved` array. Every retained actor has an
-ID, role, terminal status, and an empty `pendingPermissions` array. A status that
-still contains `running`, `working`, `pending`, or `unknown`, or any unresolved
-entry, cannot satisfy the resources gate. A no-actor branch sets
+ID, role, terminal status, and an empty `pendingPermissions` array. Every segment
+of each actor status must name a terminal state such as `idle`, `closed`,
+`completed`, `failed` or `settled-*`; a live or undeclared status, or any
+unresolved entry, cannot satisfy the resources gate. A no-actor branch sets
 `settlement.noActorsCreated: true` and supplies `noActorsReason`.
 
 Ordinary `seal` refuses an empty evidence index or any required kind without a
