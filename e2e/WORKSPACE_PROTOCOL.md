@@ -218,6 +218,10 @@ the original mandate, without repeatedly asking routine setup questions.
 
 ## Faults, waiting and settlement
 
+For Human-stop trials, use [the executing stop watcher](stop-boundary.md).
+A declared observer JSON file is not a running observer. Verify its startup PID,
+readiness dispatch and actual owner receipt before claiming an active-stop boundary.
+
 For a controlled cancellation trial, use [the inspection-first boundary procedure](recovery-boundary.md)
 before task launch. It separates initial read-only authority from post-settlement
 implementation and checks the actual call order. A prerequisite violation is an
