@@ -206,6 +206,42 @@ the original review hash, writes an append-only `review-addendum-NNN.json`, and
 The frozen scenario timeline includes its own SLP Reviewer where applicable, a
 different actor.
 
+Every newly recorded assessment has a separate byte digest: `review.sha256` for
+`review.json`, and `review-addendum-NNN.sha256` for each addendum. Each addendum
+also binds its own sequence position inside those digested bytes. The collector
+verifies the surviving history before summarizing, appending an assessment or using
+a review to permit another attempt: digests, original-review binding, canonical
+`NNN` names and one contiguous sequence. Editing reasons, evidence references,
+reviewer identity, or both criteria and aggregate verdict is detected, including
+edits to or reordering of a superseded addendum. Deleting a record together with
+its digest removes it from the verified set, so a complete rollback of all local
+state stays outside this protection; keep run receipts elsewhere if that matters.
+Correction still uses `review-addendum`, preserving the original. These are
+byte-integrity checks, like the report seal, not adversarial storage or proof of
+reviewer authenticity.
+
+New manifests pin `reviewIntegrityVersion: 1`; newly written assessments also carry
+the marker so protection applies when they are recorded into an older run. Missing
+digests cannot silently downgrade those records to legacy format. The digest is
+written exclusively before its JSON record: an interrupted write leaves an explicit
+incomplete record and further reads/writes fail closed. Preserve those receipts and
+recover the exact assessment from its original evidence; do not regenerate a digest
+from edited bytes or overwrite an incomplete assessment to make the gate pass.
+Recovery restores the exact recorded bytes retained elsewhere — reviewer input
+alone cannot rebuild generated fields like `reviewedAt`, so when the bytes are
+truly gone the incomplete record stays as evidence of the interruption.
+
+Historical assessments without this protection remain readable, with attempt-level
+`reviewIntegrity: "UNVERIFIED_LEGACY"` and a concrete limitation in `reason`.
+Their recorded status and `passCount` remain visible. They are never automatically
+resealed; even a newly protected addendum cannot establish the original assessment's
+past byte identity. A checksum added to an old unmarked assessment does not qualify
+it as verified. `verifiedPassCount` counts only PASS attempts whose entire review
+history has verified identity; scenario `gateReady` additionally requires the usual
+status and repetition rules. Dependency and retry gates reject unverified reviews.
+An unreviewed attempt is marked `NOT_REVIEWED`; an intact protected history is
+`VERIFIED`. The run's `gateReady` requires every scenario to qualify.
+
 For an unavailable scenario, create a reason file containing
 `{ "status": "BLOCKED", "reason": "specific gap", "missing": ["capability or authority"] }`
 and run `defer <run> <scenario-id> <reason-file>`. Use NOT_RUN for budget/stop
@@ -214,7 +250,9 @@ Keep incomplete attempts visible; collect/settle/seal/review them before retryin
 
 `summary` returns every row and attempt. An observed failure stays FAIL for the
 candidate; blocked retries remain visible; declared repetitions must be satisfied.
-Exit codes are 0 for all PASS, 1 for any FAIL, and 2 for BLOCKED/NOT_RUN. The JSON
+Exit codes are 0 for all PASS with verified review histories, 1 for any FAIL (or an
+integrity/validation error), and 2 for BLOCKED/NOT_RUN or unverified historical PASS.
+Use `gateReady`, not historical `status` alone, for a new acceptance gate. The JSON
 is an evidence index and status matrix, not a substitute for the Human handback
 required in WORKSPACE_PROTOCOL.md. Preserve its output as the run's final report.
 

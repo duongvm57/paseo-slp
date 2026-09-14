@@ -26,7 +26,7 @@ try {
     case 'review': result = review(args[0], readJson(args[1])); break;
     case 'review-addendum': result = reviewAddendum(args[0], readJson(args[1])); break;
     case 'defer': result = defer(args[0], args[1], readJson(args[2])); break;
-    case 'summary': result = summary(args[0]); process.exitCode = result.status === 'PASS' ? 0 : result.status === 'FAIL' ? 1 : 2; break;
+    case 'summary': result = summary(args[0]); process.exitCode = result.status === 'FAIL' ? 1 : result.gateReady ? 0 : 2; break;
     default: throw new Error('Unknown E2E command; use --help');
   }
   process.stdout.write(json(result));

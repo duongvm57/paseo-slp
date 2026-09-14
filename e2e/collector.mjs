@@ -15,6 +15,7 @@ const nonempty = value => typeof value === 'string' && value.trim().length > 0;
 const put = (path, data) => writeFileSync(path, json(data), { flag: 'wx' });
 const now = () => new Date().toISOString();
 const requireValue = (condition, message) => { if (!condition) throw new Error(message); };
+const reviewIntegrityVersion = 1;
 function harnessIdentity(root) {
   const entries = [...files(root, 'e2e'), 'docs/review-checklist.md', 'docs/contract.md', 'AGENTS.md']
     .sort().map(path => ({ path, sha256: hash(readFileSync(join(root, path))) }));
@@ -26,7 +27,7 @@ export function initialize(directory, root = sourceRoot) {
   mkdirSync(dirname(directory), { recursive: true });
   mkdirSync(directory); // Exclusive; never reset a previous run.
   mkdirSync(join(directory, 'frozen'));
-  const frozen = { scenarios, criteria: criterionIds, criterionEvidence, evidenceKinds, evidenceVersion, candidate, harness };
+  const frozen = { scenarios, criteria: criterionIds, criterionEvidence, evidenceKinds, evidenceVersion, reviewIntegrityVersion, candidate, harness };
   put(join(directory, 'frozen', 'manifest.json'), frozen);
   for (const name of ['review-checklist.md', 'contract.md']) {
     writeFileSync(join(directory, 'frozen', name), readFileSync(join(root, 'docs', name)), { flag: 'wx' });
@@ -46,6 +47,8 @@ function loadRun(directory, current = false) {
     requireValue(hash(readFileSync(join(directory, 'frozen', name))) === digest, `Frozen ${name} changed`);
   }
   const frozen = readJson(join(directory, 'frozen', 'manifest.json'));
+  requireValue(frozen.reviewIntegrityVersion === undefined || frozen.reviewIntegrityVersion === reviewIntegrityVersion,
+    'Unsupported review integrity version');
   if (current) {
     requireValue(identity(run.sourceRoot).sha256 === frozen.candidate.sha256, 'Package candidate changed; initialize a new run');
     requireValue(harnessIdentity(run.sourceRoot).sha256 === frozen.harness.sha256, 'Harness changed; initialize a new run');
@@ -63,7 +66,8 @@ export function begin(directory, id, config) {
   if (loaded.scenario.dependsOn.length) {
     const rows = summary(directory).scenarios;
     for (const dependency of loaded.scenario.dependsOn) {
-      requireValue(rows.find(row => row.id === dependency)?.status === 'PASS', `Unmet scenario gate: ${dependency}`);
+      requireValue(rows.find(row => row.id === dependency)?.gateReady,
+        `Unmet scenario gate: ${dependency}; PASS with verified review integrity required`);
     }
   }
   requireValue(nonempty(config.operatorId), 'operatorId required');
@@ -99,7 +103,11 @@ export function begin(directory, id, config) {
   mkdirSync(parent, { recursive: true });
   const existing = readdirSync(parent).filter(name => /^attempt-\d+$/.test(name));
   // One coordinator writes the ledger. Never resume a live attempt by spawning again.
-  for (const name of existing) requireValue(existsSync(join(parent, name, 'review.json')), `Unreviewed attempt ${name}; resume it first`);
+  for (const name of existing) {
+    const history = reviewHistory(join(parent, name));
+    requireValue(history, `Unreviewed attempt ${name}; resume it first`);
+    requireValue(history.integrity === 'VERIFIED', `Unverified review integrity for ${name}; historical review cannot authorize a retry`);
+  }
   const attempt = join(parent, `attempt-${String(existing.length + 1).padStart(3, '0')}`);
   mkdirSync(attempt);
   mkdirSync(join(attempt, 'evidence'));
@@ -210,8 +218,7 @@ function verifiedReport(attempt) {
   requireValue(json(report.evidence) === json(evidenceIndex(loaded.attempt)), 'Sealed evidence changed');
   return { ...loaded, report, reportSha256: hash(bytes) };
 }
-function validateReview(attempt, input) {
-  const loaded = verifiedReport(attempt);
+function validateReview(attempt, input, loaded = verifiedReport(attempt)) {
   const participantIds = input.participantIds;
   requireValue(Array.isArray(participantIds) && participantIds.every(nonempty) && participantIds.length > 0, 'Host actor participantIds required (include all scenario actors)');
   requireValue(nonempty(input.reviewerId) && input.reviewerId !== loaded.data.config.operatorId && !participantIds.includes(input.reviewerId), 'Reviewer must be independent of operator and actors');
@@ -246,28 +253,87 @@ function validateReview(attempt, input) {
   return { ...input, status };
 }
 export function review(attempt, input) {
-  const result = { ...validateReview(attempt, input), reviewedAt: now() };
-  put(join(attempt, 'review.json'), result);
-  return result;
+  requireValue(!reviewHistory(attempt), 'EEXIST: Review already recorded; use an addendum');
+  return writeReviewRecord(attempt, 'review.json', validateReview(attempt, input));
 }
 export function reviewAddendum(attempt, input) {
-  const loaded = verifiedReport(attempt);
-  const originalPath = join(attempt, 'review.json');
-  requireValue(existsSync(originalPath), 'Review addendum requires an original review');
-  const originalBytes = readFileSync(originalPath);
-  const original = readJson(originalPath);
-  const originalValidated = validateReview(attempt, original);
-  requireValue(original.status === originalValidated.status, 'Original review status inconsistent with criteria/assertions');
-  requireValue(input.supersedesReviewSha256 === hash(originalBytes), 'Addendum must bind the original review hash');
+  const history = reviewHistory(attempt);
+  requireValue(history, 'Review addendum requires an original review');
+  requireValue(input.supersedesReviewSha256 === history.originalSha256, 'Addendum must bind the original review hash');
   requireValue(nonempty(input.basis), 'Review addendum basis required');
-  requireValue(input.reviewerId === original.reviewerId, 'Review addendum must keep the original reviewer');
-  const result = { ...validateReview(attempt, input), reviewedAt: now(),
-    supersedesReviewSha256: input.supersedesReviewSha256, basis: input.basis };
-  const existing = namesForReviewAddenda(attempt);
-  const next = Math.max(0, ...existing.map(name => Number(name.match(/(\d+)/)?.[1] ?? 0))) + 1;
-  const path = join(attempt, `review-addendum-${String(next).padStart(3, '0')}.json`);
-  put(path, result);
+  requireValue(input.reviewerId === history.original.reviewerId, 'Review addendum must keep the original reviewer');
+  const sequence = history.nextAddendum;
+  const name = `review-addendum-${String(sequence).padStart(3, '0')}.json`;
+  const result = writeReviewRecord(attempt, name, { ...validateReview(attempt, input), addendumSequence: sequence });
+  const path = join(realpathSync(attempt), name);
   return { ...result, path };
+}
+
+// Review records own their byte identity separately from the report they assess.
+// Write the digest first: interruption leaves an explicit incomplete record, never
+// an unsigned assessment that a legacy run could silently treat as historical.
+function writeReviewRecord(attempt, name, input) {
+  const path = join(attempt, name);
+  requireValue(!existsSync(path), `EEXIST: Review already recorded: ${name}`);
+  const result = { ...input, reviewedAt: now(), reviewIntegrityVersion };
+  const bytes = Buffer.from(json(result));
+  writeFileSync(path.replace(/\.json$/, '.sha256'), `${hash(bytes)}\n`, { flag: 'wx' });
+  writeFileSync(path, bytes, { flag: 'wx' });
+  return result;
+}
+
+// Every consumer uses the same history: byte identity, assessment validity,
+// original-review links, and whether the entire history can support a new gate.
+function reviewHistory(attempt) {
+  const names = readdirSync(attempt);
+  const canonical = sequence => `review-addendum-${String(sequence).padStart(3, '0')}.json`;
+  const addenda = [...new Set(names.filter(name => /^review-addendum-\d+\.(json|sha256)$/.test(name))
+    .map(name => name.replace(/\.sha256$/, '.json')))];
+  // Only canonical positions count as history; an ambiguous alias like
+  // review-addendum-1 must fail closed instead of inheriting a slot.
+  for (const name of addenda) {
+    requireValue(name === canonical(Number(name.match(/(\d+)/)[1])), `Noncanonical review addendum name: ${name}`);
+  }
+  addenda.sort((a, b) => Number(a.match(/(\d+)/)[1]) - Number(b.match(/(\d+)/)[1]));
+  addenda.forEach((name, index) => requireValue(name === canonical(index + 1),
+    `Review addendum history is not contiguous at ${name}`));
+  requireValue(!addenda.length || names.includes('review.json'), 'Review addendum requires an original review');
+  if (!names.includes('review.json') && !names.includes('review.sha256')) return null;
+  const loaded = verifiedReport(attempt);
+  const read = name => {
+    const path = join(attempt, name), digestPath = path.replace(/\.json$/, '.sha256');
+    requireValue(existsSync(path), `Review record missing: ${name}; identity receipt retained`);
+    const bytes = readFileSync(path), sha256 = hash(bytes);
+    const hasDigest = existsSync(digestPath);
+    if (hasDigest) requireValue(readFileSync(digestPath, 'utf8').trim() === sha256, `Review record changed: ${name}`);
+    const value = JSON.parse(bytes);
+    requireValue(value.reviewIntegrityVersion === undefined || value.reviewIntegrityVersion === reviewIntegrityVersion,
+      `Unsupported review integrity version: ${name}`);
+    const protectedRecord = loaded.frozen.reviewIntegrityVersion === reviewIntegrityVersion
+      || value.reviewIntegrityVersion === reviewIntegrityVersion;
+    requireValue(!protectedRecord || hasDigest, `Review identity missing: ${name}`);
+    const validated = validateReview(attempt, value, loaded);
+    requireValue(value.status === validated.status, `Review status inconsistent with criteria/assertions: ${name}`);
+    return { value: validated, sha256, verified: protectedRecord && hasDigest };
+  };
+  const original = read('review.json');
+  let latest = original.value, verified = original.verified;
+  for (const [index, name] of addenda.entries()) {
+    const record = read(name), value = record.value;
+    requireValue(value.supersedesReviewSha256 === original.sha256, `Review addendum binding changed: ${name}`);
+    requireValue(nonempty(value.basis), `Review addendum basis missing: ${name}`);
+    requireValue(value.reviewerId === original.value.reviewerId, `Review addendum reviewer changed: ${name}`);
+    // Position is part of the record's protected bytes: renaming a signed
+    // addendum is a change, while a record that predates position binding just
+    // stops being evidence of ordering.
+    if (value.addendumSequence === undefined) record.verified = false;
+    else requireValue(value.addendumSequence === index + 1, `Review addendum sequence changed: ${name}`);
+    latest = value;
+    verified = verified && record.verified;
+  }
+  return { original: original.value, originalSha256: original.sha256, latest,
+    integrity: verified ? 'VERIFIED' : 'UNVERIFIED_LEGACY',
+    nextAddendum: addenda.length + 1 };
 }
 export function defer(directory, id, input) {
   const loaded = getScenario(directory, id);
@@ -289,45 +355,28 @@ export function summary(directory) {
       const path = join(parent, name);
       let status = 'NOT_RUN', reason = 'Attempt needs evidence seal and independent review';
       if (existsSync(join(path, 'report.json'))) verifiedReport(path);
-      const addenda = namesForReviewAddenda(path);
-      requireValue(!addenda.length || existsSync(join(path, 'review.json')), 'Review addendum requires an original review');
-      if (existsSync(join(path, 'review.json'))) {
-        const original = readJson(join(path, 'review.json'));
-        const originalBytes = readFileSync(join(path, 'review.json'));
-        const originalValidated = validateReview(path, original);
-        requireValue(original.status === originalValidated.status, 'Original review status inconsistent with criteria/assertions');
-        const reviews = [originalValidated];
-        const originalHash = hash(originalBytes);
-        for (const addendum of addenda) {
-          const value = readJson(join(path, addendum));
-          requireValue(value.supersedesReviewSha256 === originalHash, `Review addendum binding changed: ${addendum}`);
-          requireValue(nonempty(value.basis), `Review addendum basis missing: ${addendum}`);
-          requireValue(value.reviewerId === original.reviewerId, `Review addendum reviewer changed: ${addendum}`);
-          const validated = validateReview(path, value);
-          requireValue(value.status === validated.status, `Review addendum status inconsistent: ${addendum}`);
-          reviews.push(validated);
-        }
-        const verdict = reviews.at(-1);
-        status = verdict.status; reason = 'Independent review recorded';
+      const history = reviewHistory(path);
+      if (history) {
+        status = history.latest.status;
+        reason = history.integrity === 'VERIFIED' ? 'Independent review recorded; byte identity verified'
+          : 'Historical review; byte identity unverified, unavailable for new gates';
       }
-      return { attempt: name, status, reason, path };
+      return { attempt: name, status, reason, path, reviewIntegrity: history?.integrity ?? 'NOT_REVIEWED' };
     });
     const deferredNames = names.filter(name => /^deferred-\d+\.json$/.test(name));
     const deferrals = deferredNames.map(name => readJson(join(parent, name)));
     const passCount = attempts.filter(item => item.status === 'PASS').length;
+    const verifiedPassCount = attempts.filter(item => item.status === 'PASS' && item.reviewIntegrity === 'VERIFIED').length;
     // A failure remains visible for this candidate. Retries never erase it.
     let status = attempts.some(item => item.status === 'FAIL') ? 'FAIL'
       : attempts.some(item => item.status === 'NOT_RUN') ? 'NOT_RUN'
       : passCount >= scenario.repetitions ? 'PASS'
       : attempts.some(item => item.status === 'BLOCKED') || deferrals.at(-1)?.status === 'BLOCKED' ? 'BLOCKED' : 'NOT_RUN';
-    return { id: scenario.id, group: scenario.group, status, repetitions: scenario.repetitions, passCount, attempts, deferrals };
+    return { id: scenario.id, group: scenario.group, status, repetitions: scenario.repetitions, passCount,
+      verifiedPassCount, gateReady: status === 'PASS' && verifiedPassCount >= scenario.repetitions, attempts, deferrals };
   });
   const counts = Object.fromEntries(['PASS', 'FAIL', 'BLOCKED', 'NOT_RUN'].map(status => [status, rows.filter(row => row.status === status).length]));
   const status = counts.FAIL ? 'FAIL' : counts.BLOCKED ? 'BLOCKED' : counts.NOT_RUN ? 'NOT_RUN' : 'PASS';
-  return { status, packageSha256: loaded.frozen.candidate.sha256, harnessSha256: loaded.frozen.harness.sha256, counts, scenarios: rows };
-}
-
-function namesForReviewAddenda(attempt) {
-  return readdirSync(attempt).filter(name => /^review-addendum-\d+\.json$/.test(name))
-    .sort((a, b) => Number(a.match(/(\d+)/)[1]) - Number(b.match(/(\d+)/)[1]));
+  return { status, gateReady: status === 'PASS' && rows.every(row => row.gateReady),
+    packageSha256: loaded.frozen.candidate.sha256, harnessSha256: loaded.frozen.harness.sha256, counts, scenarios: rows };
 }

@@ -30,6 +30,7 @@ Local installation/transport checks do not constitute workflow acceptance.
 | skills/paseo-slp-e2e/SKILL.md | Single-session full-suite execution procedure; requires the source checkout and authorized Paseo actors. |
 | e2e/evidence.mjs | One contract per evidence kind: what may enter the ledger and what discharges the kind's requirement at seal. |
 | e2e/criteria.mjs | U1–U7 as code, each naming the evidence kinds that can support it; the mapping a reviewer previously held in their head. |
+| e2e/collector.mjs | Frozen evidence ledger and review history; verify assessment byte identities and original-review links before summaries, addenda or review-dependent launch gates. |
 | e2e/ | Development-only scenario manifest, fixture, external outcome check, evidence collector and repository E2E protocol. Collector commands do not create agents or judge behavioral evidence. |
 | tests/*.test.mjs | Local installer, rollback, transport, envelope and snapshot checks. |
 
@@ -126,6 +127,18 @@ Lead selects the actual Peer option, not the coordinator. U2 compares each launc
 with its relevant saved profile or option/hash. mixed-peer can use Pi and Codex
 Peer options under either Lead family without requiring extra saved profiles or
 both basic runs. Old frozen manifests retain their original criteria and results.
+
+New reviews and each addendum record an independent byte digest, and each addendum
+binds the original review plus its own sequence position. Summary and
+review-dependent gates verify the surviving assessment history, including superseded
+addenda; deleting a record and its digest removes it from that set, so complete
+local rollback stays outside this protection. New manifests require this identity
+protection; missing, mismatched, noncanonical or out-of-sequence records/digests
+fail closed. Historical assessments without recorded identity remain
+readable as UNVERIFIED_LEGACY without automatic resealing. Their verdicts remain
+visible but do not qualify dependency or retry gates. A new addendum cannot
+retroactively verify an unsigned original. Summary exposes gateReady separately
+from historical status; its CLI returns success only for a fully qualified PASS.
 
 Provider switching creates a new session: prepare-handoff requires old-owner settlement
 evidence and transfers state/resources without inventing new parentage or acceptance.
