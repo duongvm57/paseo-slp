@@ -34,8 +34,9 @@ export function acpRolePrompt(message, instruction, seen) {
     if (typeof sessionId === 'string') seen.delete(sessionId);
     return message;
   }
-  if (message?.method !== 'session/prompt' || typeof sessionId !== 'string' || seen.has(sessionId)
-      || !Array.isArray(message.params.prompt)) return message;
+  if (message?.method !== 'session/prompt') return message;
+  if (typeof sessionId !== 'string' || !Array.isArray(message.params.prompt)) throw new Error('Malformed session/prompt');
+  if (seen.has(sessionId)) return message;
   seen.add(sessionId);
   const result = structuredClone(message);
   result.params.prompt = [{ type: 'text', text: instruction }, ...result.params.prompt];

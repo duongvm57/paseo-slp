@@ -10,7 +10,7 @@ import { resolveProfile } from '../src/profiles.mjs';
 import { launchPlan, handoffPlan } from '../src/launch.mjs';
 import { roleInstructions, roleBundle } from '../src/role-bundle.mjs';
 
-import { piRoleArgs } from '../src/role-transport.mjs';
+import { piRoleArgs, acpRolePrompt } from '../src/role-transport.mjs';
 import { readCatalog, emptyCatalog, validateCatalog } from '../src/routing.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -175,6 +175,14 @@ test('devin bindings accept swe-2 models only and map catalog options to the acp
     .create.initialPrompt.includes(readFileSync(join(installed, 'src/roles/lead.md'), 'utf8')));
   assert.ok(!launchPlan(installed, { ...lead, binding: { provider: 'slp-devin-lead', model: 'swe-2-high' } })
     .create.initialPrompt.includes(readFileSync(join(installed, 'src/roles/lead.md'), 'utf8')));
+  // Saved-profile bindings pass through the same swe-2 gate.
+  const devinProfiles = [
+    { id: 'slp-lead', provider: 'slp-devin-lead', model: 'swe-2-high', modeId: 'bypass', featureValues: { auto_accept: true } },
+  ];
+  const profilePlan = launchPlan(installed, { ...lead, profiles: devinProfiles });
+  assert.equal(profilePlan.create.provider, 'slp-devin-lead/swe-2-high');
+  assert.deepEqual(profilePlan.create.settings, { modeId: 'bypass', features: { auto_accept: true } });
+  assert.throws(() => launchPlan(installed, { ...lead, profiles: [{ ...devinProfiles[0], model: 'gpt-5.6-luna' }] }), /swe-2/);
   const peer = launchPlan(installed, { ...request, repository: dir, profiles: undefined, providers, route: route('swe2-medium') });
   assert.equal(peer.create.provider, 'slp-devin-peer/swe-2-medium');
   assert.deepEqual(peer.create.settings, { modeId: 'bypass', features: { auto_accept: true } });
@@ -248,6 +256,10 @@ test('Devin wrapper prepends role policy to the first session prompt of each ses
   assert.equal(blocks(3)[0].text, instruction);
   assert.equal(lines.find(m => m.id === 4).method, 'session/load');
   assert.equal(blocks(5)[0].text, instruction);
+  // A malformed prompt must not pass silently: the agent would run without policy.
+  assert.throws(() => acpRolePrompt({ method: 'session/prompt', params: { sessionId: 's', prompt: 'oops' } }, 'p', new Set()), /Malformed/);
+  assert.throws(() => acpRolePrompt({ method: 'session/prompt', params: { prompt: [] } }, 'p', new Set()), /Malformed/);
+  assert.equal(acpRolePrompt({ method: 'session/cancel' }, 'p', new Set()).method, 'session/cancel');
 });
 
 test('quota handoff preserves evidence and old parentage, emits only new-session arguments', t => {
