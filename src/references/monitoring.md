@@ -32,12 +32,14 @@ wake/report path meets the job's observation need, report the dependent work BLO
 
 ## Heartbeat safety net
 
-Use a heartbeat when the task's duration/risk and incomplete event coverage warrant
-periodic observation within the assignment. Cadence, timezone, expiry/run bounds and
-observer ownership are repository/assignment choices; there is no universal 15-minute
-rule. Before ending a turn with delegated work still outstanding, arm a bounded
-task-local fallback wake and record it; cancel it once that child's report is in
-hand. A finish notification you are waiting on promises a future turn without
+Whether to use a heartbeat at all is the workspace protocol/assignment's choice
+from the task's duration, risk and event coverage; cadence, timezone, expiry/run
+bounds and observer ownership are likewise repository/assignment choices — there
+is no universal 15-minute rule. This section owns the rules once that choice is
+made. When the observation plan calls for periodic coverage, arm a bounded
+task-local fallback wake before ending a turn with delegated work still
+outstanding, record it, and cancel it once that child's report is in hand. A
+finish notification you are waiting on promises a future turn without
 guaranteeing one.
 
 The observing session calls Paseo create_heartbeat with prompt and cron, plus

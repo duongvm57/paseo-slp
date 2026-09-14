@@ -79,8 +79,10 @@ reopen/dependency requests and significant risk changes to the assigned Supervis
 For short bounded work with adequate events, default to no heartbeat. For long work
 or incomplete event coverage, decide and record the observer, reporting route,
 cron/timezone, expiry/run bound, evidence checkpoint and stop condition before
-creating a fallback heartbeat. No universal cadence is prescribed. Record the
-creation/deletion receipts and retain pre-existing monitoring outside the task.
+creating a fallback heartbeat. No universal cadence is prescribed; ownership,
+receipts, bounded lifetime and settlement follow references/monitoring.md.
+Record the creation/deletion receipts and retain pre-existing monitoring outside
+the task.
 
 ## Proof and escalation
 
