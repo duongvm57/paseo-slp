@@ -268,22 +268,17 @@ test('a coordinator envelope only discharges the kind through verified capture',
   collectCoordinator(data.attempt, outside, 'synthetic-session');
   assert.doesNotThrow(() => seal(data.attempt));
 });
-test('coordinator evidence recorded before the provenance rule keeps its historical reading', t => {
+test('a run frozen under another evidence version refuses new evaluation', t => {
   const data = setup(t, 'basic-codex', manifest => { manifest.evidenceVersion = 3; });
-  for (const kind of evidenceKinds.filter(kind => kind !== 'coordinator')) {
-    if (kind === 'resources') { collectResources(data.attempt, resourceSettlement(data)); continue; }
-    const path = join(data.dir, `${kind}.txt`);
-    writeFileSync(path, 'Synthetic collector test payload; not live evidence.\n');
-    collect(data.attempt, kind, path);
+  const path = join(data.dir, 'checks.txt');
+  writeFileSync(path, 'Synthetic collector test payload; not live evidence.\n');
+  // Collecting, sealing and reviewing would silently apply current validators
+  // to records captured under a different era.
+  for (const op of [() => collect(data.attempt, 'checks', path), () => seal(data.attempt)]) {
+    assert.throws(op, /Unsupported evidence version/);
   }
-  const transcript = `${JSON.stringify({ type: 'session_meta', payload: { id: 'synthetic-session' } })}\n`;
-  const outside = join(data.dir, 'rollout-synthetic-session.jsonl');
-  writeFileSync(outside, transcript);
-  const envelope = join(data.dir, 'envelope.json');
-  writeFileSync(envelope, JSON.stringify({ operatorId: config.operatorId, sessionId: 'synthetic-session',
-    source: outside, transcript, transcriptSha256: hash(Buffer.from(transcript)) }));
-  collect(data.attempt, 'coordinator', envelope);
-  assert.doesNotThrow(() => seal(data.attempt), 'Records frozen before the rule keep their reading');
+  // The frozen history itself stays readable.
+  assert.doesNotThrow(() => summary(data.run));
 });
 test('resource settlement needs declared terminal states, not merely absent live labels', t => {
   const settlement = status => Buffer.from(JSON.stringify({

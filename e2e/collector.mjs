@@ -120,6 +120,8 @@ function loadAttempt(attempt, current = false) {
   const loaded = getScenario(dirname(dirname(attempt)), data.scenarioId, current);
   requireValue(basename(dirname(attempt)) === data.scenarioId && /^attempt-\d+$/.test(basename(attempt)), 'Attempt location mismatch');
   requireValue(data.runManifestSha256 === loaded.run.manifestSha256, 'Attempt manifest mismatch');
+  requireValue(loaded.frozen.evidenceVersion === undefined || loaded.frozen.evidenceVersion === evidenceVersion,
+    'Unsupported evidence version; initialize a new run');
   return { ...loaded, attempt, data };
 }
 export function fixture(attempt) {
@@ -169,8 +171,7 @@ function evidenceIndex(attempt) {
     return { path, kind: record.kind, sha256: hash(bytes) };
   });
 }
-const evidenceContext = loaded => ({ operatorId: loaded.data.config.operatorId, runDirectory: loaded.directory,
-  evidenceVersion: loaded.frozen.evidenceVersion });
+const evidenceContext = loaded => ({ operatorId: loaded.data.config.operatorId, runDirectory: loaded.directory });
 function missingEvidence(loaded, evidence) {
   const context = evidenceContext(loaded);
   return loaded.frozen.evidenceKinds.filter(kind => !evidence.some(item => {

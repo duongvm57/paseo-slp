@@ -106,12 +106,13 @@ export function satisfiesEvidence(kind, bytes, context = {}) {
 }
 
 // Whether a ledger record discharges its kind: the payload rule, plus capture
-// provenance for kinds whose evidence only exists outside the run. Records
-// frozen before the provenance rule keep their historical reading.
+// provenance for kinds whose evidence only exists outside the run. The caller
+// guarantees the run was frozen under this evidenceVersion, so provenance is
+// unconditional here.
 export function dischargesEvidence(kind, record, context = {}) {
   const entry = registry[kind];
   if (!entry) return false;
   const bytes = Buffer.from(record.bytes, 'base64');
   if (!attempt(entry.satisfies, bytes, context)) return false;
-  return !entry.sourceVerified || context.evidenceVersion < 4 || record.capture === 'verified';
+  return !entry.sourceVerified || record.capture === 'verified';
 }

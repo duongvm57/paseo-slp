@@ -133,7 +133,10 @@ additional evidence and declare the coordinator gap; do not present a run-author
 ledger as native evidence. `collect ... coordinator` cannot satisfy this gate.
 Reviewer inspection must still establish relevant requests/responses, completeness
 through settlement and authentic host provenance. Older sealed runs retain their
-frozen evidence format and historical judgments.
+frozen evidence format and historical judgments. An attempt frozen under a
+different `evidenceVersion` refuses new collection, sealing and review — the
+current validators would silently re-interpret another era's records — so
+initialize a new run; sealed history stays readable in the run summary.
 The source should carry actual event time, host/tool source, actor IDs and request
 or receipt correlation. Export host records through discovered supported tools;
 do not store credentials from host config. If redaction removes required proof,
