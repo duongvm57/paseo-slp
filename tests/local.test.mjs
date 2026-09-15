@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, chmodSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { identity, install, verifyInstall, uninstall, snapshot, json } from '../src/package.mjs';
 import { prompt, launchPlan } from '../src/launch.mjs';
 import { roleBundle } from '../src/role-bundle.mjs';
@@ -109,6 +109,21 @@ test('offline CLI prepares from a staged install with no Paseo executable or dae
   const planned = JSON.parse(execFileSync(process.execPath, [join(root, 'bin/slp.mjs'), 'install', join(dir, 'not-created')], { env: { PATH: '' }, encoding: 'utf8' }));
   assert.equal(planned.applied, false);
   assert.equal(existsSync(join(dir, 'not-created')), false);
+});
+
+test('CLI reports a missing target instead of a raw path error', () => {
+  const cli = join(root, 'bin/slp.mjs');
+  for (const command of ['prepare', 'prepare-handoff', 'snapshot', 'verify', 'routes', 'init']) {
+    const result = spawnSync(process.execPath, [cli, command], { encoding: 'utf8' });
+    assert.equal(result.status, 1, command);
+    assert.match(result.stderr, new RegExp(`${command} requires`), command);
+  }
+});
+
+test('prepare rejects an unknown role before binding resolution', t => {
+  const installed = join(fixture(t), 'release');
+  install(root, installed);
+  assert.throws(() => launchPlan(installed, { role: 'bogus', workspaceId: 'w', repository: root, assignment: 'x', binding }), /Unknown role/);
 });
 
 test('work snapshot detects untracked edits, deletion and executable mode without a commit', t => {

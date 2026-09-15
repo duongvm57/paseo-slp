@@ -27,6 +27,8 @@ try {
   if (command === 'upgrade' && !options['--from']) throw new Error('upgrade requires --from <previous-installation>');
   if (options['--paseo-home'] && command !== 'install') throw new Error('--paseo-home is only valid for install');
   if (options['--reload'] && (!options['--apply'] || !['install', 'uninstall', 'upgrade'].includes(command))) throw new Error('--reload requires install/uninstall/upgrade --apply');
+  const targetArg = { snapshot: 'repository', verify: 'dir', prepare: 'request.json', 'prepare-handoff': 'request.json', routes: 'repository', init: 'repository' };
+  if (targetArg[command] && !target) throw new Error(`${command} requires <${targetArg[command]}>`);
   let result;
   if (command === 'identity') result = identity(root);
   else if (command === 'snapshot') result = snapshot(target);

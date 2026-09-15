@@ -1,5 +1,5 @@
 import { join, isAbsolute, basename } from 'node:path';
-import { savedProfileBinding, roleProvider } from './profiles.mjs';
+import { savedProfileBinding, roleProvider, roles } from './profiles.mjs';
 import { verifyInstall, snapshot } from './package.mjs';
 import { catalogBinding } from './routing.mjs';
 import { bindingCheck, dispositionPattern } from './binding.mjs';
@@ -83,6 +83,7 @@ function agentTitle(role, disposition, request, packet) {
 function plan(root, request, packet) {
   verifyInstall(root);
   const role = request.role ?? 'supervisor';
+  if (!roles.includes(role)) throw new Error('Unknown role');
   const disposition = request.disposition ?? request.route?.disposition;
   if (disposition != null && (role !== 'peer' || typeof disposition !== 'string' || !dispositionPattern.test(disposition))) throw new Error('Invalid Peer disposition');
   for (const key of ['workspaceId', 'repository', 'assignment']) {
