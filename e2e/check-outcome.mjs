@@ -14,6 +14,10 @@ const cases = [
   [[{ unitCents: 1, quantity: 1 }], 50, 0, 1],
   [[{ unitCents: 999, quantity: 7 }], 100, 99, 99],
   [[{ unitCents: 0, quantity: 5 }], 10, 7, 7],
+  // Discount amount floors to whole cents: 101*15% = 15.15 -> 15, not 15 or 16.
+  [[{ unitCents: 101, quantity: 1 }], 15, 0, 86],
+  // Multi-line subtotal, fractional discount and shipping ordering together.
+  [[{ unitCents: 200, quantity: 2 }, { unitCents: 50, quantity: 1 }], 25, 30, 368],
 ];
 for (const [lines, percent, shipping, expected] of cases) {
   assert.equal(checkout(lines, percent, shipping), expected, JSON.stringify({ lines, percent, shipping }));

@@ -15,7 +15,7 @@ Live execution and skill discovery remain NOT_RUN until exercised on a real host
 
 ## Basic flows
 
-`basic-pi` and `basic-codex` use the current authorized Paseo host with a separate
+`basic-pi`, `basic-codex` and `basic-devin` use the current authorized Paseo host with a separate
 fixture. They require no prelaunch confirmer (`config.confirmer` may be omitted).
 The coordinator validates candidate/profiles, prepares the fixture and failing
 baseline, then launches Supervisor → Lead → Peer. Final outcome checks,
@@ -29,12 +29,16 @@ Use `npm run e2e -- plan` for the whole manifest, or append a scenario ID for on
 row. All paths below are arguments, not shell snippets to interpolate from logs.
 
 ```bash
-npm run e2e -- init .e2e-runs/run-001
+npm run e2e -- init .e2e-runs/run-001 /absolute/run-config.json
 npm run e2e -- begin .e2e-runs/run-001 basic-codex /absolute/attempt-config.json
 npm run e2e -- fixture .e2e-runs/run-001/basic-codex/attempt-001
 # Complete fixture protocol and verify saved profiles before launching any task actor;
 # see Fixture setup below. Then capture actual launch and subsequent evidence.
 npm run e2e -- collect .e2e-runs/run-001/basic-codex/attempt-001 launch /absolute/launch-receipt.json
+# Preview at any time: status lists each collected record, whether its payload
+# discharges its kind, and the still-missing required kinds — or, once sealed,
+# the frozen report hash, declared gaps, source drift and recorded review.
+npm run e2e -- status .e2e-runs/run-001/basic-codex/attempt-001
 # After handback: settle activity, collect final transcripts and actual receipts,
 # then complete WORKSPACE_PROTOCOL.md's Before sealing audit.
 npm run e2e -- seal .e2e-runs/run-001/basic-codex/attempt-001
@@ -43,7 +47,19 @@ npm run e2e -- review .e2e-runs/run-001/basic-codex/attempt-001 /absolute/indepe
 # preserve review.json and append an explicitly bound addendum.
 npm run e2e -- review-addendum .e2e-runs/run-001/basic-codex/attempt-001 /absolute/review-addendum.json
 npm run e2e -- summary .e2e-runs/run-001
+# Cross-run index: every child directory holding a run.json is summarized with
+# status, gate readiness and counts; an unreadable run reports its error.
+npm run e2e -- runs .e2e-runs
 ```
+
+`init` accepts an optional run config recording the run-level bound the protocol
+requires: `scope` (selected scenario IDs; absent means the whole manifest),
+`budget` (`maxAgents`, `maxWallTimeSeconds`) and a future `deadline`. `begin`
+refuses new launches past a recorded deadline; settlement, sealing and review
+stay open. `summary` reports `scopeReady` — every in-scope row gate-ready —
+beside `gateReady`, which always covers the full manifest, and marks each row
+`inScope`, so a scoped run can record completion without implying the suite
+passed.
 
 The coordinator creates the config from discovery and existing Human authority;
 the Human does not need to fill out JSON. `begin` requires `operatorId`,
@@ -150,8 +166,8 @@ record the limitation. Decode `bytes` as base64 to inspect the original artifact
 | timeline | Full relevant host events, parentage, messages, reports, faults, notifications and owner decisions. |
 | coordinator | Raw coordinator requests/responses from setup through root launch, observation and settlement, with source provenance and event times. Reconcile these bytes with the interventions ledger for U5; a curated summary does not substitute. |
 | artifacts | Before/after snapshots **and artifact bytes/diffs**, stable candidate identities, sealed reports and integrated result. |
-| checks | Exact independent outcome and actor verification commands, exit statuses and outputs on identified candidates. |
-| interventions | Declared stimuli, operator assistance/decisions or explicit zero, duration and assistance count. |
+| checks | Structured receipt `{ "checks": [{ "command", "exitCode", "output"?, "cwd"? }] }` naming each exact independent outcome or actor verification command with its real integer exit status on the identified candidate; a failing baseline keeps its nonzero code — the receipt proves the check ran, not that it passed. Freeform logs stay visible as raw captures but cannot discharge the kind under evidenceVersion 5. |
+| interventions | Structured receipt `{ "interventions": [{ "at", "action", ... }], "assistanceCount": 0, "durationSeconds": number|null }` — declared stimuli, operator assistance/decisions or explicit zero, observed duration and assistance count. An explicit-zero receipt is a recorded claim; a freeform "no interventions" note stays in the ledger but cannot discharge the kind under evidenceVersion 5. |
 | resources | Version 1 structured settlement: creation/owner IDs, terminal actor states, empty pending-permission arrays, settlement operations/receipts, final inventories and late-wake observations. |
 
 Collect each resource receipt as soon as it is returned. Before sealing, write the
@@ -262,7 +278,9 @@ Keep incomplete attempts visible; collect/settle/seal/review them before retryin
 candidate; blocked retries remain visible; declared repetitions must be satisfied.
 Exit codes are 0 for all PASS with verified review histories, 1 for any FAIL (or an
 integrity/validation error), and 2 for BLOCKED/NOT_RUN or unverified historical PASS.
-Use `gateReady`, not historical `status` alone, for a new acceptance gate. The JSON
+Use `gateReady`, not historical `status` alone, for a new acceptance gate; for a
+run initialized with a declared `scope`, `scopeReady` reports only the in-scope
+rows while `gateReady` still covers the whole manifest. The JSON
 is an evidence index and status matrix, not a substitute for the Human handback
 required in WORKSPACE_PROTOCOL.md. Preserve its output as the run's final report.
 

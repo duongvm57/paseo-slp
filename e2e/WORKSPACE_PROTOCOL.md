@@ -79,7 +79,9 @@ run cost/agents/time as well as each attempt, counting reviewers and retries.
 Where cost telemetry is absent, record that limit; agent/time caps do not prove a
 monetary cap. Record startedAt and deadline before run preparation begins; include
 setup, confirmation, retries, collection and review in elapsed time. Reserve time
-and an agent slot for final review. Resume preserves the deadline; a new budget
+and an agent slot for final review. The init run config carries the declared
+bound (`scope`, `budget`, `deadline`); `begin` refuses new launches past a
+recorded deadline, so a resume preserves it and a new budget
 requires Human authority. At the deadline stop launches and observation, then
 finish authorized settlement and report any unperformed review as NOT_RUN.
 
@@ -289,7 +291,9 @@ Apply this audit after task handback (or stop/failure settlement), before `seal`
    active/unknown actor state, cleanup plan or path to a live log cannot satisfy U7.
 5. Index the required events to collected files for each assertion and U1–U7.
    Inspect decoded collected bytes, not only original source files or evidence
-   kind names. Fill accessible gaps before sealing; if proof is unavailable,
+   kind names. `status <attempt>` previews which records discharge their kind
+   and which required kinds are still missing. Fill accessible gaps before
+   sealing; if proof is unavailable,
    collect the available receipts and use `seal <attempt> <gaps.json>` with
    `{ "gaps": [{ "kind": "missing-kind", "reason": "concrete host gap" }] }`
    for every missing kind. The incomplete report cannot receive PASS.

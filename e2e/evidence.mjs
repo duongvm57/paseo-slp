@@ -4,7 +4,7 @@ import { hash } from '../src/package.mjs';
 // One contract per evidence kind. The ledger keeps a registry; it does not know
 // what a Paseo coordinator transcript or a host resource inventory looks like.
 // Bumped whenever any validator below changes meaning.
-export const evidenceVersion = 4;
+export const evidenceVersion = 5;
 
 const nonempty = value => typeof value === 'string' && value.trim().length > 0;
 
@@ -62,6 +62,30 @@ function settledResources(bytes) {
 const terminalActorStatus = new Set(['idle', 'closed', 'completed', 'finished', 'failed', 'error',
   'stopped', 'archived', 'exited', 'retained', 'interrupted', 'cancelled', 'canceled', 'settled', 'done', 'terminated']);
 
+// A checks receipt names each verification command and its real exit status, so
+// the outcome criterion rests on recorded runs rather than a success narrative.
+// A failing baseline keeps its nonzero exitCode: the receipt proves the check
+// ran, not that it passed.
+function checksReceipt(bytes) {
+  const payload = JSON.parse(bytes);
+  return Array.isArray(payload?.checks) && payload.checks.length > 0
+    && payload.checks.every(entry => entry !== null && typeof entry === 'object'
+      && nonempty(entry.command) && Number.isInteger(entry.exitCode));
+}
+
+// An interventions receipt is the explicit ledger U5 stands on: every stimulus,
+// assistance and decision with its time, plus totals — so "no interventions" is
+// a recorded claim, not an absent file.
+function interventionsReceipt(bytes) {
+  const payload = JSON.parse(bytes);
+  return Array.isArray(payload?.interventions)
+    && payload.interventions.every(entry => entry !== null && typeof entry === 'object'
+      && nonempty(entry.at) && nonempty(entry.action))
+    && Number.isInteger(payload.assistanceCount) && payload.assistanceCount >= 0
+    && Object.hasOwn(payload, 'durationSeconds')
+    && (payload.durationSeconds === null || Number.isFinite(payload.durationSeconds));
+}
+
 const capturedBytes = bytes => bytes.length > 0;
 // accept: gate at collection time, with the message a coordinator sees.
 // satisfies: does this payload actually discharge its kind's requirement at seal time.
@@ -79,8 +103,8 @@ const registry = {
     sourceVerified: true,
   },
   artifacts: { satisfies: capturedBytes },
-  checks: { satisfies: capturedBytes },
-  interventions: { satisfies: capturedBytes },
+  checks: { satisfies: checksReceipt },
+  interventions: { satisfies: interventionsReceipt },
   resources: {
     accept: resourceSettlementShape,
     message: 'Resource settlement must use the version 1 structured receipt',

@@ -56,7 +56,9 @@ window on an explicit new run request, preserving previous elapsed history.
    package identity, scenario manifest, checklist and harness identity. Complete
    the concrete prelaunch config before requesting independent confirmation;
    follow **Prelaunch confirmation** in e2e/WORKSPACE_PROTOCOL.md. Record the
-   run deadline, resource baseline, permission policy and retention choice.
+   run deadline, resource baseline, permission policy and retention choice; pass
+   `scope`/`budget`/`deadline` to `init` through run-config.json so `begin`
+   enforces the bound on new launches.
    For a full run, start with isolated onboarding/install trials and the
    Codex/Pi basic flows (Human configures profiles for each family); for a scoped run, prepare only its required prerequisites.
 3. For every selected row, create an attempt and independent fixture. Complete
@@ -75,7 +77,8 @@ window on an explicit new run request, preserving previous elapsed history.
    e2e/WORKSPACE_PROTOCOL.md: collect final transcript copies through handback and
    settlement, collect the coordinator's native session with `collect-coordinator`,
    freeze the settlement with `collect-resources`, reconcile interventions, and
-   verify receipts before sealing.
+   verify receipts before sealing. `status <attempt>` previews which collected
+   records discharge their kind and which required kinds remain missing.
    Keep agents/workspace visible for Human inspection unless archive was requested.
 5. Have a fresh independent Paseo reviewer evaluate the frozen evidence against
    every scenario assertion and U1–U7. Supply the objective and evidence, not a
