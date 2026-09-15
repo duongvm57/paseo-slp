@@ -21,12 +21,10 @@ try {
       options[key] = args[++i];
     } else throw new Error(`Unknown flag ${key}`);
   }
-  if (args.length && !['install', 'uninstall', 'upgrade', 'init'].includes(command)) throw new Error('This command takes no flags');
-  if (options['--from'] && command !== 'upgrade') throw new Error('--from is only valid for upgrade');
-  if (options['--routing-from'] && command !== 'init') throw new Error('--routing-from is only valid for init');
+  const commandFlags = { install: ['--paseo-home', '--apply', '--reload'], uninstall: ['--apply', '--reload'], upgrade: ['--from', '--apply', '--reload'], init: ['--routing-from', '--apply'], routes: ['--paseo-home'] };
+  for (const key of Object.keys(options)) if (!commandFlags[command]?.includes(key)) throw new Error(`${key} is not valid for ${command}`);
   if (command === 'upgrade' && !options['--from']) throw new Error('upgrade requires --from <previous-installation>');
-  if (options['--paseo-home'] && command !== 'install') throw new Error('--paseo-home is only valid for install');
-  if (options['--reload'] && (!options['--apply'] || !['install', 'uninstall', 'upgrade'].includes(command))) throw new Error('--reload requires install/uninstall/upgrade --apply');
+  if (options['--reload'] && !options['--apply']) throw new Error('--reload requires --apply');
   const targetArg = { snapshot: 'repository', verify: 'dir', prepare: 'request.json', 'prepare-handoff': 'request.json', routes: 'repository', init: 'repository' };
   if (targetArg[command] && !target) throw new Error(`${command} requires <${targetArg[command]}>`);
   let result;
@@ -35,7 +33,7 @@ try {
   else if (command === 'verify') result = verifyInstall(resolve(target));
   else if (command === 'prepare') result = launchPlan(root, readJson(target));
   else if (command === 'prepare-handoff') result = handoffPlan(root, readJson(target));
-  else if (command === 'routes') result = readCatalog(target);
+  else if (command === 'routes') result = readCatalog(target, options['--paseo-home']);
   else if (command === 'init') result = initWorkspace(root, target, Boolean(options['--apply']), options['--routing-from']);
   else if (command === 'install' || command === 'uninstall' || command === 'upgrade') {
     if (!target || !isAbsolute(target)) throw new Error('Absolute destination required');
@@ -63,6 +61,6 @@ try {
         process.exitCode = 1;
       }
     }
-  } else throw new Error('Usage: slp.mjs identity | snapshot <repo> | install <absolute-new-dir> [--paseo-home <absolute-home>] [--apply] [--reload] | upgrade <absolute-new-dir> --from <previous-installation> [--apply] [--reload] | verify <dir> | uninstall <dir> [--apply] [--reload] | init <absolute-repo> [--routing-from <absolute-json>] [--apply] | routes <absolute-repo> | prepare <request.json> | prepare-handoff <request.json>');
+  } else throw new Error('Usage: slp.mjs identity | snapshot <repo> | install <absolute-new-dir> [--paseo-home <absolute-home>] [--apply] [--reload] | upgrade <absolute-new-dir> --from <previous-installation> [--apply] [--reload] | verify <dir> | uninstall <dir> [--apply] [--reload] | init <absolute-repo> [--routing-from <absolute-json>] [--apply] | routes <absolute-repo> [--paseo-home <absolute-home>] | prepare <request.json> | prepare-handoff <request.json>');
   process.stdout.write(json(result));
 } catch (error) { console.error(error.message); process.exitCode = 1; }

@@ -195,8 +195,9 @@ Onboarding scenarios deliberately start with their declared absent/existing-file
 baseline and test fresh-session skill discovery. Let those setup actors produce
 the files; coordinator initialization must not pre-satisfy their assertions.
 Neither this exception nor an installation trial permits a subsequent code task
-to launch with unresolved repo protocol or required profile settings. Negative routing rows may remove
-or invalidate config after recording a valid baseline, at the declared trigger.
+to launch with unresolved repo protocol or required profile settings. Negative routing rows may invalidate
+config after recording a valid baseline, at the declared trigger; a removed repository catalog resolves the
+user-scope pool, so rejection requires invalidating the resolved catalog or both scopes.
 
 For each row pin the outcome appropriate to the branch. Repair/integration uses
 the external checkout contract. Onboarding uses discovery and preserved config;

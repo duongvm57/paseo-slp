@@ -1,5 +1,6 @@
 import { readFileSync, lstatSync, realpathSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
+import { homedir } from 'node:os';
 import { hash } from './package.mjs';
 import { families, roles, providerId } from './profiles.mjs';
 import { settingIdPattern, unsafeModelPattern, rejectRouteKeys, verifyProvider,
@@ -50,23 +51,33 @@ export function routingPath(repository) {
   return join(realpathSync(repository), '.paseo-slp', 'slp-routing.json');
 }
 
-export function readCatalog(repository) {
-  const path = routingPath(repository);
-  try {
-    if (!lstatSync(join(path, '..')).isDirectory()) throw new Error('Repository .paseo-slp must be a regular directory');
-    if (!lstatSync(path).isFile()) throw new Error('Repository routing catalog must be a regular file');
-  } catch (error) {
-    if (error.code === 'ENOENT') throw new Error(`Missing repository routing catalog ${path}; run init for this repository or use paseo-slp-onboarding`);
-    throw error;
+export const paseoHome = () => process.env.PASEO_HOME || join(homedir(), '.paseo');
+
+// Resolution is skill-style: the repository catalog wins when present, otherwise
+// the user-scope catalog <paseoHome>/slp-routing.json is the declared fallback.
+// A malformed or structurally invalid repository file is an authoring error, not
+// a fallback trigger; never substitute another repository's catalog.
+export function readCatalog(repository, home = paseoHome()) {
+  if (typeof home !== 'string' || !isAbsolute(home)) throw new Error('Absolute Paseo home required');
+  const stat = path => { try { return lstatSync(path); } catch (error) { if (error.code === 'ENOENT') return null; throw error; } };
+  const repoPath = routingPath(repository);
+  const dirStat = stat(join(repoPath, '..'));
+  if (dirStat && !dirStat.isDirectory()) throw new Error('Repository .paseo-slp must be a regular directory');
+  let path = repoPath, scope = 'repository', fileStat = stat(repoPath);
+  if (dirStat == null || fileStat == null) {
+    path = join(home, 'slp-routing.json'); scope = 'user';
+    fileStat = stat(path);
+    if (fileStat == null) throw new Error(`Missing routing catalog: no repository catalog at ${repoPath} and no user-scope catalog at ${path}; run init for this repository or use paseo-slp-onboarding`);
   }
+  if (!fileStat.isFile()) throw new Error(`${scope === 'repository' ? 'Repository' : 'User-scope'} routing catalog must be a regular file`);
   const bytes = readFileSync(path, 'utf8');
-  return { ...validateCatalog(JSON.parse(bytes)), path, sha256: hash(bytes) };
+  return { ...validateCatalog(JSON.parse(bytes)), path, scope, sha256: hash(bytes) };
 }
 
 // Lead chooses the option, not an enum/disposition-to-profile mapping.
-export function catalogBinding(repository, role, providers, route) {
+export function catalogBinding(repository, role, providers, route, home) {
   if (Object.hasOwn(route, 'catalogFile')) throw new Error('Routing is repository-scoped; use repository/.paseo-slp/slp-routing.json, not route.catalogFile');
-  const catalog = readCatalog(repository);
+  const catalog = readCatalog(repository, home);
   if (route.catalogSha256 !== catalog.sha256) throw new Error('Routing catalog changed or hash missing; read routes again before selecting');
   const option = catalog.options.find(item => item.id === route.optionId);
   if (!option) throw new Error(`Unknown routing option ${route.optionId}`);
@@ -84,6 +95,6 @@ export function catalogBinding(repository, role, providers, route) {
   verifyProvider(providers, provider, () => option.provider, provider);
   return {
     binding: { provider, model: option.model, modeId: option.modeId, thinkingOptionId: option.thinkingOptionId, features: structuredClone(option.features ?? {}) },
-    routing: { catalogFile: catalog.path, catalogSha256: catalog.sha256, optionId: option.id, ...(route.quotaFallbackFrom ? { quotaFallbackFrom: route.quotaFallbackFrom } : {}) },
+    routing: { catalogFile: catalog.path, catalogScope: catalog.scope, catalogSha256: catalog.sha256, optionId: option.id, ...(route.quotaFallbackFrom ? { quotaFallbackFrom: route.quotaFallbackFrom } : {}) },
   };
 }

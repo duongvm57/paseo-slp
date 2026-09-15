@@ -19,6 +19,9 @@ launches, not existing sessions.
 
 Read the assigned repository's .paseo-slp/slp-routing.json with
 `node <installed>/bin/slp.mjs routes <absolute-repository>` before each delegation.
+Resolution is skill-style: the repository catalog wins when present; when the
+repository has no catalog, routes resolves the user-scope catalog
+($PASEO_HOME/slp-routing.json, default ~/.paseo) and reports scope/path.
 Each option contains an id, provider family (pi/codex/devin), model, optional modeId,
 thinkingOptionId/features, roles, enabled, availability, priority, suitableFor,
 avoidFor and notes. Human/onboarding establishes the pool and suitability under
@@ -37,11 +40,13 @@ common/Peer instructions.
 Record the option, hash, suitability reason, create arguments and actual settings.
 
 No slp-peer saved profile is installed or required. Profile inventories may accompany
-prepare discovery but cannot override the selected Peer option. Missing/empty pool,
-no eligible option, stale hash or unavailable runtime blocks only the dependent
-Peer delegation: use paseo-slp-onboarding to complete project setup. Do not fall
-back to host/global/another repository's catalog, a saved Peer profile or inherited
-Lead settings. Unknown availability is not permission to launch.
+prepare discovery but cannot override the selected Peer option. No catalog in
+either scope, an empty or ineligible pool, stale hash or unavailable runtime
+blocks only the dependent Peer delegation: use paseo-slp-onboarding to complete
+setup. The user-scope catalog is the only declared fallback — never substitute
+another repository's catalog, a saved Peer profile or inherited Lead settings.
+An empty repository catalog remains authoritative and disables the fallback.
+Unknown availability is not permission to launch.
 
 ## Peer quota fallback
 
@@ -73,8 +78,10 @@ waive ownership, independent-review requirements or authorize new pool entries.
 
 Supervisor/Lead prepare requests use fresh profiles/providers, role, repository,
 workspaceId and assignment. Peer requests use the same task fields and providers,
-plus route.optionId/catalogSha256. Preparation reads only the assigned repository
-pool and emits arguments; it never creates an agent or chooses the option for Lead.
+plus route.optionId/catalogSha256. An optional paseoHome overrides the fallback
+catalog home ($PASEO_HOME, default ~/.paseo). Preparation resolves the repository
+pool with the user-scope catalog as fallback and emits arguments; it never creates
+an agent or chooses the option for Lead.
 Pass the array returned by live list_providers as request.providers, extracting
 it from the tool response envelope when necessary. Each entry carries the observed
 id, enabled and status (and extends when present). A missing inventory is a request

@@ -93,7 +93,7 @@ node "$HOME/.local/share/paseo-slp/bin/slp.mjs" init /absolute/job-repo --apply
 Lệnh chỉ tạo hai file cấu hình còn thiếu và giữ nguyên từng file đã có:
 
 - `.paseo-slp/WORKSPACE_PROTOCOL.md`: quy trình, mức rủi ro, proof gate, budget và quyền fallback.
-- `.paseo-slp/slp-routing.json`: pool runtime của Peer. Init để rỗng; onboarding cần điền option hợp lệ trước delegation.
+- `.paseo-slp/slp-routing.json`: pool runtime của Peer. Init để rỗng; onboarding cần điền option hợp lệ trước delegation. Khi repo chưa có file này, runtime đọc catalog user-scope `$PASEO_HOME/slp-routing.json` (mặc định `~/.paseo`).
 
 Skill onboarding được cài riêng để agent có thể auto-trigger. Từ repo muốn dùng,
 cài project-local (tạo `.agents/skills/paseo-slp-onboarding` và có thể commit cùng repo):
@@ -133,7 +133,10 @@ node "$HOME/.local/share/paseo-slp/bin/slp.mjs" init /absolute/job-repo \
 ```
 
 Import chỉ tạo catalog khi chưa có; không ghi đè, trộn ngầm hay tiếp tục liên kết
-với file nguồn. Sau đó Human chỉnh bản trong repo. Thiếu catalog không fallback global.
+với file nguồn. Sau đó Human chỉnh bản trong repo. Repo chưa có catalog thì đọc
+catalog user-scope `$PASEO_HOME/slp-routing.json`; catalog rỗng trong repo vẫn
+authoritative (chặn delegation) cho tới khi bị xóa. Không bao giờ đọc catalog của
+repo khác.
 
 Protocol chọn topology và proof gate theo risk: task nhỏ có thể dùng một Engineer;
 việc nhạy về architecture/lifecycle có Architect, independent Reviewer hoặc nhiều
@@ -148,7 +151,8 @@ constraint liên quan qua assignment. Đây là policy cho agent sử dụng pri
 không có detector hay monitoring daemon riêng trong package.
 
 **Nguồn runtime:** Supervisor/Lead dùng hai saved profile Human cấu hình trong
-Paseo. Peer dùng pool `.paseo-slp/slp-routing.json` của repo. Mỗi option có provider
+Paseo. Peer dùng pool `.paseo-slp/slp-routing.json` của repo, hoặc catalog
+user-scope `$PASEO_HOME/slp-routing.json` khi repo chưa có. Mỗi option có provider
 `pi`/`codex`/`devin`, model, settings, `suitableFor`, `avoidFor`, `notes`, `priority` và
 trạng thái `enabled`/`availability`. Lead chọn theo công việc, không gán cứng
 Engineer/Architect/Reviewer vào model. Hai Peer có thể khác provider/model/effort
@@ -156,8 +160,9 @@ mà không thêm saved profile. Xem [catalog mẫu](examples/slp-routing.json); 
 trong mẫu cần được discovery trước khi đánh dấu `ready`.
 
 Lead đọc pool mới, ghi lý do chọn và kiểm tra option/hash bằng `prepare` trước khi
-launch. Không có pool/option hợp lệ thì hoàn thiện onboarding; không fallback sang
-`slp-peer`, settings của Lead hay catalog global. `priority` là gợi ý lựa chọn,
+launch. Không có pool/option hợp lệ ở cả hai scope thì hoàn thiện onboarding;
+không fallback sang `slp-peer`, settings của Lead hay catalog repo khác.
+`priority` là gợi ý lựa chọn,
 không thay thế đánh giá suitability và budget.
 
 **Fallback quota của Peer:** cấu hình ngay trong `.paseo-slp/slp-routing.json`:

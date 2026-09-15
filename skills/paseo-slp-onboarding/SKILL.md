@@ -7,7 +7,9 @@ description: Set up or revise a repository's Paseo SLP protocol and Peer runtime
 
 Configure tactics in .paseo-slp/WORKSPACE_PROTOCOL.md and Peer runtime options in
 .paseo-slp/slp-routing.json. Supervisor/Lead use saved slp-supervisor/slp-lead
-profiles. Peer uses the project pool by default; no saved slp-peer profile is
+profiles. Peer uses the project pool, falling back to the user-scope catalog
+($PASEO_HOME/slp-routing.json, default ~/.paseo) when the repository has none;
+no saved slp-peer profile is
 needed. Engineer, Architect and Reviewer are dispositions of the same Peer role.
 
 ## Establish context
@@ -67,11 +69,13 @@ route: { optionId, catalogSha256 } to inspect launch arguments without creating
 an agent. Verify the wrapper/model/settings match the option. Include profiles
 only if useful for discovery; they never select or override the Peer runtime.
 
-An empty catalog is valid init output but incomplete Peer onboarding. Report no
+An empty catalog is valid init output but incomplete Peer onboarding — it also
+remains authoritative and shadows the user-scope catalog until removed. Report no
 eligible option as unresolved setup, not success. Preserve existing pool entries
 and Human preferences on updates; edit only the authorized scope. --routing-from
-imports an explicitly selected source only into a missing catalog. Never use an
-implicit global/host/other-repository fallback. No automatic import from retired
+imports an explicitly selected source only into a missing catalog. The user-scope
+catalog is the only declared fallback, resolved automatically when the repository
+has none; never read another repository's catalog. No automatic import from retired
 profile bindings occurs during host upgrade.
 
 ## Verify and hand back

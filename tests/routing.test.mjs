@@ -68,7 +68,7 @@ test('Supervisor and Lead use saved profiles; Peer uses the project pool without
   writeFileSync(path, json(catalog));
   assert.throws(() => launch({ profiles: staleProfiles, route: route('glm-design') }), /Unknown routing option/);
   rmSync(path);
-  assert.throws(() => launch({ route: { optionId: 'glm-design', catalogSha256: 'old' } }), /Missing repository routing catalog/);
+  assert.throws(() => launch({ route: { optionId: 'glm-design', catalogSha256: 'old' }, paseoHome: join(dir, 'no-home') }), /Missing routing catalog/);
 });
 
 test('Lead selects independent runtime bundles for one Peer role without a disposition mapping', t => {
@@ -432,20 +432,56 @@ test('upgrade archives owned disposition settings in binding without reading or 
   assert.deepEqual(readJson(join(final, 'paseo-binding.json')).retiredProfiles, specialized);
 });
 
-test('same option ID can resolve differently per repo; missing repo config cannot fall back or redirect', t => {
+test('same option ID can resolve differently per repo; another repo catalog cannot redirect', t => {
   const { dir, installed } = fixture(t); install(root, installed);
   const repoA = join(dir, 'repo-a'), repoB = join(dir, 'repo-b'); mkdirSync(repoA); mkdirSync(repoB);
   const a = catalogFixture(repoA), b = catalogFixture(repoB);
   b.catalog.options[0].provider = 'pi'; b.catalog.options[0].model = 'opencode/glm-5.3-flash';
   b.catalog.options[0].thinkingOptionId = 'high'; writeFileSync(b.path, json(b.catalog));
-  const launch = (repository, route) => launchPlan(installed, { ...request, profiles: undefined, repository, route });
+  const launch = (repository, route, fields) => launchPlan(installed, { ...request, profiles: undefined, repository, route, paseoHome: join(dir, 'no-home'), ...fields });
   assert.equal(launch(repoA, a.route('luna-code')).create.provider, 'slp-codex-peer/gpt-5.6-luna');
   assert.equal(launch(repoB, b.route('luna-code')).create.provider, 'slp-pi-peer/opencode/glm-5.3-flash');
   assert.throws(() => launch(repoB, a.route('luna-code')), /catalog changed/);
   assert.throws(() => launch(repoB, { ...b.route('luna-code'), catalogFile: a.path }), /repository-scoped/);
   rmSync(b.path);
-  assert.throws(() => launch(repoB, { optionId: 'luna-code', catalogSha256: a.route('luna-code').catalogSha256 }), /Missing repository routing catalog/);
+  assert.throws(() => launch(repoB, { optionId: 'luna-code', catalogSha256: a.route('luna-code').catalogSha256 }), /Missing routing catalog/);
   assert.throws(() => readCatalog(), /Absolute repository/);
+});
+
+test('repository catalog wins over the user-scope fallback; fallback engages only when absent', t => {
+  const { dir, installed } = fixture(t); install(root, installed);
+  const home = join(dir, 'home'); mkdirSync(home);
+  const hostPath = join(home, 'slp-routing.json');
+  const hostCatalog = emptyCatalog();
+  hostCatalog.options = [{ id: 'host-peer', provider: 'pi', roles: ['peer'], model: 'opencode/host-model', enabled: true, availability: 'ready', priority: 1, suitableFor: ['tests'], avoidFor: [], notes: 'User-scope pool' }];
+  writeFileSync(hostPath, json(hostCatalog));
+  const repo = join(dir, 'repo'); mkdirSync(repo);
+  // No repository catalog: routes resolves the user-scope catalog.
+  let resolved = readCatalog(repo, home);
+  assert.equal(resolved.path, hostPath);
+  assert.equal(resolved.scope, 'user');
+  const hostRoute = { optionId: 'host-peer', catalogSha256: resolved.sha256 };
+  const peer = launchPlan(installed, { ...request, profiles: undefined, repository: repo, route: hostRoute, paseoHome: home });
+  assert.equal(peer.create.provider, 'slp-pi-peer/opencode/host-model');
+  assert.equal(peer.routing.catalogScope, 'user');
+  assert.equal(peer.routing.catalogFile, hostPath);
+  // Repository catalog wins when present, even with different options.
+  const { path, catalog } = catalogFixture(repo);
+  resolved = readCatalog(repo, home);
+  assert.equal(resolved.path, path);
+  assert.equal(resolved.scope, 'repository');
+  assert.throws(() => launchPlan(installed, { ...request, profiles: undefined, repository: repo, route: hostRoute, paseoHome: home }), /catalog changed|Unknown routing option/);
+  // A malformed repository file is an authoring error, not a fallback trigger.
+  writeFileSync(path, '{broken');
+  assert.throws(() => readCatalog(repo, home), SyntaxError);
+  // Both scopes absent: the error names both paths.
+  rmSync(path); rmSync(hostPath);
+  assert.throws(() => readCatalog(repo, home), /Missing routing catalog.*no repository catalog.*no user-scope catalog/s);
+  // routes CLI resolves the fallback home via --paseo-home.
+  writeFileSync(hostPath, json(hostCatalog));
+  const routes = () => JSON.parse(execFileSync(process.execPath, [join(installed, 'bin/slp.mjs'), 'routes', repo, '--paseo-home', home], { env: { PATH: '' }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+  assert.equal(routes().path, hostPath);
+  assert.equal(routes().scope, 'user');
 });
 
 test('quota fallback stays within the authorized project pool and preserves complete bundles', t => {

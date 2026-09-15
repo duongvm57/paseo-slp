@@ -16,7 +16,7 @@ const bindingSources = [
   {
     name: 'catalog routing',
     selects: request => request.route?.optionId != null,
-    resolve: (role, request, route) => catalogBinding(request.repository, role, request.providers, route),
+    resolve: (role, request, route) => catalogBinding(request.repository, role, request.providers, route, request.paseoHome),
   },
   {
     name: 'an explicit binding',
@@ -30,7 +30,7 @@ export function resolveBinding(role, request, disposition) {
     if (request.binding != null) throw new Error('Peer requires a project pool option; explicit bindings cannot bypass routing');
     // Profile inventory may accompany discovery, but never selects a Peer runtime.
     if (!request.route?.optionId) throw new Error('Peer requires a project routing option; run onboarding and select route.optionId with catalogSha256');
-    return catalogBinding(request.repository, role, request.providers, { ...request.route, disposition });
+    return catalogBinding(request.repository, role, request.providers, { ...request.route, disposition }, request.paseoHome);
   }
   const source = bindingSources.find(candidate => candidate.selects(request));
   if (!source) throw new Error('Binding source required: saved profiles, catalog routing or an explicit binding');

@@ -8,7 +8,9 @@ Peer runtime changes remain inside the project pool; quota fallback follows its 
    changes in the target checkout. Establish baseline resources to preserve. Read
    the repository's .paseo-slp/WORKSPACE_PROTOCOL.md for tactics and budget.
    Supervisor/Lead runtime settings come from slp-supervisor/slp-lead saved profiles.
-   Peer runtime settings come from this repository's .paseo-slp/slp-routing.json.
+   Peer runtime settings come from this repository's .paseo-slp/slp-routing.json,
+   or the user-scope catalog ($PASEO_HOME/slp-routing.json, default ~/.paseo) when
+   the repository has none.
    Disposition belongs to the assignment, not a fixed profile or option mapping.
    Discover provider availability and exact model/settings for the selected bundle.
    Missing setup goes through paseo-slp-onboarding; never invent a model or read

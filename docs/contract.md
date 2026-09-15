@@ -20,7 +20,7 @@ Local installation/transport checks do not constitute workflow acceptance.
 | src/references/governance.md | Supervisor scope, causal notebook, authorized recovery and policy evolution. |
 | src/references/anti-patterns.md | All 20 guide §9 hypotheses with evidence, questions and bounded responses; reached on audit/drift triggers. |
 | src/references/provider-routing.md | Supervisor/Lead profile selection, Peer pool selection, validation and handoff procedure. |
-| src/routing.mjs | Read only the assigned repository's catalog; bind a Lead-selected option with fresh hash and availability checks. |
+| src/routing.mjs | Resolve the repository catalog, falling back to the user-scope catalog when absent; bind a Lead-selected option with fresh hash and availability checks. |
 | skills/paseo-slp-onboarding/SKILL.md | Installable repo tactics and Peer pool setup, with Supervisor/Lead profile verification; project/global installation is independent from repo config initialization. |
 | src/templates/WORKSPACE_PROTOCOL.md | Repository tactics template with risk classes, routing, monitoring and proof gates; explicit init preserves existing files. |
 | src/binding.mjs | Every rule a Binding must satisfy: setting patterns, the route override deny-lists and the single provider-health check. Imports nothing from the package. |
@@ -99,14 +99,18 @@ Supervisor/Lead launches refresh these saved profiles and copy their complete
 provider/model/mode/thinking/features bundles. Missing or incompatible settings
 require Human configuration before the dependent launch.
 
-Peer delegation defaults to the assigned repository's .paseo-slp/slp-routing.json.
+Peer delegation resolves the assigned repository's .paseo-slp/slp-routing.json
+first; when the repository has no catalog, the user-scope catalog
+($PASEO_HOME/slp-routing.json, default ~/.paseo) is the declared fallback.
 Onboarding prepares a pool of complete provider/model/settings options with
 suitableFor, avoidFor, notes, priority and explicit eligibility. Lead reads the pool,
 selects an option per task/budget, explains why it fits and validates its fresh hash
 with prepare. Provider pi/codex/devin maps to the matching installed Peer wrapper; policy
 and disposition stay separate from runtime choice. Neither the Lead's family nor
-a saved slp-peer limits the pool. Missing/empty/no-eligible pool blocks Peer
-creation until setup is completed, without profile/global/other-repo fallback.
+a saved slp-peer limits the pool. No catalog in either scope, or an
+empty/no-eligible pool, blocks Peer creation until setup is completed — never a
+saved profile, another repository's catalog or inherited Lead settings. An empty
+repository catalog remains authoritative and disables the fallback.
 
 prepare accepts repository, workspaceId, assignment and role. Supervisor/Lead use
 fresh profiles/providers; Peer uses providers and route.optionId/catalogSha256.
@@ -118,7 +122,8 @@ owns lifecycle and actual settings. Source selection is shared by prepare-handof
 
 init creates missing protocol and empty pool scaffold without overwriting existing
 files. Onboarding completes the project pool; empty init output is not ready for
-Peer delegation. --routing-from imports only an explicitly chosen catalog into a
+Peer delegation and shadows the user-scope catalog until removed.
+--routing-from imports only an explicitly chosen catalog into a
 missing repo file. Host upgrade archives retired Peer profiles but neither creates
 nor edits project catalogs, so setup never silently imports host choices.
 

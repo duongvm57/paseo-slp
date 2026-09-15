@@ -32,7 +32,7 @@ export const scenarios = [
     ['Each invalid request is rejected and creates no child.', 'An authorized corrected selection can launch a real task; JSON quota flags are labelled catalog tests only.']),
   row('routing-repo-isolation', 'routing', ['G10', 'G13'],
     'Use two fixture repos with the same option ID but distinct settings, then remove one repo catalog at a declared boundary.',
-    ['Each delegation resolves only its assigned repo catalog.', 'Missing catalog blocks catalog routing without host/global/other-repo fallback.']),
+    ['Each delegation resolves only its assigned repo catalog.', 'A removed repo catalog resolves only the declared user-scope catalog; another repository catalog or a saved profile never substitutes, and no catalog in either scope blocks routing.']),
   ...[['codex', 'pi'], ['pi', 'codex']].map(([from, to]) => row(`handoff-${from}-${to}`, 'handoff', ['G09', 'G17', 'G24'],
     `During a real task, invoke the standing handoff mandate from a ${from} Lead to a fresh ${to} Lead.`,
     ['The old owner stops directing work before the new owner acknowledges ownership.', 'Work snapshot, decisions, Peer IDs and resource ownership transfer explicitly; host parentage stays truthful.', 'Replacement continues the task and hands back proof/verdict with settled resources.'], ['provider-codex', 'provider-pi', 'handoff-access'], { dependsOn: basicGates, repetitions: 2 })),
