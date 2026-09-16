@@ -237,6 +237,24 @@ provider/host error boundary and expose the corresponding real host signal;
 label it simulated. Genuine provider quota behavior remains unqualified unless
 actually observed. An unavailable injection facility blocks that scenario.
 
+For `role-transport` (resume-*) rows, the default stimulus is the supported
+per-agent boundary `paseo agent reload <id>`: the daemon closes the session
+process and rebuilds it from the persistence handle via `session/load`, which
+re-arms the role bytes on the next prompt. Fire it while the target role holds
+an unfinished assignment — Supervisor/Lead mid-orchestration (descendant live,
+verdict pending) or Peer mid-repair — then prompt the same agent to continue
+and verify in the native session store that the resume prompt carries the
+re-injected role block; the activity view may show only the prompt tail. Record
+the reload receipt and both boundary settings in `instructions`, and the reload
+itself as the declared intervention. `agent reload` cancels an in-flight turn
+cleanly, so it qualifies resume semantics, not mid-tool-call crash recovery.
+`paseo daemon restart` is a Human action: host-wide, it kills every transport
+on the daemon including unrelated projects — never run it as a routine stimulus
+and only with explicit Human authority when the scenario intends daemon-loss
+recovery. Killing an individual wrapper process is not a valid boundary: the
+daemon does not respawn dead children and the next prompt stalls — record that
+host gap rather than working around it.
+
 Use Paseo's finish/error/permission notifications; collect evidence when signalled.
 Heartbeat trials use actual timed delivery to the caller/owner with maxRuns or
 expiry and owner-scoped deletion receipts. Discover the host's actual semantics.
