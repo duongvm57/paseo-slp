@@ -96,17 +96,19 @@ when you want to hand work straight to a Lead.
 
 ## Skills
 
-Skills teach your agent how to set up and operate this pack.
+The onboarding skill teaches your agent how to set up this pack for a repo.
 
 ```bash
-npx skills add duongvm57/paseo-slp
+npx skills add duongvm57/paseo-slp --skill paseo-slp-onboarding
 ```
 
 - `paseo-slp-onboarding` — interviews you for the Peer pool decision,
   communication language and Supervisor notebook, then writes `.paseo-slp/`
-  correctly.
-- `paseo-slp-e2e` — runs the package's live E2E scenarios from one
-  coordinating session (requires a source checkout).
+  correctly. Once installed it auto-triggers when you ask an agent to
+  onboard/set up SLP.
+
+(`paseo-slp-e2e` is not installed — it runs from a source checkout; see
+[E2E](#e2e).)
 
 No skills installed? Paste this into any agent:
 
@@ -170,22 +172,22 @@ From a repo you want to use, install it project-locally (creates
 
 ```bash
 npx skills@latest add /absolute/path/to/paseo-slp \
-  --skill paseo-slp-onboarding --agent codex --copy --yes
+  --skill paseo-slp-onboarding --copy --yes
 ```
 
 Or install it globally for all of the user's repos:
 
 ```bash
 npx skills@latest add /absolute/path/to/paseo-slp \
-  --skill paseo-slp-onboarding --agent codex --global --copy --yes
+  --skill paseo-slp-onboarding --global --copy --yes
 ```
 
 Once the package is published to GitHub, replace the local path with the
-published URL/repository, e.g. `https://github.com/<owner>/<repo>`. Use
-project mode or add `--global` as above. Project skills land in
-`.agents/skills`, global skills in `~/.agents/skills`; both Codex and Pi
-discover both scopes. Verify with `npx skills@latest list --agent codex` or
-add `--global` for user scope. Open a fresh session after installing, then
+published URL/repository, e.g. `duongvm57/paseo-slp`. Use project mode or add
+`--global` as above; pass `--agent <name>` to target one agent instead of
+every detected one. Project skills land in `.agents/skills`, global skills
+in `~/.agents/skills`; Codex and Pi both discover both scopes. Verify with
+`npx skills@latest list` or add `--global` for user scope. Open a fresh session after installing, then
 ask to onboard/set up SLP for the repo; the skill description triggers the
 workflow. See the [source skill](skills/paseo-slp-onboarding/SKILL.md).
 

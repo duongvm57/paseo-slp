@@ -1,5 +1,9 @@
 # Contributor contract
 
+For this repository, delegate through Paseo `create_agent` so the Human can
+inspect and chat with each agent. Codex internal sub-agents are disabled; do not
+use native spawn/delegation tools, including when a skill requests sub-agents.
+
 Paseo SLP is an independent SLP policy package for Paseo. Before changing role
 behavior, read docs/reference/agent-orchestration-complete-operating-guide.md
 and docs/contract.md. The Human’s current assignment determines task authority.

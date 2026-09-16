@@ -91,16 +91,18 @@ cho Lead.
 
 ## Skills
 
-Skill dạy agent cách cài đặt và vận hành bộ pack này.
+Skill onboarding dạy agent cách cài đặt bộ pack này cho một repo.
 
 ```bash
-npx skills add duongvm57/paseo-slp
+npx skills add duongvm57/paseo-slp --skill paseo-slp-onboarding
 ```
 
 - `paseo-slp-onboarding` — phỏng vấn bạn về quyết định pool Peer, ngôn ngữ
   giao tiếp và notebook của Supervisor, rồi ghi `.paseo-slp/` đúng chuẩn.
-- `paseo-slp-e2e` — chạy các scenario E2E live của package từ một session
-  điều phối (cần source checkout).
+  Sau khi cài, nó tự trigger khi bạn yêu cầu agent onboard/setup SLP.
+
+(`paseo-slp-e2e` không cần cài — nó chạy từ source checkout; xem
+[E2E](#e2e).)
 
 Agent chưa có skill? Dán prompt này vào agent bất kỳ:
 
@@ -163,22 +165,23 @@ commit cùng repo):
 
 ```bash
 npx skills@latest add /absolute/path/to/paseo-slp \
-  --skill paseo-slp-onboarding --agent codex --copy --yes
+  --skill paseo-slp-onboarding --copy --yes
 ```
 
 Hoặc cài global cho mọi repo của user:
 
 ```bash
 npx skills@latest add /absolute/path/to/paseo-slp \
-  --skill paseo-slp-onboarding --agent codex --global --copy --yes
+  --skill paseo-slp-onboarding --global --copy --yes
 ```
 
 Sau khi package được publish lên GitHub, thay đường dẫn local bằng
-URL/repository đã publish, ví dụ `https://github.com/<owner>/<repo>`. Dùng
-project mode hoặc thêm `--global` như trên. Với lệnh này, project skill nằm ở
+URL/repository đã publish, ví dụ `duongvm57/paseo-slp`. Dùng project mode
+hoặc thêm `--global` như trên; truyền `--agent <name>` nếu muốn chỉ cài cho
+một agent thay vì mọi agent được phát hiện. Với lệnh này, project skill nằm ở
 `.agents/skills`, global skill nằm ở `~/.agents/skills`; Codex và Pi đều
-discover hai scope đó. Kiểm tra bằng `npx skills@latest list --agent codex`
-hoặc thêm `--global` cho user scope. Mở session mới sau khi cài, rồi yêu cầu
+discover hai scope đó. Kiểm tra bằng `npx skills@latest list` hoặc thêm
+`--global` cho user scope. Mở session mới sau khi cài, rồi yêu cầu
 onboard/setup SLP cho repo; description của skill sẽ trigger workflow. Xem
 [skill nguồn](skills/paseo-slp-onboarding/SKILL.md).
 
