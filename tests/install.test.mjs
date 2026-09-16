@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { install, verifyInstall, json, readJson } from '../src/package.mjs';
 import { installPaseo, uninstallPaseo, initWorkspace } from '../src/paseo-install.mjs';
 import { configFile, writeConfig } from '../src/host-config.mjs';
+import { emptyCatalog } from '../src/routing.mjs';
 import { roleInstructions, roleBundle } from '../src/role-bundle.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -205,4 +206,37 @@ test('reload failure reports applied files and leaves a usable installation for 
   assert.match(report.reloadError, /Files applied/);
   verifyInstall(destination);
   assert.equal(readJson(join(home, 'config.json')).daemon.agentProfiles.length, 2);
+});
+
+test('install scaffolds the user-scope catalog; uninstall removes only an unmodified scaffold', t => {
+  const { home, destination } = fixture(t);
+  installPaseo(root, destination, home, true);
+  const catalog = join(home, 'slp-routing.json');
+  assert.deepEqual(readJson(catalog), emptyCatalog());
+  const removed = uninstallPaseo(destination, true);
+  assert.equal(removed.userCatalog.preserved, false);
+  assert.equal(existsSync(catalog), false);
+});
+
+test('a Human-edited user catalog survives uninstall; an existing catalog is never claimed', t => {
+  const { home, destination } = fixture(t);
+  installPaseo(root, destination, home, true);
+  const catalog = join(home, 'slp-routing.json');
+  writeFileSync(catalog, json({ ...emptyCatalog(), options: [{ id: 'mine' }] }));
+  const kept = uninstallPaseo(destination, true);
+  assert.equal(kept.userCatalog.preserved, true);
+  assert.equal(readJson(catalog).options[0].id, 'mine');
+  const { home: home2, destination: dest2 } = fixture(t);
+  writeFileSync(join(home2, 'slp-routing.json'), 'Human catalog');
+  installPaseo(root, dest2, home2, true);
+  assert.equal(readFileSync(join(home2, 'slp-routing.json'), 'utf8'), 'Human catalog');
+});
+
+test('saved profiles default to the host\'s enabled provider family', t => {
+  const { home, destination } = fixture(t);
+  config(home, { version: 1, agents: { providers: { pi: { enabled: true } } }, daemon: {} });
+  installPaseo(root, destination, home, true);
+  const profiles = readJson(join(home, 'config.json')).daemon.agentProfiles;
+  assert.equal(profiles.find(p => p.id === 'slp-lead').provider, 'slp-pi-lead');
+  assert.equal(profiles.find(p => p.id === 'slp-supervisor').provider, 'slp-pi-supervisor');
 });

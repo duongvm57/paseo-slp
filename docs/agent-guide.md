@@ -58,8 +58,9 @@ capability claims or suitability guarantees.
 Preview with `node bin/slp.mjs init <absolute-repo>`, then rerun with
 `--apply` under the granted setup authority. Init never overwrites. Then:
 
-- Fill `Routing intent:` (decision, decider, date),
-  `Communication language:` and `Supervisor notebook:` in the protocol.
+- Fill the frontmatter fields: `routing_intent` (pinned | inherit | empty +
+  decider + date — never restate option IDs), `communication_language`,
+  `supervisor_notebook`, `decided_by`, `decided_at`.
 - Human chose **inherit** → delete the empty `slp-routing.json` init
   created. An empty catalog is authoritative and blocks delegation.
 - Human chose **pinned** → populate `options` per the schema in

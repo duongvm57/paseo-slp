@@ -233,8 +233,9 @@ option có provider `pi`/`codex`/`devin`, model, settings, `suitableFor`,
 `avoidFor`, `notes`, `priority` và trạng thái `enabled`/`availability`. Lead
 chọn theo công việc, không gán cứng Engineer/Architect/Reviewer vào model.
 Hai Peer có thể khác provider/model/effort mà không thêm saved profile. Xem
-[catalog mẫu](examples/slp-routing.json); các model trong mẫu cần được
-discovery trước khi đánh dấu `ready`.
+[catalog mẫu](examples/slp-routing.json) — skeleton theo loại công việc:
+mỗi option mô tả kiểu việc, còn `model` để trống cho tới khi điền từ
+discovery thực tế trên host.
 
 Lead đọc pool mới, ghi lý do chọn và kiểm tra option/hash bằng `prepare`
 trước khi launch. Không có pool/option hợp lệ ở cả hai scope thì hoàn thiện

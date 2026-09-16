@@ -28,10 +28,20 @@ const profiles = [
 // list_providers returns availability but need not return the extends field.
 const providers = ['slp-codex-peer', 'slp-pi-peer', 'slp-devin-peer', 'slp-codex-lead', 'slp-pi-lead', 'slp-devin-lead', 'pi', 'devin'].map(id => ({ id, enabled: true, status: 'available' }));
 const request = { role: 'peer', repository: root, workspaceId: 'workspace', assignment: 'Inspect cancellation ownership; no code writes.', profiles, providers };
+// Test pool fixture — independent of examples/, which is a documentation
+// skeleton and must never contain launchable model names.
+const testCatalog = () => ({ version: 1, policy: 'Test pool.', quotaFallback: { enabled: false, optionIds: [] }, options: [
+  { id: 'luna-code', provider: 'codex', roles: ['peer'], model: 'gpt-5.6-luna', thinkingOptionId: 'medium', enabled: true, availability: 'unknown', priority: 20, suitableFor: ['coding'], avoidFor: [], notes: 'coding seat' },
+  { id: 'luna-reason', provider: 'codex', roles: ['peer'], model: 'gpt-5.6-luna', thinkingOptionId: 'high', enabled: true, availability: 'unknown', priority: 10, suitableFor: ['reasoning'], avoidFor: [], notes: 'reasoning seat' },
+  { id: 'glm-design', provider: 'pi', roles: ['peer'], model: 'opencode/glm-5.3-flash', thinkingOptionId: 'medium', enabled: true, availability: 'unknown', priority: 20, suitableFor: ['architect'], avoidFor: [], notes: 'pi seat' },
+  { id: 'swe2-medium', provider: 'devin', roles: ['peer'], model: 'swe-2-medium', modeId: 'bypass', features: { auto_accept: true }, enabled: true, availability: 'unknown', priority: 20, suitableFor: ['coding'], avoidFor: [], notes: 'devin seat' },
+  { id: 'swe2-high', provider: 'devin', roles: ['peer'], model: 'swe-2-high', modeId: 'bypass', features: { auto_accept: true }, enabled: true, availability: 'unknown', priority: 15, suitableFor: ['exploration'], avoidFor: [], notes: 'devin seat' },
+  { id: 'swe2-max', provider: 'devin', roles: ['peer'], model: 'swe-2-max', modeId: 'bypass', features: { auto_accept: true }, enabled: true, availability: 'unknown', priority: 10, suitableFor: ['ambiguous'], avoidFor: [], notes: 'devin seat' },
+] });
 function catalogFixture(dir) {
   mkdirSync(join(dir, '.paseo-slp'), { recursive: true });
   const path = join(dir, '.paseo-slp/slp-routing.json');
-  const catalog = readJson(join(root, 'examples/slp-routing.json'));
+  const catalog = testCatalog();
   catalog.options.forEach(option => { option.availability = 'ready'; });
   writeFileSync(path, json(catalog));
   const route = optionId => ({ optionId, catalogSha256: readCatalog(dir).sha256 });
@@ -372,7 +382,7 @@ test('quota edits invalidate prepared selections and fresh selection can use ano
 test('routes reads only the selected repo on every call, independent of host and installation location', t => {
   const { dir, installed } = fixture(t), home = join(dir, 'home'); mkdirSync(home);
   installPaseo(root, installed, home, true);
-  assert.equal(existsSync(join(home, 'slp-routing.json')), false);
+  assert.deepEqual(readJson(join(home, 'slp-routing.json')), emptyCatalog());
   initWorkspace(installed, dir, true);
   const path = join(dir, '.paseo-slp/slp-routing.json');
   assert.deepEqual(readJson(path), emptyCatalog());

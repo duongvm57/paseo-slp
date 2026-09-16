@@ -8,9 +8,28 @@ import { emptyCatalog, validateCatalog, routingPath } from './routing.mjs';
 import { configFile, writeConfig, mcpFlags, requireMcp, verifyOwnedProviders, verifyOwnedProfiles,
   providers as hostProviders, agentProfiles as hostAgentProfiles } from './host-config.mjs';
 
+// Default saved-profile family follows the host's enabled base provider; every
+// role family is still installed, so this only picks the starting default.
+function defaultFamily(config) {
+  const provs = hostProviders(config);
+  return families.find(family => provs[family]?.enabled === true) ?? 'codex';
+}
+
+// User-scope catalog scaffold beside the host config: onboarding only fills
+// options. Ownership is recorded in the binding so an unmodified scaffold is
+// removed on uninstall while a Human-edited catalog is preserved.
+function scaffoldUserCatalog(home) {
+  const path = join(home, 'slp-routing.json');
+  if (existsSync(path)) return null;
+  const bytes = json(emptyCatalog());
+  writeFileSync(path, bytes, { flag: 'wx', mode: 0o600 });
+  return { path, sha256: hash(bytes) };
+}
+
 export function configurationPlan(destination, config) {
   const providers = {}, profiles = [];
   const existing = hostAgentProfiles(config);
+  const family = defaultFamily(config);
   for (const role of roles) for (const family of families) {
     const id = providerId(role, family);
     if (Object.hasOwn(hostProviders(config), id) || (profileRoles.includes(role) && existing.some(p => p.id === profileId(role)))) {
@@ -20,7 +39,7 @@ export function configurationPlan(destination, config) {
   }
   for (const role of profileRoles) {
     profiles.push({ id: profileId(role), name: `SLP ${role[0].toUpperCase() + role.slice(1)}`,
-      provider: providerId(role),
+      provider: providerId(role, family),
       notes: `SLP ${role}; installed role instructions load automatically. Use Paseo delegation and finish notifications.` });
   }
   return { providers, profiles };
@@ -53,19 +72,22 @@ export function installPaseo(source, destination, home, apply = false) {
   next.daemon.agentProfiles = [...(next.daemon.agentProfiles ?? []), ...proposal.profiles];
   const mcpBefore = Object.fromEntries(mcpFlags.map(key => [key, next.daemon.mcp?.[key] ?? null]));
   next.daemon.mcp = { ...next.daemon.mcp, ...Object.fromEntries(mcpFlags.map(key => [key, true])) };
+  let userCatalog = null;
   try {
     // Only owned entries and two shared MCP flags are recorded, never credentials.
-    const binding = json({ configPath: file.path, ...proposal, mcpBefore });
+    mkdirSync(home, { recursive: true });
+    userCatalog = scaffoldUserCatalog(home);
+    const binding = json({ configPath: file.path, ...proposal, mcpBefore, userCatalog });
     writeFileSync(join(destination, 'paseo-binding.json'), binding, { flag: 'wx', mode: 0o600 });
     const manifest = readJson(join(destination, 'installed.json'));
     writeFileSync(join(destination, 'installed.json'), json({ ...manifest, paseoBindingSha256: hash(binding) }));
-    mkdirSync(home, { recursive: true });
     writeConfig(file, next);
   } catch (error) {
+    if (userCatalog) rmSync(userCatalog.path, { force: true });
     rmSync(destination, { recursive: true, force: true });
     throw error;
   }
-  return { ...result, candidate };
+  return { ...result, candidate, userCatalog: userCatalog?.path ?? null };
 }
 
 export function uninstallPaseo(destination, apply = false) {
@@ -86,11 +108,16 @@ export function uninstallPaseo(destination, apply = false) {
   const candidate = verifyInstall(destination).candidate;
   const expectedPaths = [...candidate.files.map(f => f.path), 'installed.json', 'paseo-binding.json'].sort();
   if (!isDeepStrictEqual(files(destination).sort(), expectedPaths)) throw new Error('Extra files: preserve directory for manual review');
+  // An unmodified scaffold is install-owned and removed; a Human-edited catalog is preserved.
+  const userCatalog = binding.userCatalog ?? null;
+  const catalogRemovable = userCatalog && existsSync(userCatalog.path) && hash(readFileSync(userCatalog.path)) === userCatalog.sha256;
   if (apply) {
     writeConfig(file, next);
+    if (catalogRemovable) rmSync(userCatalog.path);
     rmSync(destination, { recursive: true });
   }
-  return { destination, configPath: file.path, applied: apply, reloadRequired: true };
+  return { destination, configPath: file.path, applied: apply, reloadRequired: true,
+    userCatalog: userCatalog ? { path: userCatalog.path, preserved: !catalogRemovable } : null };
 }
 
 // Explicit side-by-side cutover: keep the old bytes for sessions already using them.
@@ -120,18 +147,24 @@ export function upgradePaseo(source, destination, previous, apply = false) {
     retiredProfiles: retiredProfiles.map(profile => profile.id), reloadRequired: true };
   if (!apply) return result;
   const candidate = install(source, destination).candidate;
+  let userCatalog = null;
   try {
     const next = structuredClone(base);
     next.agents.providers = { ...next.agents.providers, ...proposal.providers };
     next.daemon.agentProfiles = [...next.daemon.agentProfiles, ...proposal.profiles];
+    userCatalog = scaffoldUserCatalog(home);
     const binding = json({ configPath: file.path, ...proposal, mcpBefore: prior.mcpBefore,
-      retiredProfiles: [...(prior.retiredProfiles ?? []), ...retiredProfiles] });
+      retiredProfiles: [...(prior.retiredProfiles ?? []), ...retiredProfiles], userCatalog });
     requireMcp(next);
     writeFileSync(join(destination, 'paseo-binding.json'), binding, { flag: 'wx', mode: 0o600 });
     const manifest = readJson(join(destination, 'installed.json'));
     writeFileSync(join(destination, 'installed.json'), json({ ...manifest, paseoBindingSha256: hash(binding) }));
     writeConfig(file, next);
-  } catch (error) { rmSync(destination, { recursive: true, force: true }); throw error; }
+  } catch (error) {
+    if (userCatalog) rmSync(userCatalog.path, { force: true });
+    rmSync(destination, { recursive: true, force: true });
+    throw error;
+  }
   return { ...result, candidate };
 }
 

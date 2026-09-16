@@ -33,12 +33,13 @@ For the Peer pool, discover slp-pi-peer/slp-codex-peer/slp-devin-peer and their 
 thinking/mode/features. Present the discovered options to the Human and resolve
 the pool decision explicitly: whether this repository pins its own catalog or
 inherits the user-scope catalog, and if it pins, which options, priority and
-quota-fallback policy apply. Record the resolved intent — inherit, pinned with
-its options, or deliberately empty — in the protocol's `Routing intent:` field
-with who decided and when; enacting the choice alone leaves a missing catalog
-ambiguous. In the same interview pass, ask the workflow communication language —
-covering reports, assignments and handbacks between agents and replies to the
-Human — and write it into the protocol's `Communication language:` field.
+quota-fallback policy apply. Record the resolved intent — `pinned`, `inherit` or
+`empty` — in the protocol frontmatter `routing_intent` with who decided and
+when; never restate option IDs there, the catalog file is the source of truth.
+Enacting the choice alone leaves a missing catalog ambiguous. In the same
+interview pass, ask the workflow communication language — covering reports,
+assignments and handbacks between agents and replies to the Human — and write it
+into the frontmatter `communication_language` field.
 A populated user-scope catalog is the fallback
 default, not this repository's configuration — its existence never substitutes
 for the Human's choice. Within granted setup authority, populate the choices the
@@ -52,7 +53,7 @@ or a launch fallback. Never store credentials in the repository.
 Use `node <slp-cli> init <absolute-repo>` to preview, then --apply within setup
 authority. Init creates missing protocol, an empty catalog and a
 `.paseo-slp/notebook.md` Supervisor notebook scaffold without overwriting
-existing files. Fill the `Supervisor notebook:` field — the scaffolded path with
+existing files. Fill the frontmatter `supervisor_notebook` field — the scaffolded path with
 its owner, or `timeline:<agentId>` plus a retrieval note the Human can follow.
 Complete tactics: task classes, ownership, topology, proof, budget,
 allowed operations, escalation and settlement. Keep role bytes out of the protocol.

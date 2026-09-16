@@ -244,8 +244,9 @@ none. Each option carries a `pi`/`codex`/`devin` provider, model, settings,
 `enabled`/`availability` state. The Lead chooses per task — Engineer,
 Architect and Reviewer are not hard-mapped to models. Two Peers can differ in
 provider/model/effort without any extra saved profile. See the
-[sample catalog](examples/slp-routing.json); the models in the sample must be
-discovered before being marked `ready`.
+[sample catalog](examples/slp-routing.json) — a task-type skeleton: each
+option describes the kind of work, and `model` is left blank until filled
+from live discovery on the host.
 
 The Lead reads the current pool, records its choice rationale and validates
 option/hash via `prepare` before launching. With no valid pool/option at
