@@ -23,7 +23,11 @@ or saved-profile edits. Preserve existing Human choices and unrelated work.
 Read Paseo list_profiles/list_providers and discover models/settings. Verify the
 saved Supervisor/Lead profiles use matching installed role providers and selected
 models. Ask Human to configure missing/incompatible fields in Paseo Agent profiles;
-report exact IDs/mismatches. Do not create or require slp-peer.
+report exact IDs/mismatches, and hand the Human the fix steps: Settings → the host
+running the work → Agents → Agent profiles → edit the profile → pick the matching
+`slp-{family}-{role}` provider, Model, Thinking, Mode → Save. There is no CLI or
+MCP write path for profiles — do not hand-edit the daemon config. Do not create or
+require slp-peer.
 
 For the Peer pool, discover slp-pi-peer/slp-codex-peer/slp-devin-peer and their exact models,
 thinking/mode/features. Present the discovered options to the Human and resolve

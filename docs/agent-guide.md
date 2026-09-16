@@ -32,8 +32,11 @@ require a `slp-peer` profile.
 Call Paseo `list_profiles`/`list_providers`, or run
 `node bin/slp.mjs inventory`. Confirm `slp-supervisor` and `slp-lead` exist
 and use installed `slp-*-{supervisor,lead}` providers with valid models.
-Report exact mismatches and ask the Human to fix them in Paseo — do not edit
-saved profiles yourself.
+Report exact mismatches and hand the Human the fix steps: Settings → the
+host running the work → Agents → Agent profiles → edit the profile → pick
+the matching `slp-{family}-{role}` provider, Model, Thinking, Mode → Save.
+There is no CLI or MCP write path for profiles — do not hand-edit the
+daemon config.
 
 ## Step 2 — interview the Human
 
