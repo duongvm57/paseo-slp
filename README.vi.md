@@ -157,6 +157,13 @@ Lệnh chỉ tạo các file còn thiếu và giữ nguyên từng file đã có
 - `.paseo-slp/notebook.md`: notebook mặc định của Supervisor; protocol ghi
   nhận owner và cách truy xuất thực tế (file này hoặc `timeline:<agentId>`).
 
+Catalog user-scope `$PASEO_HOME/slp-routing.json` tồn tại vì
+`install`/`upgrade --apply` tạo scaffold rỗng khi file chưa có; file đã tồn
+tại thì không bị ghi đè. Nó chỉ là placeholder rỗng cho tới khi onboarding
+hoặc Human điền options — catalog user rỗng nghĩa là chưa có pool fallback,
+không phải lỗi. `uninstall` chỉ xóa nó khi file còn nguyên vẹn như lúc
+scaffold (hash ghi trong `paseo-binding.json`); đã sửa thì uninstall giữ lại.
+
 ### Onboarding
 
 Skill onboarding được cài riêng để agent có thể auto-trigger. Từ repo muốn
@@ -361,7 +368,9 @@ node bin/slp.mjs uninstall "$HOME/.local/share/paseo-slp" --apply --reload
 ```
 
 Uninstall bỏ các entry do bản cài tạo và khôi phục hai cờ MCP trước cài; giữ
-các config khác và giữ catalog Human. Nếu profile/provider/file cài đã được
+các config khác và catalog Human đã sửa. Scaffold catalog user-scope chỉ bị
+xóa khi còn nguyên vẹn (theo hash đã ghi), nên catalog đã điền được giữ lại.
+Nếu profile/provider/file cài đã được
 sửa, lệnh dừng và giữ nguyên để bạn quyết định cách giữ thay đổi. Protocol
 trong repo công việc được giữ lại. Reload lỗi không đảo ngược việc ghi file:
 output báo `reloadRequired`/`reloadError`; chạy lại `PASEO_HOME=/absolute/home

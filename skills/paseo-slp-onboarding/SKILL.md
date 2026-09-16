@@ -42,7 +42,12 @@ assignments and handbacks between agents and replies to the Human — and write 
 into the frontmatter `communication_language` field.
 A populated user-scope catalog is the fallback
 default, not this repository's configuration — its existence never substitutes
-for the Human's choice. Within granted setup authority, populate the choices the
+for the Human's choice. Install/upgrade scaffolds `$PASEO_HOME/slp-routing.json`
+empty when absent and never overwrites it; an existing scaffold with no options
+means the fallback currently resolves an empty pool. When the Human chooses
+inherit and that file is empty, run the same option interview (providers, models,
+priority, quotaFallback) targeting the user-scope file — writing outside the
+repository needs an explicit Human grant. Within granted setup authority, populate the choices the
 Human made; otherwise ask for the missing pool decision before delegation. Do not
 invent model IDs, capability claims or suitability guarantees. Existing saved Peer
 settings may be shown as a migration suggestion but are not automatically imported
@@ -61,7 +66,10 @@ allowed operations, escalation and settlement. Keep role bytes out of the protoc
 The default pool decision is inherit: a repository with no catalog resolves the
 user-scope catalog automatically. Init's empty catalog is authoritative — when
 the Human chooses inherit, remove the init-created slp-routing.json so the
-fallback engages, and never leave an empty catalog behind.
+fallback engages, and never leave an empty catalog behind. Then check the
+user-scope file: if it still holds only the empty scaffold, offer to populate
+it from the same discovered options (with the Human's grant to write outside
+the repository) or report that the inherited pool is currently empty.
 
 Populate the project catalog only when the Human chose a pinned pool, before Peer
 delegation. Interview the Human on which options to enable, priority and quota

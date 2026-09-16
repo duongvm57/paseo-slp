@@ -43,7 +43,9 @@ daemon config.
 Ask, in one pass:
 
 1. Does this repository pin its own Peer pool, or inherit the user-scope
-   catalog (`$PASEO_HOME/slp-routing.json`, default `~/.paseo`)?
+   catalog (`$PASEO_HOME/slp-routing.json`, default `~/.paseo`)? Install
+   scaffolds that file empty when absent — check whether it already holds
+   real options before promising the fallback works.
 2. If pinning: which discovered `slp-*-peer` provider/model/settings options
    to enable, their `priority`, and the `quotaFallback` policy.
 3. Communication language — used for reports, assignments, handbacks between
@@ -62,7 +64,10 @@ Preview with `node bin/slp.mjs init <absolute-repo>`, then rerun with
   decider + date — never restate option IDs), `communication_language`,
   `supervisor_notebook`, `decided_by`, `decided_at`.
 - Human chose **inherit** → delete the empty `slp-routing.json` init
-  created. An empty catalog is authoritative and blocks delegation.
+  created. An empty catalog is authoritative and blocks delegation. Then
+  check `$PASEO_HOME/slp-routing.json`: if it is still the empty install
+  scaffold, ask whether to populate it with the same discovered options —
+  writing outside the repo needs an explicit grant.
 - Human chose **pinned** → populate `options` per the schema in
   `provider-routing.md`: `id`, `provider`, exact `model`, `enabled`,
   `availability`, `priority`, `suitableFor`/`avoidFor`, `notes`, and

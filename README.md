@@ -164,6 +164,14 @@ Init only creates missing files and never overwrites existing ones:
   records its owner and the actual retrieval method (this file or
   `timeline:<agentId>`).
 
+The user-scope catalog `$PASEO_HOME/slp-routing.json` exists because
+`install`/`upgrade --apply` scaffolds an empty one when the file is absent;
+it is never overwritten if it already exists. It stays an empty placeholder
+until onboarding or the Human fills in options — an empty user catalog means
+no fallback pool, not an error. `uninstall` removes it only while it is still
+byte-identical to the scaffold (hash recorded in `paseo-binding.json`); once
+you have edited it, uninstall preserves it.
+
 ### Onboarding
 
 The onboarding skill is installed separately so agents can auto-trigger it.
@@ -380,7 +388,9 @@ node bin/slp.mjs uninstall "$HOME/.local/share/paseo-slp" --apply --reload
 ```
 
 Uninstall removes the entries the install created and restores the two MCP
-flags from before; it keeps other config and the Human's catalog. If an
+flags from before; it keeps other config and a Human-edited catalog. The
+user-scope catalog scaffold is removed only while still unmodified (recorded
+hash), so a catalog you populated survives. If an
 installed profile/provider/file has been modified, the command stops and
 leaves everything in place for you to decide how to keep the changes. The
 protocol in the work repo is preserved. A reload failure does not roll back
