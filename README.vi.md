@@ -102,9 +102,13 @@ npx skills add duongvm57/paseo-slp
 - `paseo-slp-e2e` — chạy các scenario E2E live của package từ một session
   điều phối (cần source checkout).
 
-Agent chưa có skill? Chỉ cho agent đọc
-[docs/agent-guide.md](docs/agent-guide.md) — cùng quy trình cài đặt viết
-thành các bước đơn giản để agent làm theo.
+Agent chưa có skill? Dán prompt này vào agent bất kỳ:
+
+```text
+Help me understand and set up Paseo SLP. Read
+https://raw.githubusercontent.com/duongvm57/paseo-slp/main/docs/agent-guide.md
+first, then walk me through it step by step.
+```
 
 ## Agent profiles
 

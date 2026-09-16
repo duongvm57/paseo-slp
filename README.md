@@ -108,9 +108,13 @@ npx skills add duongvm57/paseo-slp
 - `paseo-slp-e2e` — runs the package's live E2E scenarios from one
   coordinating session (requires a source checkout).
 
-No skills installed? Point the agent at
-[docs/agent-guide.md](docs/agent-guide.md) — the same setup procedure written
-as plain steps an agent can follow.
+No skills installed? Paste this into any agent:
+
+```text
+Help me understand and set up Paseo SLP. Read
+https://raw.githubusercontent.com/duongvm57/paseo-slp/main/docs/agent-guide.md
+first, then walk me through it step by step.
+```
 
 ## Agent profiles
 
