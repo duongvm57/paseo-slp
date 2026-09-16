@@ -26,13 +26,16 @@ models. Ask Human to configure missing/incompatible fields in Paseo Agent profil
 report exact IDs/mismatches. Do not create or require slp-peer.
 
 For the Peer pool, discover slp-pi-peer/slp-codex-peer/slp-devin-peer and their exact models,
-thinking/mode/features. Resolve allowed options, task suitability, budget and quota
-fallback from Human instructions and existing project configuration. Within granted
-setup authority, populate those choices; otherwise present discovered options and
-ask only for the missing model/cost decision. Do not invent model IDs, capability
-claims or suitability guarantees. Existing saved Peer settings may be shown as a
-migration suggestion but are not automatically imported or a launch fallback.
-Never store credentials in the repository.
+thinking/mode/features. Present the discovered options to the Human and resolve
+the pool decision explicitly: whether this repository pins its own catalog or
+inherits the user-scope catalog, and if it pins, which options, priority and
+quota-fallback policy apply. A populated user-scope catalog is the fallback
+default, not this repository's configuration — its existence never substitutes
+for the Human's choice. Within granted setup authority, populate the choices the
+Human made; otherwise ask for the missing pool decision before delegation. Do not
+invent model IDs, capability claims or suitability guarantees. Existing saved Peer
+settings may be shown as a migration suggestion but are not automatically imported
+or a launch fallback. Never store credentials in the repository.
 
 ## Set up protocol and pool
 
@@ -41,7 +44,16 @@ authority. Init creates missing protocol and an empty catalog without overwritin
 existing files. Complete tactics: task classes, ownership, topology, proof, budget,
 allowed operations, escalation and settlement. Keep role bytes out of the protocol.
 
-Populate the project catalog before Peer delegation. Every option has:
+The default pool decision is inherit: a repository with no catalog resolves the
+user-scope catalog automatically. Init's empty catalog is authoritative — when
+the Human chooses inherit, remove the init-created slp-routing.json so the
+fallback engages, and never leave an empty catalog behind.
+
+Populate the project catalog only when the Human chose a pinned pool, before Peer
+delegation. Interview the Human on which options to enable, priority and quota
+fallback rather than copying a catalog verbatim; --routing-from imports an
+explicitly selected source as a starting point for that decision, not as the
+decision itself. Every option has:
 
 - id: unique lowercase identifier; provider: pi, codex or devin; exact discovered
   model. Devin options accept swe-2 models only.
