@@ -1,2 +1,11 @@
 .local-checks/
 .e2e-runs/
+.paseo-slp/
+
+# Local skill-install artifacts (skills CLI)
+.agents/
+.pi/
+skills-lock.json
+
+# Local agent tool config
+.codex/
