@@ -94,6 +94,24 @@ Supervisor and Lead already carry the procedures for picking child profiles,
 keeping parentage and using finish notifications. **SLP Lead** also works
 when you want to hand work straight to a Lead.
 
+## Skills
+
+Skills teach your agent how to set up and operate this pack.
+
+```bash
+npx skills add duongvm57/paseo-slp
+```
+
+- `paseo-slp-onboarding` — interviews you for the Peer pool decision,
+  communication language and Supervisor notebook, then writes `.paseo-slp/`
+  correctly.
+- `paseo-slp-e2e` — runs the package's live E2E scenarios from one
+  coordinating session (requires a source checkout).
+
+No skills installed? Point the agent at
+[docs/agent-guide.md](docs/agent-guide.md) — the same setup procedure written
+as plain steps an agent can follow.
+
 ## Agent profiles
 
 To set per-role model and reasoning:
@@ -410,6 +428,7 @@ itself.
 
 ## Documentation
 
+- [Agent setup guide](docs/agent-guide.md)
 - [File map and contract](docs/contract.md)
 - [Operating guide](docs/reference/agent-orchestration-complete-operating-guide.md)
 - [Guide → policy, procedure and protocol trace](docs/guide-coverage.md)

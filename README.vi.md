@@ -89,6 +89,23 @@ Supervisor và Lead đã có procedure chọn profile con, giữ parentage và d
 finish notifications. **SLP Lead** cũng dùng được nếu bạn muốn giao trực tiếp
 cho Lead.
 
+## Skills
+
+Skill dạy agent cách cài đặt và vận hành bộ pack này.
+
+```bash
+npx skills add duongvm57/paseo-slp
+```
+
+- `paseo-slp-onboarding` — phỏng vấn bạn về quyết định pool Peer, ngôn ngữ
+  giao tiếp và notebook của Supervisor, rồi ghi `.paseo-slp/` đúng chuẩn.
+- `paseo-slp-e2e` — chạy các scenario E2E live của package từ một session
+  điều phối (cần source checkout).
+
+Agent chưa có skill? Chỉ cho agent đọc
+[docs/agent-guide.md](docs/agent-guide.md) — cùng quy trình cài đặt viết
+thành các bước đơn giản để agent làm theo.
+
 ## Agent profiles
 
 Để đặt model và reasoning riêng cho từng role:
@@ -386,6 +403,7 @@ envelope. Đường này không đăng ký profile hay tự tạo agent.
 
 ## Tài liệu
 
+- [Hướng dẫn cài đặt cho agent](docs/agent-guide.md)
 - [File map và contract](docs/contract.md)
 - [Operating guide](docs/reference/agent-orchestration-complete-operating-guide.md)
 - [Trace guide → policy, procedure và protocol](docs/guide-coverage.md)
