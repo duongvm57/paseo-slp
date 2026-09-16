@@ -1,6 +1,7 @@
 import { join, isAbsolute, basename } from 'node:path';
+import { statSync, accessSync, constants } from 'node:fs';
 import { savedProfileBinding, roleProvider, roles } from './profiles.mjs';
-import { verifyInstall, snapshot } from './package.mjs';
+import { verifyInstall, snapshot, readJson } from './package.mjs';
 import { catalogBinding } from './routing.mjs';
 import { bindingCheck, dispositionPattern } from './binding.mjs';
 import { roleInstructions, orchestrates } from './role-bundle.mjs';
@@ -69,6 +70,40 @@ const handoffNotice = (role, packet) => `\nProvider handoff evidence:\n${JSON.st
   'Acknowledge the transferred assignment. ' +
   (orchestrates(role) ? 'Use references/provider-routing.md for the handoff procedure.\n' : 'Return bounded findings to Lead; do not manage agents.\n');
 
+// request.inventoryFile fills providers/profiles the request did not inline;
+// explicit inline arrays always win. The file must be a JSON object whose
+// providers/profiles fields, when present, are arrays.
+function mergeInventory(request) {
+  if (request.inventoryFile == null) return request;
+  if (typeof request.inventoryFile !== 'string' || !isAbsolute(request.inventoryFile)) throw new Error('Absolute inventoryFile required');
+  let inventory;
+  try { inventory = readJson(request.inventoryFile); }
+  catch (error) { throw new Error(`inventoryFile is not a readable JSON file: ${request.inventoryFile} (${error.message})`); }
+  if (inventory === null || typeof inventory !== 'object' || Array.isArray(inventory)) throw new Error('inventoryFile must be a JSON object');
+  for (const key of ['providers', 'profiles']) {
+    if (inventory[key] != null && !Array.isArray(inventory[key])) throw new Error(`inventoryFile.${key} must be an array`);
+    if (request[key] == null && inventory[key] != null) request = { ...request, [key]: inventory[key] };
+  }
+  return request;
+}
+
+// request.assignmentFile names the full bounded assignment kept out of the
+// prompt; it must be an existing regular readable file.
+function assignmentFile(path) {
+  if (path == null) return null;
+  if (typeof path !== 'string' || !isAbsolute(path)) throw new Error('Absolute assignmentFile required');
+  let stat;
+  try { stat = statSync(path); }
+  catch (error) {
+    if (error.code === 'ENOENT') throw new Error(`Assignment file does not exist: ${path}`);
+    throw error;
+  }
+  if (!stat.isFile()) throw new Error(`Assignment file must be a regular file: ${path}`);
+  try { accessSync(path, constants.R_OK); }
+  catch { throw new Error(`Assignment file is not readable: ${path}`); }
+  return path;
+}
+
 function agentTitle(role, disposition, request, packet) {
   const label = request.taskLabel ?? (basename(request.repository) || 'Task');
   if (typeof label !== 'string' || !label.trim() || label.trim().length > 100 || /[\x00-\x1f\x7f]/.test(label)) {
@@ -90,9 +125,12 @@ function plan(root, request, packet) {
     if (typeof request[key] !== 'string' || !request[key].trim()) throw new Error(`Missing ${key}`);
   }
   if (!isAbsolute(request.repository)) throw new Error('Absolute repository required');
+  request = mergeInventory(request);
+  const file = assignmentFile(request.assignmentFile);
   const { binding, routing } = resolveBinding(role, request, disposition);
   roleProvider(role, binding?.provider);
-  const assignment = `Repository: ${request.repository}\nWorkspace ID: ${request.workspaceId}\n${disposition ? `Disposition: ${disposition}\n` : ''}${request.assignment}`;
+  const assignment = `Repository: ${request.repository}\nWorkspace ID: ${request.workspaceId}\n${disposition ? `Disposition: ${disposition}\n` : ''}${request.assignment}`
+    + (file ? `\nAssignment file: ${file} — read it first; it is authoritative for scope details.` : '');
   return {
     transport: 'Paseo create_agent; settings.features must be preserved',
     role, instructionPath: join(root, `src/roles/${role}.md`),

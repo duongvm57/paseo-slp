@@ -74,22 +74,26 @@ test('extra files or changed binding block removal before detaching Paseo', t =>
   assert.equal(readFileSync(join(home, 'config.json'), 'utf8'), current);
 });
 
-test('workspace init creates only protocol and routing once and preserves Human edits independently', t => {
+test('workspace init creates only protocol, routing and notebook once and preserves Human edits independently', t => {
   const { dir, destination } = fixture(t);
   install(root, destination);
   writeFileSync(join(dir, 'AGENTS.md'), 'Human instructions');
   assert.equal(initWorkspace(destination, dir).applied, false);
   assert.equal(existsSync(join(dir, '.paseo-slp')), false);
   const initialized = initWorkspace(destination, dir, true);
-  assert.equal(initialized.files.length, 2);
+  assert.equal(initialized.files.length, 3);
   const protocol = join(dir, '.paseo-slp/WORKSPACE_PROTOCOL.md');
   const routing = join(dir, '.paseo-slp/slp-routing.json');
+  const notebook = join(dir, '.paseo-slp/notebook.md');
   assert.match(readFileSync(protocol, 'utf8'), /Lead reads this file/);
   assert.deepEqual(readJson(routing).options, []);
+  assert.match(readFileSync(notebook, 'utf8'), /Supervisor notebook/);
   assert.equal(existsSync(join(dir, '.paseo-slp/skills')), false);
   writeFileSync(protocol, 'Human protocol');
+  writeFileSync(notebook, 'Human notebook');
   assert.equal(initWorkspace(destination, dir, true).preserved, true);
   assert.equal(readFileSync(protocol, 'utf8'), 'Human protocol');
+  assert.equal(readFileSync(notebook, 'utf8'), 'Human notebook');
   assert.equal(readFileSync(join(dir, 'AGENTS.md'), 'utf8'), 'Human instructions');
   rmSync(routing);
   const repaired = initWorkspace(destination, dir, true);

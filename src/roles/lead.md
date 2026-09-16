@@ -32,7 +32,8 @@ large dependency branches with explicit handback when they would derail the main
 objective; retain integration ownership and escalate any expansion beyond authority.
 
 On a finish notification, retrieve the disposition-specific report and reconcile it
-against its assignment. Before accepting implementation, inspect the exact artifact
+against its assignment; a named artifact can precede the report — verify it on the
+notification. Before accepting implementation, inspect the exact artifact
 and diff, including untracked files and preserved pre-existing changes. Require
 a stable work snapshot from the installed snapshot helper (or an exact commit with
 all relevant working changes accounted for), actual commands, outputs and exit codes.

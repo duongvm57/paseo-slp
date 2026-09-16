@@ -16,6 +16,10 @@ The defaults below can be adapted under the repository's policy mandate.
 - Applies to: repository root containing this .paseo-slp directory; verify the actual path.
 - Criticality, dominant risks and expensive-to-reverse decisions: establish per repo.
 - External effects and cost/model budget: use explicit assignment boundaries.
+- Communication language: decided at onboarding; applies to reports, assignments
+  and handbacks between agents and to agent replies to the Human (for example,
+  "Vietnamese for all workflow exchanges; keep technical identifiers and proper
+  nouns verbatim").
 
 ## Decision boundaries
 
@@ -51,6 +55,12 @@ Assign one integration writer, preserve unrelated changes and reverify the integ
 candidate. Do not infer filesystem isolation from workspace IDs.
 
 ## Routing and skills
+
+Routing intent: `inherit user-scope catalog`, `pinned pool (options: ...)` or
+`empty (authoritative; blocks Peer delegation)`, plus who decided and when. An
+absent repository catalog with recorded inherit intent is a decision, not an
+accident; an absent catalog with pinned or no recorded intent is incomplete
+onboarding.
 
 Read slp-supervisor/slp-lead saved profiles for those roles. Peer delegation uses
 this repository's .paseo-slp/slp-routing.json pool; when the repository has no
@@ -106,10 +116,11 @@ record actual proof, unresolved findings and settlement of task-owned resources.
 
 ## Repo anti-patterns and evolution
 
-Supervisor notebook: choose an authorized path and owner, or indexed timeline notes
-with a retrieval reference; record the choice when supervision starts. A separate
-file write needs scope just like other writes. Handback preserves notes if durable
-retrieval is unavailable and reports the gap.
+Supervisor notebook: `.paseo-slp/notebook.md` (scaffolded by init) or
+`timeline:<agentId>` with a retrieval note the Human can follow; onboarding
+records the choice and its owner here. A separate file write needs scope just
+like other writes. Handback preserves notes if durable retrieval is unavailable
+and reports the gap.
 
 For each observed repo-specific pattern, record signal, evidence/counterevidence,
 suspected mechanism, impact, open question, allowed response and outcome. Begin

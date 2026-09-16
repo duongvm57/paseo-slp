@@ -144,6 +144,7 @@ export function initWorkspace(source, repository, apply = false, routingFrom) {
   const entries = [
     { path: join(repository, '.paseo-slp/WORKSPACE_PROTOCOL.md'), bytes: readFileSync(join(source, 'src/templates/WORKSPACE_PROTOCOL.md')) },
     { path: catalogPath, bytes: json(catalog) },
+    { path: join(repository, '.paseo-slp/notebook.md'), bytes: '# Supervisor notebook\n\nPurpose and owner are recorded in .paseo-slp/WORKSPACE_PROTOCOL.md.\n' },
   ];
   // Check all existing targets and ancestors before mutation, including dangling links.
   const exists = path => { try { return lstatSync(path); } catch (error) { if (error.code === 'ENOENT') return null; throw error; } };

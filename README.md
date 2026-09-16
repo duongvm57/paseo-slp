@@ -90,10 +90,11 @@ Khởi tạo repo công việc một lần:
 node "$HOME/.local/share/paseo-slp/bin/slp.mjs" init /absolute/job-repo --apply
 ```
 
-Lệnh chỉ tạo hai file cấu hình còn thiếu và giữ nguyên từng file đã có:
+Lệnh chỉ tạo các file còn thiếu và giữ nguyên từng file đã có:
 
 - `.paseo-slp/WORKSPACE_PROTOCOL.md`: quy trình, mức rủi ro, proof gate, budget và quyền fallback.
 - `.paseo-slp/slp-routing.json`: pool runtime của Peer. Init để rỗng; onboarding cần điền option hợp lệ trước delegation. Khi repo chưa có file này, runtime đọc catalog user-scope `$PASEO_HOME/slp-routing.json` (mặc định `~/.paseo`).
+- `.paseo-slp/notebook.md`: notebook mặc định của Supervisor; protocol ghi nhận owner và cách truy xuất thực tế (file này hoặc `timeline:<agentId>`).
 
 Skill onboarding được cài riêng để agent có thể auto-trigger. Từ repo muốn dùng,
 cài project-local (tạo `.agents/skills/paseo-slp-onboarding` và có thể commit cùng repo):
@@ -119,7 +120,7 @@ mới sau khi cài, rồi yêu cầu onboard/setup SLP cho repo; description c�
 trigger workflow.
 Xem [skill nguồn](skills/paseo-slp-onboarding/SKILL.md).
 
-Hai file tách riêng: protocol là hướng dẫn vận hành, JSON là dữ liệu có thể kiểm
+Protocol và catalog là hai file tách riêng: protocol là hướng dẫn vận hành, JSON là dữ liệu có thể kiểm
 tra tự động và đổi thường xuyên. Cả hai thuộc repo và có thể version cùng code;
 không nhúng JSON vào Markdown. Lead đọc protocol và pool trước mỗi Peer delegation, chọn option theo task/budget,
 rồi truyền constraint liên quan vào assignment. Worktree mới cần các file trong base candidate hoặc bản copy
@@ -205,13 +206,46 @@ repo và disposition hiển thị `General`. Resume giữ tên; session handoff 
 Đường offline tùy chọn: `prepare` nhận role, repository, workspaceId, assignment.
 Supervisor/Lead thêm inventory `profiles`/`providers`; Peer thêm `providers` và
 `route: {optionId, catalogSha256}` lấy từ `routes`. Có thể kèm profiles khi chuẩn bị
-Peer, nhưng chúng không thay thế pool. Option quyết định nguyên bundle và map sang
+Peer, nhưng chúng không thay thế pool. Hai trường tùy chọn nữa, áp dụng cho cả
+`prepare-handoff`:
+
+- `inventoryFile`: đường dẫn tuyệt đối tới JSON object có `providers`/`profiles`;
+  các mảng này chỉ điền trường request chưa inline — mảng inline tường minh
+  (kể cả `[]`) luôn thắng.
+- `assignmentFile`: đường dẫn tuyệt đối tới file assignment đầy đủ (phải tồn tại,
+  là file thường và đọc được). Prompt giữ `assignment` làm brief ngắn và thêm dòng
+  `Assignment file: <path> — read it first; it is authoritative for scope
+  details.`; nội dung file không được inline.
+
+Option quyết định nguyên bundle và map sang
 `slp-pi-peer`/`slp-codex-peer`/`slp-devin-peer`; model chứa `/` được giữ nguyên. `binding` tường minh
 không kèm profiles chỉ hỗ trợ Supervisor/Lead khi được Human cho phép. Peer luôn
 phải chọn option trong pool, kể cả handoff và recovery.
 `prepare-handoff <request.json>` thêm snapshot và handoff vào create_agent arguments;
 xem [ví dụ handoff](examples/provider-handoff.request.json). Hai lệnh chỉ chuẩn bị
 arguments; Supervisor/Lead dùng Paseo để thực sự tạo agent.
+
+Hai lệnh read-only hỗ trợ discovery, chạy được offline (không cần daemon hay
+`paseo` trên PATH):
+
+```bash
+node bin/slp.mjs inventory [--paseo-home /absolute/paseo-home]
+node bin/slp.mjs agents [--paseo-home /absolute/paseo-home]
+```
+
+`inventory` in `{providers, profiles, source}` đúng shape `prepare` nhận. Lệnh
+chỉ gọi `paseo provider ls --json` khi `paseo.pid` của home được chỉ định là
+tiến trình đang sống; không thì đọc `agents.providers` trong `config.json` của
+chính home đó — không bao giờ lấy providers của daemon khác và không tạo thư mục.
+Providers live được chuẩn hóa thành `{id, enabled, status}` (`enabled` có thể
+null với trạng thái không nhận diện được), còn config cho `{id, enabled,
+extends}`; profiles luôn đọc từ `daemon.agentProfiles`. Trên host nhiều daemon,
+listing live phản ánh daemon mà `paseo` CLI kết nối tới. `agents`
+liệt kê `<home>/agents/*/<id>.json` thành `{id, title, provider, cwd,
+workspaceId, status, nativeHandle, attach}`; `attach` là gợi ý `cd <cwd> &&
+devin -r <nativeHandle>` đã shell-quote cho provider devin có handle. Vì `paseo
+inspect`/`ls` không trả `persistence.nativeHandle`, lệnh này đọc persistence của
+daemon — chi tiết host best-effort, không phải contract.
 
 Gỡ sau khi các session dùng bản cài đã hoàn tất:
 
@@ -259,6 +293,13 @@ saved profile hay ép family của Lead theo mỗi Peer. Các scenario ngoài sc
 Đường offline vẫn có: `install <dir> --apply` không có `--paseo-home` chỉ stage
 package; `prepare <request.json>` xuất create_agent arguments có role envelope.
 Đường này không đăng ký profile hay tự tạo agent.
+
+`snapshot <repo>` ghi nhận work snapshot gồm HEAD, đường dẫn tracked/untracked
+không bị ignore, nội dung, symlink, permission mode và deleted marker. Thư mục
+untracked là root của một repo Git lồng nhau được snapshot đệ quy và ghi dưới
+`nested` (mỗi sub-repo có `{path, head, sha256, files}` riêng và có thể mang
+`nested` của chính nó, tính vào sha256 tổng). Gitlink submodule đã stage
+(mode 160000) và thư mục được liệt kê mà không phải repo vẫn không được hỗ trợ.
 
 - [File map và contract](docs/contract.md)
 - [Operating guide](docs/reference/agent-orchestration-complete-operating-guide.md)

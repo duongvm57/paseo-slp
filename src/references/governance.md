@@ -23,7 +23,9 @@ available budget, not by role title; preserve explicit Human profile selections.
 
 At setup, resolve a durable notebook location and its write owner within assignment
 authority. This can be an authorized notebook file or indexed session timeline notes;
-record the exact path/session and retrieval method. Notebook authority is separate
+record the exact path/session and retrieval method. When timeline notes are chosen,
+leave the retrieval reference where the Human can find it — the protocol's
+Supervisor notebook field or a first visible reply. Notebook authority is separate
 from project implementation authority. If durable retrieval is unavailable, retain
 the handback note and report that limitation. Never edit installed policy as storage.
 

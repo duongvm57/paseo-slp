@@ -45,6 +45,9 @@ guaranteeing one.
 The observing session calls Paseo create_heartbeat with prompt and cron, plus
 timezone, name, maxRuns and/or expiresIn as appropriate to the agreed boundary.
 It prompts that same session; it does not target an arbitrary Lead/Supervisor ID.
+create_heartbeat requires an agent-scoped session: when the host rejects it
+(observed 2026-09-16 on an ACP Lead session), rely on notifyOnFinish finishes
+and mailbox events within authority, or report the gap.
 Before creating, check the session's recorded task heartbeat receipt to avoid
 duplicates. Record the returned ID, owner session, task scope, cadence, expiry and
 stop condition durably in the timeline/notebook. Require a bounded lifetime for
@@ -72,6 +75,9 @@ Record owned schedule IDs and stopping conditions when that separate path is use
 
 Inspect the indicated agent status/activity and only relevant timeline/Git/workspace
 delta. Retrieve the actual report/candidate: curated activity may omit full evidence.
+get_agent_activity reads are tail-oriented and may truncate long sessions into
+overflow files; widen the limit or read the overflow path rather than assuming
+the returned tail is complete.
 If a discovered host timeline path cannot recover it, report the evidence gap rather
 than infer an outcome. If action is needed, use observation → evidence → hypothesis →
 open question to Lead. Use references/anti-patterns.md for suspected drift and repeated

@@ -57,18 +57,33 @@ export function snapshot(root) {
   const git = args => execFileSync('git', ['--no-optional-locks', '-C', root, ...args], { maxBuffer: 32 * 1024 * 1024 });
   if (git(['rev-parse', '--show-toplevel']).toString().trim() !== root) throw new Error('Snapshot requires repository root');
   const names = [...new Set(git(['ls-files', '-z', '--cached', '--others', '--exclude-standard']).toString().split('\0').filter(Boolean))].sort();
-  const entries = names.map(path => {
+  // Staged gitlinks (submodule entries, mode 160000) remain unsupported; an
+  // untracked directory that is itself a git work-tree root snapshots nested.
+  const gitlinks = new Set(git(['ls-files', '-z', '-s']).toString().split('\0')
+    .filter(line => line.startsWith('160000 ')).map(line => line.slice(line.indexOf('\t') + 1)));
+  const nested = [];
+  const entries = names.flatMap(name => {
     try {
-      const stat = lstatSync(join(root, path));
-      if (stat.isDirectory()) throw new Error(`Submodules/directories unsupported: ${path}`);
-      return { path, mode: stat.mode & 0o777, sha256: hash(stat.isSymbolicLink() ? readlinkSync(join(root, path)) : readFileSync(join(root, path))), kind: stat.isSymbolicLink() ? 'symlink' : 'file' };
+      const stat = lstatSync(join(root, name));
+      if (stat.isDirectory()) {
+        const path = name.replace(/\/+$/, '');
+        if (!gitlinks.has(path) && existsSync(join(root, path, '.git'))) {
+          const sub = snapshot(join(root, path));
+          nested.push({ path, head: sub.head, sha256: sub.sha256, files: sub.files,
+            ...(sub.nested ? { nested: sub.nested } : {}) });
+          return [];
+        }
+        throw new Error(`Submodules/directories unsupported: ${name}`);
+      }
+      return [{ path: name, mode: stat.mode & 0o777, sha256: hash(stat.isSymbolicLink() ? readlinkSync(join(root, name)) : readFileSync(join(root, name))), kind: stat.isSymbolicLink() ? 'symlink' : 'file' }];
     } catch (error) {
-      if (error.code === 'ENOENT') return { path, deleted: true };
+      if (error.code === 'ENOENT') return [{ path: name, deleted: true }];
       throw error;
     }
   });
   let head = null;
   try { head = git(['rev-parse', '--verify', '--quiet', 'HEAD']).toString().trim(); }
   catch (error) { if (error.status !== 1) throw error; }
-  return { root, head, sha256: hash(json({ head, entries })), files: entries };
+  return { root, head, sha256: hash(json(nested.length ? { head, entries, nested } : { head, entries })), files: entries,
+    ...(nested.length ? { nested } : {}) };
 }

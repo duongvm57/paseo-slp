@@ -8,7 +8,7 @@ Local installation/transport checks do not constitute workflow acceptance.
 | Files | Responsibility |
 |---|---|
 | install.sh | One-command local install into the selected destination and Paseo home; reload configuration. |
-| src/paseo-install.mjs | Merge owned provider/profile entries, preserve existing preferences, record rollback binding, initialize repository protocol. |
+| src/paseo-install.mjs | Merge owned provider/profile entries, preserve existing preferences, record rollback binding, initialize repository protocol and Supervisor notebook scaffold. |
 | src/host-config.mjs | Sole reader/writer of the Paseo host configuration; one rule each for owned provider and owned profile verification and the two MCP flags. |
 | bin/codex-role.mjs, src/role-transport.mjs | Transparent Codex stdio adapter; append installed role instructions at start/resume and existing turn overrides. |
 | bin/pi-role.mjs, src/role-transport.mjs | Pi native append-system-prompt adapter; preserve RPC bytes, host extensions and session/model/thinking arguments. |
@@ -25,9 +25,11 @@ Local installation/transport checks do not constitute workflow acceptance.
 | src/templates/WORKSPACE_PROTOCOL.md | Repository tactics template with risk classes, routing, monitoring and proof gates; explicit init preserves existing files. |
 | src/binding.mjs | Every rule a Binding must satisfy: setting patterns, the route override deny-lists and the single provider-health check. Imports nothing from the package. |
 | src/role-bundle.mjs | Which policy bytes each role receives at session entry, and their order; the load-path contract traced in guide-coverage.md. |
-| src/launch.mjs, src/profiles.mjs | Select one Binding source (saved profiles, catalog routing or an explicit binding), then compose the create_agent argument record. launchPlan and handoffPlan share one builder; nothing edits that record afterwards. Handoff adds explicit authority, old-owner evidence, resources and current work snapshot; no lifecycle mutations. |
-| src/package.mjs | Package identity, exclusive staging, integrity checks and stable Git work snapshot. |
-| bin/slp.mjs | Install/upgrade/preview, verify/uninstall, init, routes, prepare/handoff, identity and snapshot entrypoints. |
+| src/launch.mjs, src/profiles.mjs | Select one Binding source (saved profiles, catalog routing or an explicit binding), then compose the create_agent argument record. launchPlan and handoffPlan share one builder; nothing edits that record afterwards. Handoff adds explicit authority, old-owner evidence, resources and current work snapshot; no lifecycle mutations. request.inventoryFile fills providers/profiles the request did not inline; request.assignmentFile appends a read-first pointer to the emitted prompt without inlining file bytes. |
+| src/inventory.mjs | Provider/profile inventory in the exact shapes prepare consumes: `paseo provider ls --json` only when the requested home's paseo.pid names a live process, else that home's own config.json `agents.providers` — never another daemon's providers, no directory materialization; provider `enabled` may be null for unrecognized states; profiles always from `daemon.agentProfiles`. Read-only; on multi-daemon hosts the live listing reflects whichever daemon the paseo CLI reaches. |
+| src/agents.mjs | Agent listing from daemon persistence (`<paseoHome>/agents/*/<id>.json`) with shell-quoted devin-family `devin -r` attach hints; works around `paseo inspect`/`ls` not surfacing `persistence.nativeHandle`. Read-only, best-effort host detail. |
+| src/package.mjs | Package identity, exclusive staging, integrity checks and stable Git work snapshot; untracked nested Git work-tree roots are snapshotted recursively under `nested`, and sub-repos can carry their own `nested`. |
+| bin/slp.mjs | Install/upgrade/preview, verify/uninstall, init, routes, prepare/handoff, inventory, agents, identity and snapshot entrypoints. |
 | skills/paseo-slp-e2e/SKILL.md | Single-session full-suite execution procedure; requires the source checkout and authorized Paseo actors. |
 | e2e/evidence.mjs | One contract per evidence kind: what may enter the ledger and what discharges the kind's requirement at seal. |
 | e2e/criteria.mjs | U1–U7 as code, each naming the evidence kinds that can support it; the mapping a reviewer previously held in their head. |
@@ -114,14 +116,18 @@ repository catalog remains authoritative and disables the fallback.
 
 prepare accepts repository, workspaceId, assignment and role. Supervisor/Lead use
 fresh profiles/providers; Peer uses providers and route.optionId/catalogSha256.
-A profiles inventory can accompany Peer discovery but does not select its runtime.
+A profiles inventory can accompany Peer discovery but does not select its runtime;
+an inventoryFile path fills providers/profiles the request did not inline (explicit
+inline arrays win, including `[]`), and an assignmentFile path appends a
+read-first pointer to the emitted prompt while keeping file bytes out of it. Both
+fields apply to prepare-handoff through the shared plan builder.
 Catalog settings cannot be overlaid via route runtime/profile overrides. Explicit
 binding without profiles remains a separate Human-authorized offline/handoff path,
 not an ordinary missing-pool fallback. Helpers emit create arguments only; Paseo
 owns lifecycle and actual settings. Source selection is shared by prepare-handoff.
 
-init creates missing protocol and empty pool scaffold without overwriting existing
-files. Onboarding completes the project pool; empty init output is not ready for
+init creates missing protocol, empty pool scaffold and Supervisor notebook file
+without overwriting existing files. Onboarding completes the project pool; empty init output is not ready for
 Peer delegation and shadows the user-scope catalog until removed.
 --routing-from imports only an explicitly chosen catalog into a
 missing repo file. Host upgrade archives retired Peer profiles but neither creates
@@ -156,7 +162,12 @@ policy supplies it. Actual live transfer remains separate E2E evidence.
 A work snapshot includes HEAD, tracked/untracked nonignored paths, content,
 symlink targets, permission modes and deleted markers. It excludes ignored build
 outputs, staging intent, external artifacts and processes; relevant external
-proof must be recorded separately. Submodules are unsupported. Before/after
+proof must be recorded separately. An untracked directory that is itself a Git
+work-tree root is snapshotted recursively and recorded under `nested` with its
+own HEAD/sha256/files (a sub-repo can itself carry `nested`); the top-level
+sha256 covers nested content. Staged
+submodule gitlinks and listed directories that are not repositories remain
+unsupported. Before/after
 snapshots detect drift while Peer is paused, not transient or malicious writes.
 
 Peer quota fallback is configured by catalog quotaFallback.enabled and optionIds.

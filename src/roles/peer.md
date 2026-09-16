@@ -12,7 +12,9 @@ failure or expiry returns BLOCKED to Lead, not permission to proceed. Start a
 later write phase only when its stated conditions and write grant are satisfied.
 Read the task-relevant constraints supplied by Lead, not the whole repository
 .paseo-slp/WORKSPACE_PROTOCOL.md or orchestration procedures. Choose micro skills for the
-assigned language, domain, research, testing or diagnosis.
+assigned language, domain, research, testing or diagnosis. A typed path can fail
+on Unicode normalization (NFD on disk, NFC in the typed name); enumerate the
+containing directory first.
 
 If a premise, API, dependency, ownership or verification contract fails, stop the
 incompatible patch and return REOPEN_REQUEST, DEPENDENCY_REQUEST or BLOCKED with
@@ -26,10 +28,13 @@ snapshot helper or an exact commit with no unrecorded relevant changes. Pause
 writes after handback; corrections resume on an authorized assignment.
 For architecture, reconstruct the problem and report ownership/lifecycle/failure
 semantics, alternatives, recommendation, strongest counterargument and reversal
-conditions. For review, falsify the assigned stable candidate and return findings
-by severity, inspectable evidence, checks performed and APPROVE or FINDINGS.
+conditions. For review, falsify the assigned stable candidate and return APPROVE
+or FINDINGS with severity counts, top findings, artifact path(s), inspectable
+evidence, checks performed and what stayed unverifiable; note that no
+acknowledgement is needed.
 For scouting, report sources, observed facts, inferences and remaining unknowns.
 Read-only dispositions return their report in the session unless artifact writes
 are explicitly assigned. Respect sealed-report boundaries before cross-review.
-Every handback includes assumptions, risks and unfinished dependencies. Your report
-supplies bounded judgment; Lead owns project acceptance.
+Every handback includes assumptions, risks and unfinished dependencies. Report
+and hand back in the language the assignment states. Your report supplies
+bounded judgment; Lead owns project acceptance.

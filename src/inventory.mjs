@@ -1,0 +1,78 @@
+import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { isAbsolute, join } from 'node:path';
+import { configFile, providers as hostProviders, agentProfiles } from './host-config.mjs';
+import { paseoHome } from './routing.mjs';
+
+// Provider/profile inventory in exactly the shapes launchPlan consumes:
+// providers satisfy verifyProvider ({id, enabled, status, extends}) and
+// profiles satisfy resolveProfile ({id, provider, model, modeId,
+// thinkingOptionId, featureValues}). Live `paseo provider ls --json` wins for
+// providers, but only when the requested home has a running daemon — spawning
+// the CLI against a home without one can auto-create the directory and fall
+// back to a foreign default daemon. config.json supplies profiles (no live
+// listing exists) and is the fallback source when the daemon is absent or the
+// call fails. Read-only.
+const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+
+// Tri-state: only the observed states map to a boolean; anything else stays
+// null so a future third state is never silently read as enabled.
+const enabledOf = value =>
+  value === 'Enabled' || value === true ? true
+    : value === 'Disabled' || value === false ? false : null;
+
+// paseo provider ls --json uses `provider` for the id, "Enabled"/"Disabled"
+// strings for enabled, and carries no `extends`; verifyProvider's pass rule is
+// enabled !== false and status !== 'unavailable'.
+const liveProvider = entry => ({
+  id: entry.provider,
+  enabled: enabledOf(entry.enabled),
+  ...(entry.status != null ? { status: entry.status } : {}),
+});
+
+// agents.providers is a map keyed by id; absent enabled means enabled.
+const configProvider = (id, entry) => ({
+  id,
+  enabled: !record(entry) || entry.enabled == null ? true : enabledOf(entry.enabled),
+  ...(entry?.extends != null ? { extends: entry.extends } : {}),
+});
+
+const profile = entry => ({
+  id: entry.id,
+  provider: entry.provider,
+  model: entry.model,
+  ...(entry.modeId != null ? { modeId: entry.modeId } : {}),
+  ...(entry.thinkingOptionId != null ? { thinkingOptionId: entry.thinkingOptionId } : {}),
+  ...(entry.featureValues != null ? { featureValues: entry.featureValues } : {}),
+});
+
+// A running daemon for this home leaves paseo.pid; EPERM still means alive.
+const liveDaemon = home => {
+  try {
+    const pid = JSON.parse(readFileSync(join(home, 'paseo.pid'), 'utf8')).pid;
+    if (!Number.isInteger(pid) || pid <= 0) return false;
+    process.kill(pid, 0);
+    return true;
+  } catch (error) { return error.code === 'EPERM'; }
+};
+
+export function inventory(home = paseoHome()) {
+  if (typeof home !== 'string' || !isAbsolute(home)) throw new Error('Absolute Paseo home required');
+  const file = configFile(home);
+  const source = { providers: file.path, profiles: file.path };
+  let providers;
+  if (liveDaemon(home)) {
+    try {
+      const env = { ...process.env, PASEO_HOME: home };
+      delete env.PASEO_HOST;
+      const listed = JSON.parse(execFileSync('paseo', ['provider', 'ls', '--json'], {
+        env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000,
+      }));
+      if (!Array.isArray(listed)) throw new Error('Unexpected provider listing');
+      providers = listed.filter(record).map(liveProvider).filter(entry => typeof entry.id === 'string' && entry.id);
+      source.providers = 'paseo provider ls --json';
+    } catch { /* stale pid or mid-restart daemon: fall back to config */ }
+  }
+  providers ??= Object.entries(hostProviders(file.config)).map(([id, entry]) => configProvider(id, entry));
+  return { providers, profiles: agentProfiles(file.config).filter(record).map(profile), source };
+}

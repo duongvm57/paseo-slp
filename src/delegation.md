@@ -45,8 +45,11 @@ Peer runtime changes remain inside the project pool; quota fallback follows its 
    record actual agent IDs for ownership and report routing.
    initialPrompt contains the neutral assignment: project/task identifiers,
    repository/workspace, role/disposition, objective or open question, owned/excluded
-   scope, read/write mode, separate authority grants, known constraints/dependencies,
-   verification, your own agent ID as the report recipient, and handback. For
+   scope, read/write mode, separate authority grants, known constraints/dependencies
+   (including discovered filename hazards and their recovery technique), the
+   protocol's communication language for reports and handbacks, any effort/scope
+   bound (for example, cover the top-N highest-risk references first, then
+   breadth), verification, your own agent ID as the report recipient, and handback. For
    review include the exact candidate; for sealed design include the report
    visibility boundary. A Peer receives only relevant repository tactics and may
    propose a different solution.
@@ -55,6 +58,15 @@ Peer runtime changes remain inside the project pool; quota fallback follows its 
    separately from the eventual project outcome. Pass required prerequisites
    intact. A later write grant is a separate assignment after its conditions are
    verified; describing the eventual repair does not grant those writes now.
+   A standby Lead — requested before its task is concrete — gets a bounded
+   read-only assignment: orient on the repository and protocol, acknowledge
+   ownership and handback conditions, then await the task; the acknowledgment is
+   its completion condition. The later task and write grant arrive as a separate
+   assignment. For an N-peer fan-out, write one brief file per seat under a
+   non-deliverable scratch path (for example .local-checks/), pass a short
+   assignment plus assignmentFile=<absolute path> to prepare and keep briefs one
+   per seat; the emitted prompt references the seat's brief file instead of
+   inlining it.
 3. Record the returned agent/workspace IDs, assignment and ownership in your timeline.
    If create_agent is aborted, times out or loses its response, its outcome is
    unknown: the child may still start. Keep that scope reserved to the pending
