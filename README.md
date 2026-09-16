@@ -13,11 +13,17 @@ creates one per assignment, and the Lead delegates to Peers through Paseo. You
 can keep chatting in the existing Supervisor session — no need to re-enter the
 role prompt.
 
-Requirements: Node >=22, the Paseo CLI/daemon and the Codex/Pi CLIs matching
-the providers you want to use, plus each provider's credentials on the daemon
-host. Pi needs repeatable `--append-system-prompt` support (the tested Pi build
-has it). The installer integrates into an existing Paseo; it does not download
-or replace Paseo/Codex.
+## Requirements
+
+- Node >=22, the Paseo CLI/daemon, and the Codex/Pi CLIs matching the
+  providers you want to use.
+- Each provider's credentials on the daemon host.
+- Pi needs repeatable `--append-system-prompt` support (the tested Pi build
+  has it).
+- The installer integrates into an existing Paseo; it does not download or
+  replace Paseo/Codex.
+
+## Installation
 
 ```bash
 ./install.sh
@@ -29,18 +35,31 @@ adds the nine providers `slp-codex-{supervisor,lead,peer}`,
 `slp-pi-{supervisor,lead,peer}` and `slp-devin-{supervisor,lead,peer}`, plus
 two saved profiles **SLP Supervisor** and **SLP Lead** to
 `$PASEO_HOME/config.json` (default `~/.paseo`), enables MCP injection and
-reloads. No agent is created during install. The three roles stay intact;
-**Peers need no saved profile** — the Lead picks each Peer's runtime from the
-project pool in `.paseo-slp/slp-routing.json`. Repos keep their tactics in
-`.paseo-slp/WORKSPACE_PROTOCOL.md`; onboarding guides you through both files.
+reloads.
 
-Override the install location with `SLP_HOME=/absolute/path` and the host
-config with `PASEO_HOME=/absolute/home`. Run the installer on the daemon's
-host. Reinstalling the same candidate does not overwrite settings you have
-tuned. A different candidate or a conflicting ID is refused, preserving the
-current install. To upgrade an installed copy, cut over to a new directory;
-the command keeps profile settings and leaves the old files for sessions still
-using them:
+- No agent is created during install. The three roles stay intact.
+- **Peers need no saved profile** — the Lead picks each Peer's runtime from
+  the project pool in `.paseo-slp/slp-routing.json`.
+- Repos keep their tactics in `.paseo-slp/WORKSPACE_PROTOCOL.md`; onboarding
+  guides you through both files.
+- Override the install location with `SLP_HOME=/absolute/path` and the host
+  config with `PASEO_HOME=/absolute/home`. Run the installer on the daemon's
+  host.
+- Reinstalling the same candidate does not overwrite settings you have tuned.
+  A different candidate or a conflicting ID is refused, preserving the
+  current install.
+
+To preview the entries before writing:
+
+```bash
+node bin/slp.mjs install /absolute/new/destination --paseo-home /absolute/paseo-home
+# add --apply to write; add --reload to activate on the running daemon
+```
+
+## Upgrading
+
+To upgrade an installed copy, cut over to a new directory; the command keeps
+profile settings and leaves the old files for sessions still using them:
 
 ```bash
 node bin/slp.mjs upgrade "$HOME/.local/share/paseo-slp.next" \
@@ -53,51 +72,55 @@ current settings of `slp-peer` and any SLP-owned retired disposition profiles
 by recording them in `paseo-binding.json` → `retiredProfiles` before removing
 them from active profiles. The Supervisor/Lead profiles keep their chosen
 settings; the project pool is neither modified nor auto-filled from old
-profiles. An existing catalog and user-owned profiles outside this install are
-preserved. Keep the old directory around until dependent sessions have
-finished; do not uninstall the old copy to remove entries that moved to the
-new one. `.next` is only a temporary cutover path: after old sessions settle,
-move the verified candidate back to the canonical
-`~/.local/share/paseo-slp`, reload, then delete the temporary directory.
-Always use the path the providers actually reference for `init` and `prepare`.
+profiles. An existing catalog and user-owned profiles outside this install
+are preserved.
 
-To preview the entries before writing:
+Keep the old directory around until dependent sessions have finished; do not
+uninstall the old copy to remove entries that moved to the new one. `.next`
+is only a temporary cutover path: after old sessions settle, move the
+verified candidate back to the canonical `~/.local/share/paseo-slp`, reload,
+then delete the temporary directory. Always use the path the providers
+actually reference for `init` and `prepare`.
 
-```bash
-node bin/slp.mjs install /absolute/new/destination --paseo-home /absolute/paseo-home
-# add --apply to write; add --reload to activate on the running daemon
-```
+## Getting started
 
-After installing, open a work workspace in Paseo, pick **SLP Supervisor** and
-enter an objective plus a normal authority scope, e.g. "Fix the cart-total
-display bug; you may edit code/tests in this repo; no commit/push/deploy."
+1. Install the package (above), then open a work workspace in Paseo.
+2. Pick **SLP Supervisor** and enter an objective plus a normal authority
+   scope, e.g. "Fix the cart-total display bug; you may edit code/tests in
+   this repo; no commit/push/deploy."
+3. Initialize each work repo once and onboard it (below).
+
 Supervisor and Lead already carry the procedures for picking child profiles,
-keeping parentage and using finish notifications. **SLP Lead** also works when
-you want to hand work straight to a Lead.
+keeping parentage and using finish notifications. **SLP Lead** also works
+when you want to hand work straight to a Lead.
+
+## Agent profiles
 
 To set per-role model and reasoning:
 
 1. Open **Settings → the host running the work → Agents → Agent profiles**.
 2. Edit **SLP Supervisor** or **SLP Lead**.
-3. Pick the matching `slp-codex-{role}`, `slp-pi-{role}` or `slp-devin-{role}`
-   provider, then choose **Model**, **Thinking**, **Mode** where the provider
-   offers them, plus features, then **Save**.
+3. Pick the matching `slp-codex-{role}`, `slp-pi-{role}` or
+   `slp-devin-{role}` provider, then choose **Model**, **Thinking**, **Mode**
+   where the provider offers them, plus features, then **Save**.
 4. When creating a session directly, pick the saved profile in the model
-   picker. For Peers, use onboarding to set up the repo pool; the Lead picks a
-   suitable option from the pool and passes that provider/model/settings into
-   `create_agent`.
+   picker. For Peers, use onboarding to set up the repo pool; the Lead picks
+   a suitable option from the pool and passes that provider/model/settings
+   into `create_agent`.
 
 **Thinking** is reasoning effort; **Mode** is the permission/approval level —
 two separate settings. Pick values the provider/model actually offers. Agents
 use `list_profiles`, `list_models` and `inspect_provider` for discovery; the
-profile's `thinkingOptionId` is passed through as `settings.thinkingOptionId`
-when creating the agent.
+profile's `thinkingOptionId` is passed through as
+`settings.thinkingOptionId` when creating the agent.
 
 Editing a profile affects the next selection/launch; it does not update a
 running session. For a live session, Paseo offers `update_agent` to change
 model/thinking within the same provider when supported. The profile keeps its
 own default for future sessions. See
 [Paseo agent profiles](https://paseo.sh/docs/agent-profiles.md).
+
+## Repository setup
 
 Initialize each work repo once:
 
@@ -107,15 +130,17 @@ node "$HOME/.local/share/paseo-slp/bin/slp.mjs" init /absolute/job-repo --apply
 
 Init only creates missing files and never overwrites existing ones:
 
-- `.paseo-slp/WORKSPACE_PROTOCOL.md`: operating procedure, risk levels, proof
-  gates, budget and fallback authority.
-- `.paseo-slp/slp-routing.json`: the Peer runtime pool. Init leaves it empty;
-  onboarding must fill in valid options before delegation. While a repo has
-  no such file, the runtime reads the user-scope catalog
+- `.paseo-slp/WORKSPACE_PROTOCOL.md`: operating procedure, risk levels,
+  proof gates, budget and fallback authority.
+- `.paseo-slp/slp-routing.json`: the Peer runtime pool. Init leaves it
+  empty; onboarding must fill in valid options before delegation. While a
+  repo has no such file, the runtime reads the user-scope catalog
   `$PASEO_HOME/slp-routing.json` (default `~/.paseo`).
 - `.paseo-slp/notebook.md`: the default Supervisor notebook; the protocol
   records its owner and the actual retrieval method (this file or
   `timeline:<agentId>`).
+
+### Onboarding
 
 The onboarding skill is installed separately so agents can auto-trigger it.
 From a repo you want to use, install it project-locally (creates
@@ -134,13 +159,13 @@ npx skills@latest add /absolute/path/to/paseo-slp \
 ```
 
 Once the package is published to GitHub, replace the local path with the
-published URL/repository, e.g. `https://github.com/<owner>/<repo>`. Use project
-mode or add `--global` as above. Project skills land in `.agents/skills`,
-global skills in `~/.agents/skills`; both Codex and Pi discover both scopes.
-Verify with `npx skills@latest list --agent codex` or add `--global` for user
-scope. Open a fresh session after installing, then ask to onboard/set up SLP
-for the repo; the skill description triggers the workflow.
-See the [source skill](skills/paseo-slp-onboarding/SKILL.md).
+published URL/repository, e.g. `https://github.com/<owner>/<repo>`. Use
+project mode or add `--global` as above. Project skills land in
+`.agents/skills`, global skills in `~/.agents/skills`; both Codex and Pi
+discover both scopes. Verify with `npx skills@latest list --agent codex` or
+add `--global` for user scope. Open a fresh session after installing, then
+ask to onboard/set up SLP for the repo; the skill description triggers the
+workflow. See the [source skill](skills/paseo-slp-onboarding/SKILL.md).
 
 Protocol and catalog are two separate files: the protocol is operating
 guidance, the JSON is machine-checkable data that changes often. Both belong
@@ -149,6 +174,8 @@ Markdown. The Lead reads the protocol and pool before every Peer delegation,
 picks an option by task/budget, then passes the relevant constraints into the
 assignment. A new worktree needs these files present in the base candidate or
 an authorized copy; each worktree reads its own configuration.
+
+### Importing an existing catalog
 
 If you already have a global table from an earlier version, import it once
 into the repo:
@@ -164,6 +191,8 @@ repo copy. A repo with no catalog reads the user-scope catalog
 `$PASEO_HOME/slp-routing.json`; an empty catalog in the repo is still
 authoritative (it blocks delegation) until removed. A repo never reads
 another repo's catalog.
+
+## How the roles work
 
 The protocol picks topology and proof gates by risk: a small task may use a
 single Engineer; architecture/lifecycle-sensitive work gets an Architect, an
@@ -181,10 +210,12 @@ receive the relevant constraints through assignments. This is a policy pack
 for agents using Paseo primitives — there is no detector or monitoring daemon
 in the package.
 
+## Peer runtime pool
+
 **Runtime sources:** Supervisor/Lead use the two saved profiles the Human
-configures in Paseo. Peers use the repo pool `.paseo-slp/slp-routing.json`, or
-the user-scope catalog `$PASEO_HOME/slp-routing.json` when the repo has none.
-Each option carries a `pi`/`codex`/`devin` provider, model, settings,
+configures in Paseo. Peers use the repo pool `.paseo-slp/slp-routing.json`,
+or the user-scope catalog `$PASEO_HOME/slp-routing.json` when the repo has
+none. Each option carries a `pi`/`codex`/`devin` provider, model, settings,
 `suitableFor`, `avoidFor`, `notes`, `priority` and an
 `enabled`/`availability` state. The Lead chooses per task — Engineer,
 Architect and Reviewer are not hard-mapped to models. Two Peers can differ in
@@ -198,7 +229,9 @@ either scope, finish onboarding first; there is no fallback to `slp-peer`, to
 the Lead's own settings, or to another repo's catalog. `priority` is a
 selection hint, not a replacement for suitability and budget judgment.
 
-**Peer quota fallback:** configure it right in `.paseo-slp/slp-routing.json`:
+### Peer quota fallback
+
+Configure it right in `.paseo-slp/slp-routing.json`:
 
 ```json
 "quotaFallback": { "enabled": true, "optionIds": ["luna-code", "glm-design"] }
@@ -213,16 +246,18 @@ default, and do not treat another model on the same account as fresh quota.
 When no valid fallback remains, report BLOCKED; keep ownership and evidence
 before handing off.
 
-**Switching a Lead to Pi when Codex runs out of quota:** change the **SLP
-Lead** profile's provider to `slp-pi-lead`, pick the matching model/thinking
-and Save for later launches. To move work already running, tell the
-Supervisor: "Codex is out of quota — move this Lead to Pi, keep the current
-scope and hand off per the saved profile." The Supervisor checks the old Lead
-has stopped orchestrating, collects state/evidence and creates a new Lead
-with the same policy on Pi. If the old Lead cannot respond, the Supervisor
-pulls state from the timeline/artifacts; no need to call the out-of-quota
-model just for a summary. Without a Supervisor, the Human moves the handoff to
-a new Lead session and confirms ownership.
+## Lead provider handoff
+
+Switching a Lead to Pi when Codex runs out of quota: change the **SLP Lead**
+profile's provider to `slp-pi-lead`, pick the matching model/thinking and
+Save for later launches. To move work already running, tell the Supervisor:
+"Codex is out of quota — move this Lead to Pi, keep the current scope and
+hand off per the saved profile." The Supervisor checks the old Lead has
+stopped orchestrating, collects state/evidence and creates a new Lead with
+the same policy on Pi. If the old Lead cannot respond, the Supervisor pulls
+state from the timeline/artifacts; no need to call the out-of-quota model
+just for a summary. Without a Supervisor, the Human moves the handoff to a
+new Lead session and confirms ownership.
 
 This is a handoff to a new session: the host does not switch providers in
 place and does not reparent Peers. The procedure preserves Peer
@@ -233,6 +268,8 @@ beforehand; a quota error alone does not grant provider-switch authority.
 Changing model/thinking within the same provider can use `update_agent`,
 subject to provider capability.
 
+## Agent naming
+
 Agent naming uses `Supervisor — <task>`, `Lead — <task>` and
 `Peer — <Disposition> — <task>`. For example `Peer — Engineer — checkout
 totals` and `Peer — Reviewer — checkout totals` distinguish two jobs sharing
@@ -242,6 +279,10 @@ API`. When omitted, taskLabel falls back to the repo directory name and the
 disposition shows `General`. Resume keeps the name; a handed-off session adds
 `Handoff`. The agent ID remains the identifier used for ownership and
 reporting.
+
+## CLI reference
+
+### `prepare` / `prepare-handoff`
 
 The optional offline path: `prepare` accepts role, repository, workspaceId
 and assignment. Supervisor/Lead additionally take the `profiles`/`providers`
@@ -264,9 +305,12 @@ kept verbatim. An explicit `binding` without profiles only supports
 Supervisor/Lead when the Human authorizes it. Peers must always pick a pool
 option, including during handoff and recovery.
 `prepare-handoff <request.json>` adds the snapshot and handoff packet to the
-create_agent arguments; see the [handoff example](examples/provider-handoff.request.json).
+create_agent arguments; see the
+[handoff example](examples/provider-handoff.request.json).
 Both commands only prepare arguments; Supervisor/Lead use Paseo to actually
 create the agent.
+
+### `inventory` / `agents`
 
 Two read-only commands support discovery and work offline (no daemon or
 `paseo` on PATH required):
@@ -292,6 +336,18 @@ Because `paseo inspect`/`ls` do not return `persistence.nativeHandle`, this
 command reads daemon persistence — a host detail, best-effort, not a
 contract.
 
+### `snapshot`
+
+`snapshot <repo>` records a work snapshot covering HEAD, tracked/untracked
+non-ignored paths, contents, symlinks, permission modes and deleted markers.
+An untracked directory that is the root of a nested Git repo is snapshotted
+recursively and recorded under `nested` (each sub-repo gets its own `{path,
+head, sha256, files}` and may carry its own `nested`, all counted in the
+overall sha256). Staged submodule gitlinks (mode 160000) and listed
+directories that are not repos remain unsupported.
+
+## Uninstall
+
 Uninstall after the sessions using the install have finished:
 
 ```bash
@@ -308,6 +364,8 @@ the file writes: the output reports `reloadRequired`/`reloadError`; rerun
 installer never restarts the daemon itself nor answers agent permission
 prompts.
 
+## Testing
+
 ```bash
 npm test
 npm run check
@@ -322,6 +380,8 @@ Codex and Pi; routing, adapter, upgrade and handoff have local checks. Live
 provider switching, heartbeat, council, recovery and concurrent writers are
 not yet E2E-accepted. Capability and policy-load paths are recorded in the
 trace table below.
+
+## E2E
 
 To dogfood from an open session on this **source checkout**, ask: **"run the
 package's full E2E"**. The [E2E skill](skills/paseo-slp-e2e/SKILL.md) walks
@@ -348,13 +408,7 @@ stages the package; `prepare <request.json>` emits create_agent arguments
 with a role envelope. This path registers no profile and creates no agent
 itself.
 
-`snapshot <repo>` records a work snapshot covering HEAD, tracked/untracked
-non-ignored paths, contents, symlinks, permission modes and deleted markers.
-An untracked directory that is the root of a nested Git repo is snapshotted
-recursively and recorded under `nested` (each sub-repo gets its own `{path,
-head, sha256, files}` and may carry its own `nested`, all counted in the
-overall sha256). Staged submodule gitlinks (mode 160000) and listed
-directories that are not repos remain unsupported.
+## Documentation
 
 - [File map and contract](docs/contract.md)
 - [Operating guide](docs/reference/agent-orchestration-complete-operating-guide.md)
