@@ -40,14 +40,20 @@ daemon config.
 
 ## Step 2 — interview the Human
 
-Ask, in one pass:
+Ask, in one pass and in plain terms — name the files and what each choice
+does; the Human decides, you supply discovered facts:
 
-1. Does this repository pin its own Peer pool, or inherit the user-scope
-   catalog (`$PASEO_HOME/slp-routing.json`, default `~/.paseo`)? Install
-   scaffolds that file empty when absent — check whether it already holds
-   real options before promising the fallback works.
-2. If pinning: which discovered `slp-*-peer` provider/model/settings options
-   to enable, their `priority`, and the `quotaFallback` policy.
+1. Where the Peer model list lives — this repo's
+   `.paseo-slp/slp-routing.json` (init seeds it with disabled task-type seats
+   the Human fills and reshapes), or the shared user file
+   `$PASEO_HOME/slp-routing.json` (every repo without its own list falls back
+   to it; install seeds the same skeleton there when absent — check whether
+   it already holds real options before promising the fallback works). The
+   Human may also keep this repo deliberately without a pool, which blocks
+   Peer delegation until filled.
+2. For a list meant to work: walk the seeded seats together — which
+   discovered `slp-*-peer` provider/model/settings fill each seat, which
+   seats to drop or add, their `priority`, and the `quotaFallback` policy.
 3. Communication language — used for reports, assignments, handbacks between
    agents and replies to the Human.
 4. Where the Supervisor notebook lives and how to retrieve it.
@@ -63,15 +69,16 @@ Preview with `node bin/slp.mjs init <absolute-repo>`, then rerun with
 - Fill the frontmatter fields: `routing_intent` (pinned | inherit | empty +
   decider + date — never restate option IDs), `communication_language`,
   `supervisor_notebook`, `decided_by`, `decided_at`.
-- Human chose **inherit** → delete the empty `slp-routing.json` init
-  created. An empty catalog is authoritative and blocks delegation. Then
-  check `$PASEO_HOME/slp-routing.json`: if it is still the empty install
-  scaffold, ask whether to populate it with the same discovered options —
-  writing outside the repo needs an explicit grant.
-- Human chose **pinned** → populate `options` per the schema in
-  `provider-routing.md`: `id`, `provider`, exact `model`, `enabled`,
-  `availability`, `priority`, `suitableFor`/`avoidFor`, `notes`, and
-  `quotaFallback` only under Human fallback authority.
+- Human chose the shared list → delete the seeded `slp-routing.json` init
+  created; any repo catalog file is authoritative and blocks the fallback.
+  Then check `$PASEO_HOME/slp-routing.json`: if it still holds only the
+  seeded skeleton, ask whether to populate it with the same discovered
+  options — writing outside the repo needs an explicit grant.
+- Human chose a repo pool → fill the seeded seats per the schema in
+  `provider-routing.md`: `id`, `provider`, exact discovered `model`,
+  `enabled`, `availability`, `priority`, `suitableFor`/`avoidFor`, `notes`,
+  and `quotaFallback` only under Human fallback authority.
+- Human chose no pool → strip the seeded seats, leaving `options: []`.
 
 ## Step 4 — validate
 

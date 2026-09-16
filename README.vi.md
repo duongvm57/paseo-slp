@@ -150,18 +150,19 @@ Lệnh chỉ tạo các file còn thiếu và giữ nguyên từng file đã có
 
 - `.paseo-slp/WORKSPACE_PROTOCOL.md`: quy trình, mức rủi ro, proof gate,
   budget và quyền fallback.
-- `.paseo-slp/slp-routing.json`: pool runtime của Peer. Init để rỗng;
-  onboarding cần điền option hợp lệ trước delegation. Khi repo chưa có file
-  này, runtime đọc catalog user-scope `$PASEO_HOME/slp-routing.json` (mặc
-  định `~/.paseo`).
+- `.paseo-slp/slp-routing.json`: pool runtime của Peer. Init seed sẵn
+  [skeleton theo loại việc](src/templates/slp-routing.json) — các ghế đều
+  disabled, đặt tên theo kiểu tác vụ; onboarding điền model thật từ
+  discovery trước delegation. Khi repo chưa có file này, runtime đọc
+  catalog user-scope `$PASEO_HOME/slp-routing.json` (mặc định `~/.paseo`).
 - `.paseo-slp/notebook.md`: notebook mặc định của Supervisor; protocol ghi
   nhận owner và cách truy xuất thực tế (file này hoặc `timeline:<agentId>`).
 
 Catalog user-scope `$PASEO_HOME/slp-routing.json` tồn tại vì
-`install`/`upgrade --apply` tạo scaffold rỗng khi file chưa có; file đã tồn
-tại thì không bị ghi đè. Nó chỉ là placeholder rỗng cho tới khi onboarding
-hoặc Human điền options — catalog user rỗng nghĩa là chưa có pool fallback,
-không phải lỗi. `uninstall` chỉ xóa nó khi file còn nguyên vẹn như lúc
+`install`/`upgrade --apply` seed cùng skeleton đó khi file chưa có; file đã
+tồn tại thì không bị ghi đè. Các ghế giữ nguyên disabled cho tới khi
+onboarding hoặc Human điền model — catalog user chỉ có skeleton nghĩa là
+chưa có pool fallback, không phải lỗi. `uninstall` chỉ xóa nó khi file còn nguyên vẹn như lúc
 scaffold (hash ghi trong `paseo-binding.json`); đã sửa thì uninstall giữ lại.
 
 ### Onboarding
@@ -239,10 +240,10 @@ catalog user-scope `$PASEO_HOME/slp-routing.json` khi repo chưa có. Mỗi
 option có provider `pi`/`codex`/`devin`, model, settings, `suitableFor`,
 `avoidFor`, `notes`, `priority` và trạng thái `enabled`/`availability`. Lead
 chọn theo công việc, không gán cứng Engineer/Architect/Reviewer vào model.
-Hai Peer có thể khác provider/model/effort mà không thêm saved profile. Xem
-[catalog mẫu](examples/slp-routing.json) — skeleton theo loại công việc:
-mỗi option mô tả kiểu việc, còn `model` để trống cho tới khi điền từ
-discovery thực tế trên host.
+Hai Peer có thể khác provider/model/effort mà không thêm saved profile.
+[Skeleton theo loại việc](src/templates/slp-routing.json) được seed sẵn cho
+thấy hình dạng: mỗi ghế đặt tên theo kiểu tác vụ, `model` để trống cho tới
+khi điền từ discovery thực tế trên host.
 
 Lead đọc pool mới, ghi lý do chọn và kiểm tra option/hash bằng `prepare`
 trước khi launch. Không có pool/option hợp lệ ở cả hai scope thì hoàn thiện

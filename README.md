@@ -156,18 +156,19 @@ Init only creates missing files and never overwrites existing ones:
 
 - `.paseo-slp/WORKSPACE_PROTOCOL.md`: operating procedure, risk levels,
   proof gates, budget and fallback authority.
-- `.paseo-slp/slp-routing.json`: the Peer runtime pool. Init leaves it
-  empty; onboarding must fill in valid options before delegation. While a
-  repo has no such file, the runtime reads the user-scope catalog
-  `$PASEO_HOME/slp-routing.json` (default `~/.paseo`).
+- `.paseo-slp/slp-routing.json`: the Peer runtime pool. Init seeds the
+  [task-type skeleton](src/templates/slp-routing.json) — disabled seats
+  named for kinds of work; onboarding fills real models from discovery
+  before delegation. While a repo has no such file, the runtime reads the
+  user-scope catalog `$PASEO_HOME/slp-routing.json` (default `~/.paseo`).
 - `.paseo-slp/notebook.md`: the default Supervisor notebook; the protocol
   records its owner and the actual retrieval method (this file or
   `timeline:<agentId>`).
 
 The user-scope catalog `$PASEO_HOME/slp-routing.json` exists because
-`install`/`upgrade --apply` scaffolds an empty one when the file is absent;
-it is never overwritten if it already exists. It stays an empty placeholder
-until onboarding or the Human fills in options — an empty user catalog means
+`install`/`upgrade --apply` seeds the same skeleton when the file is absent;
+it is never overwritten if it already exists. Its seats stay disabled until
+onboarding or the Human fills in models — a skeleton-only user catalog means
 no fallback pool, not an error. `uninstall` removes it only while it is still
 byte-identical to the scaffold (hash recorded in `paseo-binding.json`); once
 you have edited it, uninstall preserves it.
@@ -251,10 +252,10 @@ none. Each option carries a `pi`/`codex`/`devin` provider, model, settings,
 `suitableFor`, `avoidFor`, `notes`, `priority` and an
 `enabled`/`availability` state. The Lead chooses per task — Engineer,
 Architect and Reviewer are not hard-mapped to models. Two Peers can differ in
-provider/model/effort without any extra saved profile. See the
-[sample catalog](examples/slp-routing.json) — a task-type skeleton: each
-option describes the kind of work, and `model` is left blank until filled
-from live discovery on the host.
+provider/model/effort without any extra saved profile. The seeded
+[task-type skeleton](src/templates/slp-routing.json) shows the shape: each
+seat names a kind of work, and `model` stays blank until filled from live
+discovery on the host.
 
 The Lead reads the current pool, records its choice rationale and validates
 option/hash via `prepare` before launching. With no valid pool/option at

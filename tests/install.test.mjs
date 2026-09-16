@@ -87,7 +87,9 @@ test('workspace init creates only protocol, routing and notebook once and preser
   const routing = join(dir, '.paseo-slp/slp-routing.json');
   const notebook = join(dir, '.paseo-slp/notebook.md');
   assert.match(readFileSync(protocol, 'utf8'), /Lead reads this file/);
-  assert.deepEqual(readJson(routing).options, []);
+  const seeded = readJson(routing).options;
+  assert.deepEqual(seeded, readJson(join(root, 'src/templates/slp-routing.json')).options);
+  assert.ok(seeded.length > 0 && seeded.every(o => o.enabled === false && o.availability === 'unknown'));
   assert.match(readFileSync(notebook, 'utf8'), /Supervisor notebook/);
   assert.equal(existsSync(join(dir, '.paseo-slp/skills')), false);
   writeFileSync(protocol, 'Human protocol');
@@ -109,7 +111,7 @@ test('repo init imports only an explicit catalog, preserves existing files and r
   writeFileSync(input, 'invalid');
   assert.throws(() => initWorkspace(destination, repository, true, input));
   assert.equal(existsSync(join(repository, '.paseo-slp')), false);
-  const catalog = readJson(join(root, 'examples/slp-routing.json'));
+  const catalog = readJson(join(root, 'src/templates/slp-routing.json'));
   writeFileSync(input, json(catalog));
   const cli = join(destination, 'bin/slp.mjs');
   const run = flags => JSON.parse(execFileSync(process.execPath, [cli, 'init', repository, '--routing-from', input, ...flags], { encoding: 'utf8' }));
@@ -212,7 +214,7 @@ test('install scaffolds the user-scope catalog; uninstall removes only an unmodi
   const { home, destination } = fixture(t);
   installPaseo(root, destination, home, true);
   const catalog = join(home, 'slp-routing.json');
-  assert.deepEqual(readJson(catalog), emptyCatalog());
+  assert.deepEqual(readJson(catalog), readJson(join(root, 'src/templates/slp-routing.json')));
   const removed = uninstallPaseo(destination, true);
   assert.equal(removed.userCatalog.preserved, false);
   assert.equal(existsSync(catalog), false);

@@ -382,10 +382,11 @@ test('quota edits invalidate prepared selections and fresh selection can use ano
 test('routes reads only the selected repo on every call, independent of host and installation location', t => {
   const { dir, installed } = fixture(t), home = join(dir, 'home'); mkdirSync(home);
   installPaseo(root, installed, home, true);
-  assert.deepEqual(readJson(join(home, 'slp-routing.json')), emptyCatalog());
+  const skeleton = readJson(join(root, 'src/templates/slp-routing.json'));
+  assert.deepEqual(readJson(join(home, 'slp-routing.json')), skeleton);
   initWorkspace(installed, dir, true);
   const path = join(dir, '.paseo-slp/slp-routing.json');
-  assert.deepEqual(readJson(path), emptyCatalog());
+  assert.deepEqual(readJson(path), skeleton);
   const { catalog } = catalogFixture(dir);
   writeFileSync(path, json(catalog));
   writeFileSync(join(home, 'slp-routing.json'), 'invalid legacy host catalog');

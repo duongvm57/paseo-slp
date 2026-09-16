@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { json, readJson, hash, identity, install, verifyInstall, files } from './package.mjs';
 import { roles, profileRoles, families, profileId, providerId } from './profiles.mjs';
 import { transportOf } from './binding.mjs';
-import { emptyCatalog, validateCatalog, routingPath } from './routing.mjs';
+import { validateCatalog, routingPath } from './routing.mjs';
 import { configFile, writeConfig, mcpFlags, requireMcp, verifyOwnedProviders, verifyOwnedProfiles,
   providers as hostProviders, agentProfiles as hostAgentProfiles } from './host-config.mjs';
 
@@ -15,13 +15,14 @@ function defaultFamily(config) {
   return families.find(family => provs[family]?.enabled === true) ?? 'codex';
 }
 
-// User-scope catalog scaffold beside the host config: onboarding only fills
-// options. Ownership is recorded in the binding so an unmodified scaffold is
+// User-scope catalog scaffold beside the host config: the task-type skeleton
+// gives the Human seats to fill; nothing is launchable until they do.
+// Ownership is recorded in the binding so an unmodified scaffold is
 // removed on uninstall while a Human-edited catalog is preserved.
-function scaffoldUserCatalog(home) {
+function scaffoldUserCatalog(home, installDir) {
   const path = join(home, 'slp-routing.json');
   if (existsSync(path)) return null;
-  const bytes = json(emptyCatalog());
+  const bytes = json(validateCatalog(readJson(join(installDir, 'src/templates/slp-routing.json'))));
   writeFileSync(path, bytes, { flag: 'wx', mode: 0o600 });
   return { path, sha256: hash(bytes) };
 }
@@ -76,7 +77,7 @@ export function installPaseo(source, destination, home, apply = false) {
   try {
     // Only owned entries and two shared MCP flags are recorded, never credentials.
     mkdirSync(home, { recursive: true });
-    userCatalog = scaffoldUserCatalog(home);
+    userCatalog = scaffoldUserCatalog(home, destination);
     const binding = json({ configPath: file.path, ...proposal, mcpBefore, userCatalog });
     writeFileSync(join(destination, 'paseo-binding.json'), binding, { flag: 'wx', mode: 0o600 });
     const manifest = readJson(join(destination, 'installed.json'));
@@ -152,7 +153,7 @@ export function upgradePaseo(source, destination, previous, apply = false) {
     const next = structuredClone(base);
     next.agents.providers = { ...next.agents.providers, ...proposal.providers };
     next.daemon.agentProfiles = [...next.daemon.agentProfiles, ...proposal.profiles];
-    userCatalog = scaffoldUserCatalog(home);
+    userCatalog = scaffoldUserCatalog(home, destination);
     const binding = json({ configPath: file.path, ...proposal, mcpBefore: prior.mcpBefore,
       retiredProfiles: [...(prior.retiredProfiles ?? []), ...retiredProfiles], userCatalog });
     requireMcp(next);
@@ -173,7 +174,9 @@ export function initWorkspace(source, repository, apply = false, routingFrom) {
   repository = resolve(catalogPath, '../..');
   // Validate an explicit import before writing any repo files. Never consult host defaults.
   if (routingFrom != null && !isAbsolute(routingFrom)) throw new Error('Absolute --routing-from path required');
-  const catalog = routingFrom == null ? emptyCatalog() : validateCatalog(readJson(routingFrom));
+  const catalog = routingFrom == null
+    ? validateCatalog(readJson(join(source, 'src/templates/slp-routing.json')))
+    : validateCatalog(readJson(routingFrom));
   const entries = [
     { path: join(repository, '.paseo-slp/WORKSPACE_PROTOCOL.md'), bytes: readFileSync(join(source, 'src/templates/WORKSPACE_PROTOCOL.md')) },
     { path: catalogPath, bytes: json(catalog) },

@@ -30,46 +30,59 @@ MCP write path for profiles — do not hand-edit the daemon config. Do not creat
 require slp-peer.
 
 For the Peer pool, discover slp-pi-peer/slp-codex-peer/slp-devin-peer and their exact models,
-thinking/mode/features. Present the discovered options to the Human and resolve
-the pool decision explicitly: whether this repository pins its own catalog or
-inherits the user-scope catalog, and if it pins, which options, priority and
-quota-fallback policy apply. Record the resolved intent — `pinned`, `inherit` or
-`empty` — in the protocol frontmatter `routing_intent` with who decided and
-when; never restate option IDs there, the catalog file is the source of truth.
-Enacting the choice alone leaves a missing catalog ambiguous. In the same
-interview pass, ask the workflow communication language — covering reports,
-assignments and handbacks between agents and replies to the Human — and write it
-into the frontmatter `communication_language` field.
-A populated user-scope catalog is the fallback
-default, not this repository's configuration — its existence never substitutes
-for the Human's choice. Install/upgrade scaffolds `$PASEO_HOME/slp-routing.json`
-empty when absent and never overwrites it; an existing scaffold with no options
-means the fallback currently resolves an empty pool. When the Human chooses
-inherit and that file is empty, run the same option interview (providers, models,
-priority, quotaFallback) targeting the user-scope file — writing outside the
-repository needs an explicit Human grant. Within granted setup authority, populate the choices the
-Human made; otherwise ask for the missing pool decision before delegation. Do not
-invent model IDs, capability claims or suitability guarantees. Existing saved Peer
-settings may be shown as a migration suggestion but are not automatically imported
-or a launch fallback. Never store credentials in the repository.
+thinking/mode/features. Then interview the Human: they decide; you supply
+discovered facts and write what they pick. Ask in plain terms — name the files
+and what each choice does. For example:
+
+> Peers need a list of which provider/model they may run as. Init seeded this
+> repo's `.paseo-slp/slp-routing.json` with task-type seats (lightweight-recon,
+> standard-coding, deep-reasoning, independent-second-opinion,
+> autonomous-long-running) — each disabled until it gets a real model found on
+> this host. Or the repo can share your user-level list at
+> `~/.paseo/slp-routing.json` (currently <state>) — every repo without its own
+> list falls back to it, so choosing it means deleting the repo file. Which do
+> you want?
+
+For a repo pool, walk the seeded seats together: which discovered provider,
+model and settings fill each seat, which seats to drop or add — the seed is a
+starting set the Human reshapes freely. For the shared list, run the same walk
+against `~/.paseo/slp-routing.json`; writing outside the repository needs an
+explicit Human grant. A populated user-scope catalog is the fallback default,
+not this repository's configuration — its existence never substitutes for the
+Human's choice.
+
+The interview is complete when the Human has named where the list lives and,
+for a list meant to work, picked discovered options seat by seat — or declared
+the repo deliberately without a pool (then strip the seeded seats, leaving
+`options: []`). Record the resolved intent — `pinned`, `inherit` or `empty` —
+in the protocol frontmatter `routing_intent` with who decided and when; the
+catalog file carries the option IDs. In the same pass, ask the workflow
+communication language — covering reports, assignments and handbacks between
+agents and replies to the Human — and write it into `communication_language`.
+Within granted setup authority, populate the choices the Human made; otherwise
+ask for the missing pool decision before delegation. Offer only providers,
+models and settings that live discovery returned — never invent IDs, capability
+claims or suitability guarantees. Existing saved Peer settings may be shown as
+a migration suggestion but are not automatically imported or a launch fallback.
+Never store credentials in the repository.
 
 ## Set up protocol and pool
 
 Use `node <slp-cli> init <absolute-repo>` to preview, then --apply within setup
-authority. Init creates missing protocol, an empty catalog and a
-`.paseo-slp/notebook.md` Supervisor notebook scaffold without overwriting
+authority. Init creates missing protocol, seeds the task-type skeleton catalog
+and a `.paseo-slp/notebook.md` Supervisor notebook scaffold without overwriting
 existing files. Fill the frontmatter `supervisor_notebook` field — the scaffolded path with
 its owner, or `timeline:<agentId>` plus a retrieval note the Human can follow.
 Complete tactics: task classes, ownership, topology, proof, budget,
 allowed operations, escalation and settlement. Keep role bytes out of the protocol.
 
 The default pool decision is inherit: a repository with no catalog resolves the
-user-scope catalog automatically. Init's empty catalog is authoritative — when
-the Human chooses inherit, remove the init-created slp-routing.json so the
-fallback engages, and never leave an empty catalog behind. Then check the
-user-scope file: if it still holds only the empty scaffold, offer to populate
-it from the same discovered options (with the Human's grant to write outside
-the repository) or report that the inherited pool is currently empty.
+user-scope catalog automatically. Any catalog file in the repo is authoritative
+— when the Human chooses inherit, remove the seeded slp-routing.json so the
+fallback engages. Then check the user-scope file: if it still holds only the
+seeded skeleton, offer to populate it from the same discovered options (with
+the Human's grant to write outside the repository) or report that the
+inherited pool is currently empty.
 
 Populate the project catalog only when the Human chose a pinned pool, before Peer
 delegation. Interview the Human on which options to enable, priority and quota
