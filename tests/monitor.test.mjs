@@ -30,6 +30,23 @@ function agentState(home, id, fields) {
   writeFileSync(join(group, `${id}.json`), json({ id, ...fields }));
 }
 
+let DatabaseSync = null;
+try { ({ DatabaseSync } = await import('node:sqlite')); } catch { /* host without node:sqlite */ }
+const sqliteTest = DatabaseSync ? test : test.skip;
+function devinDbFixture(dir, sessions, calls) {
+  const path = join(dir, 'sessions.db');
+  const db = new DatabaseSync(path);
+  db.exec('CREATE TABLE sessions (id TEXT PRIMARY KEY, working_directory TEXT NOT NULL, last_activity_at INTEGER NOT NULL)');
+  db.exec('CREATE TABLE tool_call_state (session_id TEXT NOT NULL, tool_call_id TEXT NOT NULL, tool_call_json TEXT, PRIMARY KEY (session_id, tool_call_id))');
+  const insertSession = db.prepare('INSERT INTO sessions (id, working_directory, last_activity_at) VALUES (?, ?, ?)');
+  for (const s of sessions) insertSession.run(s.id, s.cwd, s.lastActivityAt);
+  const insertCall = db.prepare('INSERT INTO tool_call_state (session_id, tool_call_id, tool_call_json) VALUES (?, ?, ?)');
+  calls.forEach((call, i) => insertCall.run(call[0], call[1] ?? `call-${i}`, JSON.stringify(call[2])));
+  db.close();
+  return path;
+}
+const toolCall = (tool, extra = {}) => ({ toolCallId: 'x', kind: 'execute', title: tool, rawInput: {}, _meta: { 'cognition.ai/inferenceToolName': tool }, ...extra });
+
 test('monitor emits attention once per fingerprint and always rewrites the checkpoint', t => {
   const dir = fixture(t), home = join(dir, 'home'), repo = gitRepo(join(dir, 'repo'));
   agentState(home, 'a1', { lastStatus: 'running', cwd: repo, requiresAttention: true, attentionReason: 'permission pending' });
@@ -185,4 +202,67 @@ test('monitor CLI reads request.json and prints the scan', t => {
   const missing = spawnSync(process.execPath, [join(root, 'bin/slp.mjs'), 'monitor'], { encoding: 'utf8' });
   assert.equal(missing.status, 1);
   assert.match(missing.stderr, /monitor requires <request\.json>/);
+});
+
+sqliteTest('monitor devin probe emits tool-mix and suppresses the fingerprint on rerun', t => {
+  const dir = fixture(t), home = join(dir, 'home'), repo = gitRepo(join(dir, 'repo'));
+  const calls = [...Array(18).fill(toolCall('exec')), toolCall('read'), toolCall('read')]
+    .map(call => ['sess-1', null, call]);
+  const dbPath = devinDbFixture(dir, [{ id: 'sess-1', cwd: repo, lastActivityAt: 1 }], calls);
+  agentState(home, 'a1', { lastStatus: 'working', cwd: repo, provider: 'slp-devin-peer' });
+  const stateFile = join(dir, 'state.json');
+  const request = { paseoHome: home, agents: [{ id: 'a1', cwd: repo }], stateFile, devinSessionsDb: dbPath };
+  const out = monitor(request);
+  const mix = out.signals.find(s => s.kind === 'tool-mix');
+  assert.equal(mix.evidence.tool, 'exec');
+  assert.equal(mix.evidence.share, 0.9);
+  assert.equal(mix.evidence.window, 20);
+  assert.equal(mix.evidence.sessionId, 'sess-1');
+  assert.equal(readJson(stateFile).a1.devin.sessionId, 'sess-1');
+  assert.deepEqual(monitor(request).signals, []);
+  // A newer session for the same cwd retires the old fingerprints.
+  const db = new DatabaseSync(dbPath);
+  db.prepare('INSERT INTO sessions (id, working_directory, last_activity_at) VALUES (?, ?, ?)').run('sess-2', repo, 2);
+  calls.forEach((call, i) => db.prepare('INSERT INTO tool_call_state (session_id, tool_call_id, tool_call_json) VALUES (?, ?, ?)')
+    .run('sess-2', `s2-${i}`, JSON.stringify(toolCall('read'))));
+  db.close();
+  const rolled = monitor(request);
+  const remixed = rolled.signals.find(s => s.kind === 'tool-mix');
+  assert.equal(remixed.evidence.tool, 'read');
+  assert.equal(remixed.evidence.sessionId, 'sess-2');
+});
+
+sqliteTest('monitor devin probe emits correction-cadence for repeated edits of one path', t => {
+  const dir = fixture(t), home = join(dir, 'home'), repo = gitRepo(join(dir, 'repo'));
+  const target = join(repo, 'src/foo.mjs');
+  const calls = [
+    ...Array(4).fill(toolCall('edit', { kind: 'edit', rawInput: { file_path: target } })),
+    toolCall('edit', { kind: 'edit', rawInput: { file_path: join(repo, 'src/other.mjs') } }),
+    toolCall('write', { kind: 'edit', rawInput: {} }),           // unparseable path: skipped
+    toolCall('read'),
+  ].map(call => ['sess-1', null, call]);
+  const dbPath = devinDbFixture(dir, [{ id: 'sess-1', cwd: repo, lastActivityAt: 1 }], calls);
+  agentState(home, 'a1', { lastStatus: 'working', cwd: repo, provider: 'slp-devin-peer' });
+  const out = monitor({ paseoHome: home, agents: [{ id: 'a1', cwd: repo }], devinSessionsDb: dbPath });
+  const cadence = out.signals.find(s => s.kind === 'correction-cadence');
+  assert.equal(cadence.evidence.path, target);
+  assert.equal(cadence.evidence.count, 4);
+  assert.equal(cadence.evidence.window, 7);
+  assert.equal(out.signals.filter(s => s.kind === 'correction-cadence').length, 1);
+});
+
+sqliteTest('monitor devin probe records gaps and skips non-devin or unopted agents', t => {
+  const dir = fixture(t), home = join(dir, 'home'), repo = gitRepo(join(dir, 'repo'));
+  mkdirSync(join(dir, 'other'));
+  const dbPath = devinDbFixture(dir, [{ id: 'sess-1', cwd: join(dir, 'other'), lastActivityAt: 1 }], []);
+  agentState(home, 'a1', { lastStatus: 'working', cwd: repo, provider: 'slp-devin-peer' });
+  agentState(home, 'a2', { lastStatus: 'working', cwd: repo, provider: 'slp-codex-peer' });
+  const out = monitor({ paseoHome: home, agents: [{ id: 'a1', cwd: repo }, { id: 'a2', cwd: repo }], devinSessionsDb: dbPath });
+  assert.equal(out.gaps.find(g => g.agentId === 'a1').gap, 'no devin session for cwd');
+  assert.equal(out.gaps.some(g => g.agentId === 'a2'), false);
+  const unreadable = monitor({ paseoHome: home, agents: [{ id: 'a1', cwd: repo }], devinSessionsDb: join(dir, 'missing.db') });
+  assert.match(unreadable.gaps[0].gap, /devin sessions\.db unreadable/);
+  const unopted = monitor({ paseoHome: home, agents: [{ id: 'a1', cwd: repo }] });
+  assert.deepEqual(unopted.gaps ?? [], []);
+  assert.equal(unopted.signals.every(s => !['tool-mix', 'correction-cadence'].includes(s.kind)), true);
 });

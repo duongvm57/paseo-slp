@@ -416,15 +416,21 @@ node bin/slp.mjs monitor /absolute/request.json
 
 The request names `agents` (`id`, optional `cwd` — falls back to the state
 file's `cwd` — and optional `scope` prefix/glob list), plus optional
-`paseoHome` (default `$PASEO_HOME`/`~/.paseo`), `thresholds` (`idleMinutes`,
-`churnScans`), a `signals` subset and a `stateFile` checkpoint path.
-Evidence comes only from `<paseoHome>/agents/*/<id>.json` and `git
+`paseoHome` (default `$PASEO_HOME`/`~/.paseo`), `devinSessionsDb` (absolute
+path, opt-in), `thresholds` (`idleMinutes`, `churnScans`; `toolWindow`
+default 20, `toolShare` default 0.8 and `cadenceEdits` default 3 for the
+sessions-db signals), a `signals` subset and a `stateFile` checkpoint path.
+Evidence comes from `<paseoHome>/agents/*/<id>.json` and `git
 status`/`git log` in each `cwd`; a missing or non-repo `cwd` is recorded as
-an evidence gap instead of crashing. Signal kinds: `attention` (only when
-`requiresAttention` is true — a stale `attentionReason` is just evidence),
-`follow-up-round` (user bumps without an intervening commit), `idle-dirty`,
-`scope-drift`, `test-mirror` and `file-churn` (the same dirty path edited
-again across scans, tracked by mtime). With `stateFile`, only new
+an evidence gap instead of crashing. With `devinSessionsDb` it also probes
+that devin CLI sessions db (read-only; typically
+`~/.local/share/devin/cli/sessions.db`) for devin-provider agents; a missing
+or unreadable db is a gap entry, not an error. Signal kinds: `attention`
+(only when `requiresAttention` is true — a stale `attentionReason` is just
+evidence), `follow-up-round` (user bumps without an intervening commit),
+`idle-dirty`, `scope-drift`, `test-mirror`, `file-churn` (the same dirty
+path edited again across scans, tracked by mtime), `tool-mix` and
+`correction-cadence` (sessions-db candidates, require `devinSessionsDb`). With `stateFile`, only new
 fingerprints are emitted and the checkpoint — the command's only write — is
 rewritten atomically every run; without it the scan is flagged `stateless`
 and emits everything detectable. Rendered `paseo logs` output is never
@@ -499,7 +505,6 @@ itself.
 
 - [Agent setup guide](docs/agent-guide.md)
 - [File map and contract](docs/contract.md)
-- [Operating guide](docs/reference/agent-orchestration-complete-operating-guide.md)
 - [Guide → policy, procedure and protocol trace](docs/guide-coverage.md)
 - [Independent acceptance checklist](docs/review-checklist.md)
 

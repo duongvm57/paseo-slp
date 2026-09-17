@@ -5,6 +5,7 @@ applies_to: ''
 last_reviewed: ''
 communication_language: ''
 routing_intent: ''
+agent_mode: ''
 supervisor_notebook: ''
 decided_by: ''
 decided_at: ''
@@ -31,6 +32,9 @@ decisions change; the frontmatter is the single source for those fields.
 - `communication_language` applies to reports, assignments and handbacks between
   agents and to agent replies to the Human. Keep technical identifiers, file
   paths, commands and proper nouns verbatim.
+- `agent_mode` records the intended Paseo modeId for agents spawned in this
+  repository (for example `bypass`); empty means undecided — the spawner must
+  ask rather than let agents fall back to the host default.
 
 ## Decision boundaries
 

@@ -395,15 +395,22 @@ node bin/slp.mjs monitor /absolute/request.json
 
 Request khai `agents` (`id`, `cwd` tùy chọn — fallback về `cwd` trong state
 file — và `scope` tùy chọn là danh sách prefix/glob), cùng các trường tùy
-chọn `paseoHome` (mặc định `$PASEO_HOME`/`~/.paseo`), `thresholds`
-(`idleMinutes`, `churnScans`), subset `signals` và đường dẫn checkpoint
-`stateFile`. Evidence chỉ đến từ `<paseoHome>/agents/*/<id>.json` và `git
+chọn `paseoHome` (mặc định `$PASEO_HOME`/`~/.paseo`), `devinSessionsDb`
+(absolute path, opt-in), `thresholds` (`idleMinutes`, `churnScans`;
+`toolWindow` mặc định 20, `toolShare` mặc định 0.8 và `cadenceEdits` mặc
+định 3 cho các signal sessions-db), subset `signals` và đường dẫn checkpoint
+`stateFile`. Evidence đến từ `<paseoHome>/agents/*/<id>.json` và `git
 status`/`git log` trong từng `cwd`; `cwd` thiếu hoặc không phải repo được
-ghi thành evidence gap thay vì crash. Các loại signal: `attention` (chỉ khi
+ghi thành evidence gap thay vì crash. Có `devinSessionsDb` thì nó probe
+sessions db của devin CLI (read-only; thường
+`~/.local/share/devin/cli/sessions.db`) cho các agent devin-provider; db
+thiếu hoặc không đọc được là gap entry, không phải lỗi. Các loại signal:
+`attention` (chỉ khi
 `requiresAttention` là true — `attentionReason` cũ chỉ là evidence),
 `follow-up-round` (user bump mà không có commit xen giữa), `idle-dirty`,
-`scope-drift`, `test-mirror` và `file-churn` (cùng một path dirty bị sửa
-lại qua các scan, theo dõi bằng mtime). Có `stateFile` thì chỉ fingerprint
+`scope-drift`, `test-mirror`, `file-churn` (cùng một path dirty bị sửa
+lại qua các scan, theo dõi bằng mtime), `tool-mix` và `correction-cadence`
+(candidate từ sessions-db, yêu cầu `devinSessionsDb`). Có `stateFile` thì chỉ fingerprint
 mới được emit và checkpoint — write duy nhất của lệnh — được ghi lại atomic
 mỗi run; không có thì scan gắn cờ `stateless` và emit mọi thứ phát hiện
 được. Output rendered của `paseo logs` không bao giờ được parse: host không
@@ -473,7 +480,6 @@ envelope. Đường này không đăng ký profile hay tự tạo agent.
 
 - [Hướng dẫn cài đặt cho agent](docs/agent-guide.md)
 - [File map và contract](docs/contract.md)
-- [Operating guide](docs/reference/agent-orchestration-complete-operating-guide.md)
 - [Trace guide → policy, procedure và protocol](docs/guide-coverage.md)
 - [Checklist nghiệm thu độc lập](docs/review-checklist.md)
 

@@ -1,6 +1,10 @@
 # Operating guide → package trace
 
-Source: [Agent Orchestration — Complete Operating Guide](reference/agent-orchestration-complete-operating-guide.md).
+Internal/local-only: a working trace and host-gaps register for package
+maintainers, not end-user documentation.
+
+Source: Agent Orchestration — Complete Operating Guide, a local artifact at
+`.local-checks/reference/` (untracked, not shipped in the package).
 Baseline: `26a272b47701a2bd14ed399017bedf95c7ce378c`. Revision: working-tree policy
 alignment, 2026-09-08. This is a textual/load-path trace, not a workflow acceptance.
 

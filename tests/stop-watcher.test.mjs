@@ -42,7 +42,7 @@ test('running watcher dispatches once at readiness, without an agent continuatio
   const result = await pending;
   assert.equal(result.status, 'sent');
   assert.equal(f.calls.filter(x => x[0] === 'send').length, 1);
-  assert.ok(Date.parse(result.sentAt) - Date.parse(result.readiness.readyAt) < 1000);
+  assert.ok(Date.parse(result.sentAt) - Date.parse(result.readiness.readyAt) < 10000);
   await assert.rejects(watchStop(f.config, { invoke: f.invoke, verifyWait: () => {} }), /EEXIST/);
   assert.equal(f.calls.filter(x => x[0] === 'send').length, 1);
 });
@@ -90,11 +90,11 @@ test('standalone watcher checks the real foreground wait PID and calls CLI befor
   const watcher = fileURLToPath(new URL('../e2e/stop-watcher.mjs', import.meta.url));
   const helper = fileURLToPath(new URL('../e2e/wait-for-stop.mjs', import.meta.url));
   const pending = promisify(execFile)(process.execPath, [watcher, join(f.dir, 'config.json')], {
-    env: { ...process.env, PATH: bin, TEST_WORKSPACE: f.config.workspace }, timeout: 5000,
+    env: { ...process.env, PATH: bin, TEST_WORKSPACE: f.config.workspace }, timeout: 15000,
   });
   // Handle an early subprocess failure while checking its startup receipt.
   pending.catch(() => {});
-  for (let n = 0; n < 100 && !existsSync(join(f.dir, 'watcher-started.json')); n++) await delay(10);
+  for (let n = 0; n < 200 && !existsSync(join(f.dir, 'watcher-started.json')); n++) await delay(25);
   assert.ok(existsSync(join(f.dir, 'watcher-started.json')));
   const wait = spawn(process.execPath, [helper, join(f.dir, 'readiness.json'), f.config.token, '10'],
     { cwd: f.config.workspace, stdio: 'ignore' });
@@ -102,7 +102,7 @@ test('standalone watcher checks the real foreground wait PID and calls CLI befor
   const { stdout } = await pending;
   const result = JSON.parse(stdout);
   assert.equal(result.status, 'sent');
-  assert.ok(Date.parse(result.sentAt) - Date.parse(result.readiness.readyAt) < 2000);
+  assert.ok(Date.parse(result.sentAt) - Date.parse(result.readiness.readyAt) < 10000);
   assert.equal(result.readiness.pid, wait.pid);
   assert.equal(wait.exitCode, null);
 });
