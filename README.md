@@ -243,8 +243,9 @@ the protocol/assignment. The installed references cover creating/removing
 heartbeats on the right session, keeping a causal notebook, recovery and the
 20 anti-patterns from the guide. Roles read references per situation; Peers
 receive the relevant constraints through assignments. This is a policy pack
-for agents using Paseo primitives — there is no detector or monitoring daemon
-in the package.
+for agents using Paseo primitives — there is no monitoring daemon or semantic
+detector in the package; `monitor` (below) is a caller-invoked, delta-only
+signal scan.
 
 ## Peer runtime pool
 
@@ -341,6 +342,16 @@ An option decides the whole bundle and maps to
 kept verbatim. An explicit `binding` without profiles only supports
 Supervisor/Lead when the Human authorizes it. Peers must always pick a pool
 option, including during handoff and recovery.
+
+The plan also surfaces the spawn's intended mode — top-level `modeId`
+mirroring `create.settings.modeId`, plus `warnings` when the binding lacks
+one — and two locator payloads carried inside `create.initialPrompt` so the
+spawned seat actually receives them: `spawnKit`, role-scoped approximate
+Paseo MCP tool signatures (verify against live `mcp_list_tools`), and
+`orientation`, policy-byte locators (`path`, `bytes`, `sha256`, or
+`missing: true` for declared files the install does not ship). Locators
+only — interpretation stays with the seat.
+
 `prepare-handoff <request.json>` adds the snapshot and handoff packet to the
 create_agent arguments; see the
 [handoff example](examples/provider-handoff.request.json).
@@ -367,7 +378,7 @@ state is unrecognized), while config yields `{id, enabled, extends}`;
 profiles always come from `daemon.agentProfiles`. On multi-daemon hosts, the
 live listing reflects whichever daemon the `paseo` CLI reaches. `agents`
 lists `<home>/agents/*/<id>.json` as `{id, title, provider, cwd,
-workspaceId, status, nativeHandle, attach}`; `attach` is a shell-quoted `cd
+workspaceId, status, lastActivityAt, nativeHandle, attach}`; `attach` is a shell-quoted `cd
 <cwd> && devin -r <nativeHandle>` hint for devin providers with a handle.
 Because `paseo inspect`/`ls` do not return `persistence.nativeHandle`, this
 command reads daemon persistence — a host detail, best-effort, not a
@@ -382,6 +393,82 @@ recursively and recorded under `nested` (each sub-repo gets its own `{path,
 head, sha256, files}` and may carry its own `nested`, all counted in the
 overall sha256). Staged submodule gitlinks (mode 160000) and listed
 directories that are not repos remain unsupported.
+
+### `materialize`
+
+`.paseo-slp/` is gitignored local state with absolute paths, so a fresh
+worktree lacks the protocol and catalog entirely. `materialize` clones them
+from an existing checkout:
+
+```bash
+node bin/slp.mjs materialize /absolute/target-repo --from /absolute/source-repo
+# dry-run by default; add --apply to write
+```
+
+It copies only `.paseo-slp/WORKSPACE_PROTOCOL.md` and
+`.paseo-slp/slp-routing.json` (validated) — `notebook.md` is Supervisor-owned
+state and is never copied. Absolute source-root paths inside the protocol's
+YAML frontmatter are rebased to the target root (a longer sibling path like
+`<source>-old` is not a boundary match and stays put). Like `init`, existing
+target files are preserved rather than overwritten; each file reports
+`preserved`/`applied`, plus `sha256` for files it would write. The protocol
+entry also reports `rebased`, and a written copy that found no source-root
+path carries a `warning` instead of silently keeping stale paths. There is
+no fallback to the user-scope catalog or the package template — the source
+checkout is explicit.
+
+### `monitor`
+
+`monitor` is an on-demand signal scan for an observing Supervisor/Lead —
+one invocation is one scan, not a daemon, and it emits candidates, never
+verdicts:
+
+```bash
+node bin/slp.mjs monitor /absolute/request.json
+```
+
+The request names `agents` (`id`, optional `cwd` — falls back to the state
+file's `cwd` — and optional `scope` prefix/glob list), plus optional
+`paseoHome` (default `$PASEO_HOME`/`~/.paseo`), `devinSessionsDb` (absolute
+path, opt-in), `thresholds` (`idleMinutes`, `churnScans`; `toolWindow`
+default 20, `toolShare` default 0.8 and `cadenceEdits` default 3 for the
+sessions-db signals), a `signals` subset and a `stateFile` checkpoint path.
+Evidence comes from `<paseoHome>/agents/*/<id>.json` and `git
+status`/`git log` in each `cwd`; a missing or non-repo `cwd` is recorded as
+an evidence gap instead of crashing. With `devinSessionsDb` it also probes
+that devin CLI sessions db (read-only; typically
+`~/.local/share/devin/cli/sessions.db`) for devin-provider agents; a missing
+or unreadable db is a gap entry, not an error. Signal kinds: `attention`
+(only when `requiresAttention` is true — a stale `attentionReason` is just
+evidence), `follow-up-round` (user bumps without an intervening commit),
+`idle-dirty`, `scope-drift`, `test-mirror`, `file-churn` (the same dirty
+path edited again across scans, tracked by mtime), `tool-mix` and
+`correction-cadence` (sessions-db candidates, require `devinSessionsDb`). With `stateFile`, only new
+fingerprints are emitted and the checkpoint — the command's only write — is
+rewritten atomically every run; without it the scan is flagged `stateless`
+and emits everything detectable. Rendered `paseo logs` output is never
+parsed; `get_agent_activity` returns only a curated, `limit`-bounded tail
+(long sessions truncate into overflow files), so a complete structured
+timeline stays a recorded host gap.
+
+### `notebook`
+
+`notebook` locates the governance notebook for a repository when the active
+run lives in another checkout — a worktree Supervisor's record sits at
+`<its-checkout>/.paseo-slp/notebook.md`, invisible from the main checkout:
+
+```bash
+node bin/slp.mjs notebook /absolute/repository [--paseo-home /absolute/paseo-home]
+```
+
+It resolves the repository's git common dir — the property linking a
+worktree back to its repository — then lists Supervisor agents (provider
+containing `supervisor`, or a `Supervisor`-titled state file) whose `cwd`
+shares it. Output is candidates only: `{agentId, title, status, cwd,
+lastActivityAt, notebook, notebookExists}` sorted by most recent activity,
+plus `gaps` for agent cwds that fail the git probe. Read-only — it never
+copies, merges or edits notebook content, and picks no authoritative
+candidate; where governance lives stays per-checkout.
 
 ## Uninstall
 
@@ -451,7 +538,6 @@ itself.
 
 - [Agent setup guide](docs/agent-guide.md)
 - [File map and contract](docs/contract.md)
-- [Operating guide](docs/reference/agent-orchestration-complete-operating-guide.md)
 - [Guide → policy, procedure and protocol trace](docs/guide-coverage.md)
 - [Independent acceptance checklist](docs/review-checklist.md)
 

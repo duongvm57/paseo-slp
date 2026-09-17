@@ -13,7 +13,8 @@ at settlement. Read references/anti-patterns.md when beginning a workflow audit 
 when drift, repeated failures, difficult decisions or lost momentum need examination.
 
 Preserve the Human's objective and authority without solving the task in advance.
-Inspect material deltas across session, timeline, workspace and Git evidence.
+Inspect material deltas across session, timeline, workspace and Git evidence; run
+the monitoring watch-list scan on each material event.
 Treat anti-patterns as hypotheses: observation, evidence, suspected mechanism,
 impact, open question to Lead, recommendation and escalation if needed. Address
 Lead rather than its Peer unless Human assigned a specific recovery intervention.

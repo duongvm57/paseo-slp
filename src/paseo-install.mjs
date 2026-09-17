@@ -169,6 +169,31 @@ export function upgradePaseo(source, destination, previous, apply = false) {
   return { ...result, candidate };
 }
 
+const lstat = path => { try { return lstatSync(path); } catch (error) { if (error.code === 'ENOENT') return null; throw error; } };
+
+// Check all existing targets and ancestors before mutation, including dangling links.
+function stageEntries(entries, repository, apply) {
+  for (const entry of entries) {
+    for (let parent = resolve(entry.path, '..'); parent !== resolve(repository); parent = resolve(parent, '..')) {
+      const stat = lstat(parent);
+      if (stat && (!stat.isDirectory() || stat.isSymbolicLink())) throw new Error(`Expected repo directory: ${parent}`);
+      if (parent === resolve(parent, '..')) throw new Error('Repo file path escaped repository');
+    }
+    const stat = lstat(entry.path);
+    if (stat && !stat.isFile()) throw new Error(`Expected regular repo file: ${entry.path}`);
+    entry.preserved = Boolean(stat);
+  }
+  const result = entries.map(({ path, bytes, preserved }) => ({ path, preserved, applied: apply && !preserved, ...(!preserved ? { sha256: hash(bytes) } : {}) }));
+  if (apply) {
+    for (const { path, bytes, preserved } of entries) {
+      if (preserved) continue;
+      mkdirSync(resolve(path, '..'), { recursive: true });
+      writeFileSync(path, bytes, { flag: 'wx' });
+    }
+  }
+  return result;
+}
+
 export function initWorkspace(source, repository, apply = false, routingFrom) {
   const catalogPath = routingPath(repository);
   repository = resolve(catalogPath, '../..');
@@ -182,25 +207,52 @@ export function initWorkspace(source, repository, apply = false, routingFrom) {
     { path: catalogPath, bytes: json(catalog) },
     { path: join(repository, '.paseo-slp/notebook.md'), bytes: '# Supervisor notebook\n\nPurpose and owner are recorded in .paseo-slp/WORKSPACE_PROTOCOL.md.\n' },
   ];
-  // Check all existing targets and ancestors before mutation, including dangling links.
-  const exists = path => { try { return lstatSync(path); } catch (error) { if (error.code === 'ENOENT') return null; throw error; } };
-  for (const entry of entries) {
-    for (let parent = resolve(entry.path, '..'); parent !== resolve(repository); parent = resolve(parent, '..')) {
-      const stat = exists(parent);
-      if (stat && (!stat.isDirectory() || stat.isSymbolicLink())) throw new Error(`Expected repo directory: ${parent}`);
-      if (parent === resolve(parent, '..')) throw new Error('Initialization path escaped repository');
-    }
-    const stat = exists(entry.path);
-    if (stat && !stat.isFile()) throw new Error(`Expected regular repo file: ${entry.path}`);
-    entry.preserved = Boolean(stat);
-  }
-  const result = entries.map(({ path, bytes, preserved }) => ({ path, preserved, applied: apply && !preserved, ...(!preserved ? { sha256: hash(bytes) } : {}) }));
-  if (apply) {
-    for (const { path, bytes, preserved } of entries) {
-      if (preserved) continue;
-      mkdirSync(resolve(path, '..'), { recursive: true });
-      writeFileSync(path, bytes, { flag: 'wx' });
-    }
-  }
+  const result = stageEntries(entries, repository, apply);
   return { repository, files: result, applied: result.some(file => file.applied), preserved: result.every(file => file.preserved) };
+}
+
+// Rebase absolute paths inside the simple `key: 'value'` frontmatter from the
+// source root to the target root; a prefix replace on that block is
+// sufficient — no YAML parser. The source match must end at a path boundary
+// ('/', a non-path character or end of value) so a longer sibling path like
+// `<source>-old` is left alone. Reports whether anything was rebased.
+function rebaseFrontmatter(text, source, target) {
+  if (source === target || !text.startsWith('---\n')) return { text, rebased: false };
+  const end = text.indexOf('\n---\n', 3);
+  if (end < 0) return { text, rebased: false };
+  const frontmatter = text.slice(0, end);
+  const pattern = new RegExp(`${source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=$|/|[^\\w.~+-])`, 'g');
+  if (!pattern.test(frontmatter)) return { text, rebased: false };
+  return { text: frontmatter.replace(pattern, target) + text.slice(end), rebased: true };
+}
+
+// Clone an initialized checkout's .paseo-slp into a target checkout: a fresh
+// worktree lacks the gitignored local state, and a manual copy leaves source
+// absolute paths behind. Explicit source only — never the user-scope catalog
+// or the package template. notebook.md is Supervisor-owned state and is
+// deliberately not copied.
+export function materializeWorkspace(from, repository, apply = false) {
+  const source = resolve(routingPath(from), '../..');
+  repository = resolve(routingPath(repository), '../..');
+  const sourceFile = name => {
+    const path = join(source, '.paseo-slp', name);
+    if (!lstat(path)?.isFile()) throw new Error(`Source checkout lacks .paseo-slp/${name}`);
+    return path;
+  };
+  const catalog = validateCatalog(readJson(sourceFile('slp-routing.json')));
+  const protocol = rebaseFrontmatter(readFileSync(sourceFile('WORKSPACE_PROTOCOL.md'), 'utf8'), source, repository);
+  const entries = [
+    { path: join(repository, '.paseo-slp/WORKSPACE_PROTOCOL.md'), bytes: protocol.text },
+    { path: join(repository, '.paseo-slp/slp-routing.json'), bytes: json(catalog) },
+  ];
+  const result = stageEntries(entries, repository, apply);
+  const protocolFile = result.find(file => file.path.endsWith('WORKSPACE_PROTOCOL.md'));
+  protocolFile.rebased = protocol.rebased;
+  // A protocol may legitimately carry no absolute path, so silence is a
+  // warning on the file entry, not an error — but an applied file that kept
+  // stale source paths would reproduce the exact friction this fixes.
+  if (!protocolFile.preserved && !protocol.rebased) {
+    protocolFile.warning = 'frontmatter has no source-root path; absolute paths left verbatim';
+  }
+  return { repository, source, files: result, applied: result.some(file => file.applied), preserved: result.every(file => file.preserved) };
 }
