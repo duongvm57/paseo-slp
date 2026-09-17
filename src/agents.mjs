@@ -46,6 +46,7 @@ export function agents(home = paseoHome()) {
         cwd,
         workspaceId: text(state.workspaceId),
         status: text(state.lastStatus) ?? text(state.status),
+        lastActivityAt: text(state.lastActivityAt),
         nativeHandle,
         attach: attachHint(provider, cwd, nativeHandle),
       });

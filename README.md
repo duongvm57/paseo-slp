@@ -365,7 +365,7 @@ state is unrecognized), while config yields `{id, enabled, extends}`;
 profiles always come from `daemon.agentProfiles`. On multi-daemon hosts, the
 live listing reflects whichever daemon the `paseo` CLI reaches. `agents`
 lists `<home>/agents/*/<id>.json` as `{id, title, provider, cwd,
-workspaceId, status, nativeHandle, attach}`; `attach` is a shell-quoted `cd
+workspaceId, status, lastActivityAt, nativeHandle, attach}`; `attach` is a shell-quoted `cd
 <cwd> && devin -r <nativeHandle>` hint for devin providers with a handle.
 Because `paseo inspect`/`ls` do not return `persistence.nativeHandle`, this
 command reads daemon persistence — a host detail, best-effort, not a
@@ -436,6 +436,25 @@ rewritten atomically every run; without it the scan is flagged `stateless`
 and emits everything detectable. Rendered `paseo logs` output is never
 parsed: the host has no cheap structured timeline read (`get_agent_activity`
 lacks tail/limit), which stays a recorded host gap.
+
+### `notebook`
+
+`notebook` locates the governance notebook for a repository when the active
+run lives in another checkout — a worktree Supervisor's record sits at
+`<its-checkout>/.paseo-slp/notebook.md`, invisible from the main checkout:
+
+```bash
+node bin/slp.mjs notebook /absolute/repository [--paseo-home /absolute/paseo-home]
+```
+
+It resolves the repository's git common dir — the property linking a
+worktree back to its repository — then lists Supervisor agents (provider
+containing `supervisor`, or a `Supervisor`-titled state file) whose `cwd`
+shares it. Output is candidates only: `{agentId, title, status, cwd,
+lastActivityAt, notebook, notebookExists}` sorted by most recent activity,
+plus `gaps` for agent cwds that fail the git probe. Read-only — it never
+copies, merges or edits notebook content, and picks no authoritative
+candidate; where governance lives stays per-checkout.
 
 ## Uninstall
 

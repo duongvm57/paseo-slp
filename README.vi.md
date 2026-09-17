@@ -345,8 +345,8 @@ status}` (`enabled` có thể null với trạng thái không nhận diện đư
 config cho `{id, enabled, extends}`; profiles luôn đọc từ
 `daemon.agentProfiles`. Trên host nhiều daemon, listing live phản ánh daemon
 mà `paseo` CLI kết nối tới. `agents` liệt kê `<home>/agents/*/<id>.json`
-thành `{id, title, provider, cwd, workspaceId, status, nativeHandle,
-attach}`; `attach` là gợi ý `cd <cwd> && devin -r <nativeHandle>` đã
+thành `{id, title, provider, cwd, workspaceId, status, lastActivityAt,
+nativeHandle, attach}`; `attach` là gợi ý `cd <cwd> && devin -r <nativeHandle>` đã
 shell-quote cho provider devin có handle. Vì `paseo inspect`/`ls` không trả
 `persistence.nativeHandle`, lệnh này đọc persistence của daemon — chi tiết
 host best-effort, không phải contract.
@@ -416,6 +416,25 @@ mỗi run; không có thì scan gắn cờ `stateless` và emit mọi thứ phá
 được. Output rendered của `paseo logs` không bao giờ được parse: host không
 có đường đọc structured timeline rẻ (`get_agent_activity` thiếu
 tail/limit) — đây vẫn là host gap đã ghi nhận.
+
+### `notebook`
+
+`notebook` định vị governance notebook của một repository khi run đang hoạt
+động nằm ở checkout khác — record của Supervisor trong worktree nằm ở
+`<checkout-của-nó>/.paseo-slp/notebook.md`, không nhìn thấy từ main checkout:
+
+```bash
+node bin/slp.mjs notebook /absolute/repository [--paseo-home /absolute/paseo-home]
+```
+
+Lệnh resolve git common dir của repository — thuộc tính liên kết một
+worktree về repository của nó — rồi liệt kê các Supervisor agent (provider
+chứa `supervisor`, hoặc state file có title `Supervisor`) mà `cwd` chia sẻ
+common dir đó. Output chỉ là candidate: `{agentId, title, status, cwd,
+lastActivityAt, notebook, notebookExists}` sắp theo activity mới nhất, kèm
+`gaps` cho các cwd agent lỗi git probe. Read-only — không copy, merge hay
+sửa nội dung notebook, và không chọn candidate nào là authoritative; vị trí
+governance vẫn là per-checkout.
 
 ## Gỡ cài đặt
 
