@@ -31,8 +31,9 @@ role prompt.
 ```
 
 This installs the Markdown policies and CLI into `~/.local/share/paseo-slp`,
-adds the nine providers `slp-codex-{supervisor,lead,peer}`,
-`slp-pi-{supervisor,lead,peer}` and `slp-devin-{supervisor,lead,peer}`, plus
+adds the twelve providers `slp-codex-{supervisor,lead,peer}`,
+`slp-pi-{supervisor,lead,peer}`, `slp-devin-{supervisor,lead,peer}` and
+`slp-claude-{supervisor,lead,peer}`, plus
 two saved profiles **SLP Supervisor** and **SLP Lead** to
 `$PASEO_HOME/config.json` (default `~/.paseo`), enables MCP injection and
 reloads.
@@ -124,8 +125,8 @@ To set per-role model and reasoning:
 
 1. Open **Settings → the host running the work → Agents → Agent profiles**.
 2. Edit **SLP Supervisor** or **SLP Lead**.
-3. Pick the matching `slp-codex-{role}`, `slp-pi-{role}` or
-   `slp-devin-{role}` provider, then choose **Model**, **Thinking**, **Mode**
+3. Pick the matching `slp-codex-{role}`, `slp-pi-{role}`, `slp-devin-{role}`
+   or `slp-claude-{role}` provider, then choose **Model**, **Thinking**, **Mode**
    where the provider offers them, plus features, then **Save**.
 4. When creating a session directly, pick the saved profile in the model
    picker. For Peers, use onboarding to set up the repo pool; the Lead picks
@@ -195,7 +196,9 @@ Once the package is published to GitHub, replace the local path with the
 published URL/repository, e.g. `duongvm57/paseo-slp`. Use project mode or add
 `--global` as above; pass `--agent <name>` to target one agent instead of
 every detected one. Project skills land in `.agents/skills`, global skills
-in `~/.agents/skills`; Codex and Pi both discover both scopes. Verify with
+in `~/.agents/skills`; Codex and Pi discover both scopes directly, and the
+installer also links them into each agent's own skills directory (e.g.
+`.claude/skills`), so Claude picks them up the same way. Verify with
 `npx skills@latest list` or add `--global` for user scope. Open a fresh session after installing, then
 ask to onboard/set up SLP for the repo; the skill description triggers the
 workflow. See the [source skill](skills/paseo-slp-onboarding/SKILL.md).
@@ -249,7 +252,7 @@ signal scan.
 **Runtime sources:** Supervisor/Lead use the two saved profiles the Human
 configures in Paseo. Peers use the repo pool `.paseo-slp/slp-routing.json`,
 or the user-scope catalog `$PASEO_HOME/slp-routing.json` when the repo has
-none. Each option carries a `pi`/`codex`/`devin` provider, model, settings,
+none. Each option carries a `pi`/`codex`/`devin`/`claude` provider, model, settings,
 `suitableFor`, `avoidFor`, `notes`, `priority` and an
 `enabled`/`availability` state. The Lead chooses per task — Engineer,
 Architect and Reviewer are not hard-mapped to models. Two Peers can differ in
@@ -335,7 +338,7 @@ never replace the pool. Two more optional fields, both also honored by
   authoritative for scope details.`; the file content is not inlined.
 
 An option decides the whole bundle and maps to
-`slp-pi-peer`/`slp-codex-peer`/`slp-devin-peer`; a model containing `/` is
+`slp-pi-peer`/`slp-codex-peer`/`slp-devin-peer`/`slp-claude-peer`; a model containing `/` is
 kept verbatim. An explicit `binding` without profiles only supports
 Supervisor/Lead when the Human authorizes it. Peers must always pick a pool
 option, including during handoff and recovery.
@@ -499,7 +502,7 @@ stdio adapter; they do not prove role compliance with the operating guide.
 The transport was previously cross-checked against Paseo 0.7.2/Codex
 0.153.4; there is no E2E acceptance for this revision yet. Roles are
 behavioral instructions, not a filesystem/MCP sandbox. The transport supports
-Codex and Pi; routing, adapter, upgrade and handoff have local checks. Live
+Codex, Pi, Devin and Claude; routing, adapter, upgrade and handoff have local checks. Live
 provider switching, heartbeat, council, recovery and concurrent writers are
 not yet E2E-accepted. Capability and policy-load paths are recorded in the
 trace table below.
@@ -517,7 +520,7 @@ the fixture/evidence/verdict subcommands are described in the
 [E2E guide](e2e/README.md). This harness has no live acceptance yet; adding
 the entrypoint does not change the unverified E2E states above.
 
-To run `basic-codex` or `basic-pi`, configure the two Supervisor/Lead
+To run a `basic-*` scenario, configure the two Supervisor/Lead
 profiles and the fixture's Peer pool for the matching family. The coordinator
 prepares fixture/protocol, pool and baseline; the Supervisor creates a Lead
 per the saved profile, the Lead picks the Peer option itself. There is no

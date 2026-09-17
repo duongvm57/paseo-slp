@@ -10,7 +10,7 @@ import { resolveProfile } from '../src/profiles.mjs';
 import { launchPlan, handoffPlan } from '../src/launch.mjs';
 import { roleInstructions, roleBundle } from '../src/role-bundle.mjs';
 
-import { piRoleArgs, acpRolePrompt } from '../src/role-transport.mjs';
+import { piRoleArgs, acpRolePrompt, claudeRolePrompt } from '../src/role-transport.mjs';
 import { readCatalog, emptyCatalog, validateCatalog } from '../src/routing.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -26,7 +26,7 @@ const profiles = [
   { id: 'slp-lead', provider: 'slp-codex-lead', model: 'gpt-5.6-luna', modeId: 'full-access', thinkingOptionId: 'high', featureValues: { fast_mode: true } },
 ];
 // list_providers returns availability but need not return the extends field.
-const providers = ['slp-codex-peer', 'slp-pi-peer', 'slp-devin-peer', 'slp-codex-lead', 'slp-pi-lead', 'slp-devin-lead', 'pi', 'devin'].map(id => ({ id, enabled: true, status: 'available' }));
+const providers = ['slp-codex-peer', 'slp-pi-peer', 'slp-devin-peer', 'slp-claude-peer', 'slp-codex-lead', 'slp-pi-lead', 'slp-devin-lead', 'slp-claude-lead', 'pi', 'devin', 'claude'].map(id => ({ id, enabled: true, status: 'available' }));
 const request = { role: 'peer', repository: root, workspaceId: 'workspace', assignment: 'Inspect cancellation ownership; no code writes.', profiles, providers };
 // Test pool fixture — independent of examples/, which is a documentation
 // skeleton and must never contain launchable model names.
@@ -37,6 +37,7 @@ const testCatalog = () => ({ version: 1, policy: 'Test pool.', quotaFallback: { 
   { id: 'swe2-medium', provider: 'devin', roles: ['peer'], model: 'swe-2-medium', modeId: 'bypass', features: { auto_accept: true }, enabled: true, availability: 'unknown', priority: 20, suitableFor: ['coding'], avoidFor: [], notes: 'devin seat' },
   { id: 'swe2-high', provider: 'devin', roles: ['peer'], model: 'swe-2-high', modeId: 'bypass', features: { auto_accept: true }, enabled: true, availability: 'unknown', priority: 15, suitableFor: ['exploration'], avoidFor: [], notes: 'devin seat' },
   { id: 'swe2-max', provider: 'devin', roles: ['peer'], model: 'swe-2-max', modeId: 'bypass', features: { auto_accept: true }, enabled: true, availability: 'unknown', priority: 10, suitableFor: ['ambiguous'], avoidFor: [], notes: 'devin seat' },
+  { id: 'claude-seat', provider: 'claude', roles: ['peer'], model: 'claude-synthetic-1', thinkingOptionId: 'medium', enabled: true, availability: 'unknown', priority: 20, suitableFor: ['coding'], avoidFor: [], notes: 'claude seat' },
 ] });
 function catalogFixture(dir) {
   mkdirSync(join(dir, '.paseo-slp'), { recursive: true });
@@ -201,18 +202,46 @@ test('devin bindings accept swe-2 models only and map catalog options to the acp
   assert.throws(() => readCatalog(dir), /swe-2/);
 });
 
+test('claude bindings accept any discovered model and map catalog options to the claude wrapper', t => {
+  const { dir, installed } = fixture(t); install(root, installed);
+  const { route } = catalogFixture(dir);
+  const lead = { ...request, profiles: undefined, repository: dir, role: 'lead' };
+  for (const provider of ['claude', 'slp-claude-lead']) {
+    const plan = launchPlan(installed, { ...lead, binding: { provider, model: 'claude-synthetic-1' } });
+    assert.equal(plan.create.provider, `${provider}/claude-synthetic-1`);
+  }
+  // Stock claude carries the role policy in the prompt; the wrapper injects it.
+  assert.ok(launchPlan(installed, { ...lead, binding: { provider: 'claude', model: 'claude-synthetic-1' } })
+    .create.initialPrompt.includes(readFileSync(join(installed, 'src/roles/lead.md'), 'utf8')));
+  assert.ok(!launchPlan(installed, { ...lead, binding: { provider: 'slp-claude-lead', model: 'claude-synthetic-1' } })
+    .create.initialPrompt.includes(readFileSync(join(installed, 'src/roles/lead.md'), 'utf8')));
+  const claudeProfiles = [
+    { id: 'slp-lead', provider: 'slp-claude-lead', model: 'claude-synthetic-1', featureValues: { fast_mode: true } },
+  ];
+  const profilePlan = launchPlan(installed, { ...lead, profiles: claudeProfiles });
+  assert.equal(profilePlan.create.provider, 'slp-claude-lead/claude-synthetic-1');
+  assert.deepEqual(profilePlan.create.settings.features, { fast_mode: true });
+  const peer = launchPlan(installed, { ...request, repository: dir, profiles: undefined, providers, route: route('claude-seat') });
+  assert.equal(peer.create.provider, 'slp-claude-peer/claude-synthetic-1');
+  assert.deepEqual(peer.create.settings, { thinkingOptionId: 'medium', features: {} });
+});
+
 test('installer registers both role transports and preserves user provider switches and model edits', t => {
   const { dir, installed } = fixture(t), home = join(dir, 'home'); mkdirSync(home);
   installPaseo(root, installed, home, true);
   const path = join(home, 'config.json');
   const config = readJson(path);
-  assert.equal(Object.keys(config.agents.providers).length, 9);
+  assert.equal(Object.keys(config.agents.providers).length, 12);
   assert.equal(config.daemon.agentProfiles.length, 2);
   assert.equal(config.agents.providers['slp-pi-peer'].extends, 'pi');
   assert.equal(config.agents.providers['slp-pi-lead'].command[1], join(installed, 'bin/pi-role.mjs'));
   // Devin has no builtin client factory; its wrappers derive from the acp adapter.
   assert.equal(config.agents.providers['slp-devin-peer'].extends, 'acp');
   assert.equal(config.agents.providers['slp-devin-peer'].command[1], join(installed, 'bin/devin-role.mjs'));
+  // Claude wrappers extend the builtin claude provider, launched through the Agent SDK.
+  assert.equal(config.agents.providers['slp-claude-peer'].extends, 'claude');
+  assert.equal(config.agents.providers['slp-claude-peer'].command[1], join(installed, 'bin/claude-role.mjs'));
+  assert.equal(config.agents.providers['slp-claude-lead'].label, 'SLP claude lead');
   Object.assign(config.daemon.agentProfiles.find(p => p.id === 'slp-lead'), { provider: 'slp-pi-lead', model: 'b-ai/glm-5.3-flash', thinkingOptionId: 'medium' });
   writeFileSync(path, json(config));
   const bytes = readFileSync(path, 'utf8');
@@ -270,6 +299,51 @@ test('Devin wrapper prepends role policy to the first session prompt of each ses
   assert.throws(() => acpRolePrompt({ method: 'session/prompt', params: { sessionId: 's', prompt: 'oops' } }, 'p', new Set()), /Malformed/);
   assert.throws(() => acpRolePrompt({ method: 'session/prompt', params: { prompt: [] } }, 'p', new Set()), /Malformed/);
   assert.equal(acpRolePrompt({ method: 'session/cancel' }, 'p', new Set()).method, 'session/cancel');
+});
+
+test('Claude wrapper appends role policy inside the SDK initialize control request', t => {
+  const { dir, installed } = fixture(t); install(root, installed);
+  const fake = join(dir, 'fake-claude');
+  writeFileSync(fake, `#!${process.execPath}\nif(process.argv.includes('--version')) { console.log('probe-ok'); process.exit(0); } process.stdin.pipe(process.stdout);\n`);
+  chmodSync(fake, 0o755);
+  const sdkArgs = ['--output-format', 'stream-json', '--verbose', '--input-format', 'stream-json', '--model', 'claude-synthetic-1'];
+  const instruction = roleInstructions(installed, 'peer');
+  const messages = [
+    // r1/r2: defensive shapes — an emitter forwarding the preset object verbatim.
+    // SDK 0.3.246 hoists options.systemPrompt.append to top-level instead (r3/r5).
+    { type: 'control_request', request_id: 'r1', request: { subtype: 'initialize', sdkMcpServers: ['paseo'], systemPrompt: { type: 'preset', preset: 'claude_code', append: 'Daemon prompt' } } },
+    { type: 'control_request', request_id: 'r2', request: { subtype: 'initialize', systemPrompt: { type: 'preset', preset: 'claude_code' } } },
+    // r3: the real SDK 0.3.246 wire shape (preset hoisted, systemPrompt dropped).
+    { type: 'control_request', request_id: 'r3', request: { subtype: 'initialize', appendSystemPrompt: 'Daemon append' } },
+    { type: 'control_request', request_id: 'r4', request: { subtype: 'initialize', systemPrompt: ['Fully custom prompt'] } },
+    // r5: both fields present — the policy must join both, not silently pick one.
+    { type: 'control_request', request_id: 'r5', request: { subtype: 'initialize', appendSystemPrompt: 'Daemon append', systemPrompt: { type: 'preset', preset: 'claude_code', append: 'Preset append' } } },
+    { type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'bounded task' }] } },
+    { type: 'control_response', response: { request_id: 'r1', subtype: 'success' } },
+    { type: 'control_cancel_request', request_id: 'r9' },
+  ];
+  const env = { ...process.env, SLP_CLAUDE_BIN: fake };
+  const run = argv => execFileSync(process.execPath, argv, { env, input: messages.map(m => JSON.stringify(m)).join('\n') + '\n', encoding: 'utf8', timeout: 5000 });
+  const lines = run([join(installed, 'bin/claude-role.mjs'), 'peer', ...sdkArgs]).trim().split('\n').map(JSON.parse);
+  assert.equal(lines[0].request.systemPrompt.append, `Daemon prompt\n\n${instruction}`);
+  assert.deepEqual(lines[0].request.sdkMcpServers, ['paseo']);
+  assert.equal(lines[1].request.systemPrompt.append, instruction);
+  assert.equal(lines[1].request.systemPrompt.preset, 'claude_code');
+  assert.equal(lines[2].request.appendSystemPrompt, `Daemon append\n\n${instruction}`);
+  assert.equal(lines[3].request.appendSystemPrompt, instruction);
+  assert.deepEqual(lines[3].request.systemPrompt, ['Fully custom prompt']);
+  assert.equal(lines[4].request.systemPrompt.append, `Preset append\n\n${instruction}`);
+  assert.equal(lines[4].request.appendSystemPrompt, `Daemon append\n\n${instruction}`);
+  assert.deepEqual(lines.slice(5), messages.slice(5));
+  // Injection is idempotent when the policy already sits in the append field.
+  const done = claudeRolePrompt(messages[0], instruction);
+  assert.equal(claudeRolePrompt(done, instruction).request.systemPrompt.append, done.request.systemPrompt.append);
+  assert.equal(claudeRolePrompt(messages[5], instruction), messages[5]);
+  // Non-protocol invocations (--version, auth, interactive) stay a plain passthrough.
+  assert.equal(execFileSync(process.execPath, [join(installed, 'bin/claude-role.mjs'), 'peer', '--version'], { env, encoding: 'utf8' }).trim(), 'probe-ok');
+  // The '--flag=value' arg style still selects protocol mode.
+  const eqLines = run([join(installed, 'bin/claude-role.mjs'), 'peer', '--output-format=stream-json', '--input-format=stream-json']).trim().split('\n').map(JSON.parse);
+  assert.equal(eqLines[2].request.appendSystemPrompt, `Daemon append\n\n${instruction}`);
 });
 
 test('quota handoff preserves evidence and old parentage, emits only new-session arguments', t => {

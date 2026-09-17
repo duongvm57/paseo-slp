@@ -11,7 +11,7 @@ import { config, temporary, setup, fakeReview } from './helpers.mjs';
 test('basic preflight requires Human profiles for the scenario family before creating an attempt', t => {
   const dir = temporary(t), run = join(dir, 'run');
   initialize(run);
-  for (const family of ['codex', 'pi', 'devin']) {
+  for (const family of ['codex', 'pi', 'devin', 'claude']) {
     const id = `basic-${family}`;
     const current = structuredClone(config);
     delete current.confirmer; // Basic flows launch without a paid prelaunch reviewer.

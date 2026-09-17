@@ -33,7 +33,7 @@ Peer runtime changes remain inside the project pool; quota fallback follows its 
    create arguments. Profile inventory never overrides a Peer pool selection.
    All catalog settings are complete; do not overlay model/effort/features from
    slp-peer, the Lead or a different option. No saved slp-peer profile is required.
-   Map catalog provider pi/codex/devin to slp-pi-peer/slp-codex-peer/slp-devin-peer. Combine the wrapper
+   Map catalog provider pi/codex/devin/claude to slp-pi-peer/slp-codex-peer/slp-devin-peer/slp-claude-peer. Combine the wrapper
    ID with the exact model ID, preserving embedded slashes. Copy modeId,
    thinkingOptionId and features to settings, omitting absent fields; saved
    profiles use featureValues as settings.features. `settings.modeId` resolves

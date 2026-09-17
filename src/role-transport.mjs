@@ -25,6 +25,29 @@ export function injectRole(message, instruction) {
   return result;
 }
 
+// The Claude Agent SDK opens each query with an `initialize` control request on
+// stdin. Under SDK 0.3.246 a preset options.systemPrompt is hoisted before the
+// wire: the request carries top-level request.appendSystemPrompt and no
+// systemPrompt key. The request.systemPrompt.append branch is defensive cover
+// for emitters that forward the preset object verbatim; when both fields are
+// present the policy joins both so neither carries stale text. Every other
+// frame passes through untouched.
+export function claudeRolePrompt(message, instruction) {
+  if (message?.type !== 'control_request' || message?.request?.subtype !== 'initialize') return message;
+  const result = structuredClone(message);
+  const request = result.request;
+  const append = value => typeof value === 'string' && value.includes(instruction)
+    ? value : [value, instruction].filter(Boolean).join('\n\n');
+  const systemPrompt = request.systemPrompt;
+  const preset = systemPrompt !== null && typeof systemPrompt === 'object' && !Array.isArray(systemPrompt)
+    && (systemPrompt.append === undefined || typeof systemPrompt.append === 'string');
+  if (preset) systemPrompt.append = append(systemPrompt.append);
+  if (!preset || request.appendSystemPrompt !== undefined) {
+    request.appendSystemPrompt = append(request.appendSystemPrompt);
+  }
+  return result;
+}
+
 // Generic ACP has no system-instruction channel; the role policy leads the
 // first session/prompt of each session as a text block. `seen` tracks injected
 // sessionIds; loading/resuming/forking a session re-arms its next prompt.
