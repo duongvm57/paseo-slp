@@ -132,6 +132,21 @@ function orientation(root, role, routing) {
   };
 }
 
+// The carrier is the self-contained block that actually reaches the spawned
+// seat: create_agent transmits only create.initialPrompt, so plan-level
+// spawnKit/orientation alone would never arrive. It repeats the same data in
+// compact text — absolute policy locators (missing markers included) and the
+// approximate kit signatures — with no file contents inlined.
+function carrierBlock(kit, manifest) {
+  const locators = manifest.policyBytes.map(entry => entry.missing
+    ? `- ${entry.path} — declared but not shipped in this install`
+    : `- ${entry.path} — ${entry.bytes} bytes, sha256 ${entry.sha256}`);
+  return `\nSpawn kit — role-scoped Paseo MCP signatures (${kit.note}):\n`
+    + kit.tools.map(tool => `- ${tool}`).join('\n')
+    + '\nPolicy locators — absolute paths; size/sha256 are plan-time values for verifying the file found is the one prepare checked:\n'
+    + locators.join('\n') + '\n';
+}
+
 function agentTitle(role, disposition, request, packet) {
   const label = request.taskLabel ?? (basename(request.repository) || 'Task');
   if (typeof label !== 'string' || !label.trim() || label.trim().length > 100 || /[\x00-\x1f\x7f]/.test(label)) {
@@ -162,6 +177,8 @@ function plan(root, request, packet) {
   // Surface the intended mode once, at plan level: a binding without modeId
   // silently falls back to the caller's default mode at create_agent time.
   const warnings = binding?.modeId == null ? ['no modeId in binding — spawn inherits caller default'] : [];
+  const kit = spawnKit(role);
+  const manifest = orientation(root, role, routing);
   return {
     transport: 'Paseo create_agent; settings.features must be preserved',
     role, instructionPath: join(root, `src/roles/${role}.md`),
@@ -174,15 +191,15 @@ function plan(root, request, packet) {
       notifyOnFinish: true,
       provider: `${binding.provider}/${binding.model}`,
       workspaceId: request.workspaceId,
-      initialPrompt: prompt(root, role, assignment, binding) + (packet ? handoffNotice(role, packet) : ''),
+      initialPrompt: prompt(root, role, assignment, binding) + carrierBlock(kit, manifest) + (packet ? handoffNotice(role, packet) : ''),
       settings: {
         ...(binding.modeId ? { modeId: binding.modeId } : {}),
         ...(binding.thinkingOptionId ? { thinkingOptionId: binding.thinkingOptionId } : {}),
         features: binding.features ?? {},
       },
     },
-    spawnKit: spawnKit(role),
-    orientation: orientation(root, role, routing),
+    spawnKit: kit,
+    orientation: manifest,
     ...(packet ? { handoff: packet, activation: 'Paseo create_agent after current settlement verification; no agent started by this command' } : {}),
   };
 }

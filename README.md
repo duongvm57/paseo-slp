@@ -339,6 +339,16 @@ An option decides the whole bundle and maps to
 kept verbatim. An explicit `binding` without profiles only supports
 Supervisor/Lead when the Human authorizes it. Peers must always pick a pool
 option, including during handoff and recovery.
+
+The plan also surfaces the spawn's intended mode — top-level `modeId`
+mirroring `create.settings.modeId`, plus `warnings` when the binding lacks
+one — and two locator payloads carried inside `create.initialPrompt` so the
+spawned seat actually receives them: `spawnKit`, role-scoped approximate
+Paseo MCP tool signatures (verify against live `mcp_list_tools`), and
+`orientation`, policy-byte locators (`path`, `bytes`, `sha256`, or
+`missing: true` for declared files the install does not ship). Locators
+only — interpretation stays with the seat.
+
 `prepare-handoff <request.json>` adds the snapshot and handoff packet to the
 create_agent arguments; see the
 [handoff example](examples/provider-handoff.request.json).
@@ -434,8 +444,9 @@ path edited again across scans, tracked by mtime), `tool-mix` and
 fingerprints are emitted and the checkpoint — the command's only write — is
 rewritten atomically every run; without it the scan is flagged `stateless`
 and emits everything detectable. Rendered `paseo logs` output is never
-parsed: the host has no cheap structured timeline read (`get_agent_activity`
-lacks tail/limit), which stays a recorded host gap.
+parsed; `get_agent_activity` returns only a curated, `limit`-bounded tail
+(long sessions truncate into overflow files), so a complete structured
+timeline stays a recorded host gap.
 
 ### `notebook`
 

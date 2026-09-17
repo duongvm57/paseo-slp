@@ -58,9 +58,15 @@ test('spawnKit carries role-scoped approximate MCP tool signatures', t => {
     assert.deepEqual(plan.spawnKit.tools.map(tool => tool.split('(')[0]), orchestrating);
     assert.match(plan.spawnKit.tools[0], /labels\?: object/);
     for (const tool of plan.spawnKit.tools) assert.match(tool, /^[a-z_]+\([^)]*\)$/);
+    // The carrier: create_agent transmits only initialPrompt, so the kit must
+    // reach the child there, not just at plan level.
+    for (const tool of plan.spawnKit.tools) assert.ok(plan.create.initialPrompt.includes(`- ${tool}`));
+    assert.match(plan.create.initialPrompt, /approximate; verify against live mcp_list_tools/);
   }
   const peer = launchPlan(installed, { ...request, repository: dir, role: 'peer', providers, route: catalogFixture(dir) });
   assert.deepEqual(peer.spawnKit.tools.map(tool => tool.split('(')[0]), ['send_agent_prompt', 'get_agent_status']);
+  assert.ok(peer.create.initialPrompt.includes('- send_agent_prompt(agentId: string'));
+  assert.ok(!peer.create.initialPrompt.includes('create_agent('));
   assert.equal(spawnKit('peer').tools.length, 2);
   assert.throws(() => spawnKit('human'), /Unknown role/);
 });
@@ -86,6 +92,10 @@ test('orientation carries mechanical locators only', t => {
     assert.deepEqual(entry, { path: join(installed, rel), bytes: bytes.length, sha256: hash(bytes) });
   }
   assert.equal(lead.orientation.policyBytes.length, 9);
+  // Carrier: locators and the missing marker must survive into initialPrompt.
+  assert.ok(lead.create.initialPrompt.includes(`- ${join(installed, 'src/common.md')} — `));
+  assert.ok(lead.create.initialPrompt.includes(`${join(installed, 'src/common.md')} — ${readFileSync(join(installed, 'src/common.md')).length} bytes, sha256 ${hash(readFileSync(join(installed, 'src/common.md')))}`));
+  assert.match(lead.create.initialPrompt, new RegExp(`${join(installed, 'docs/contract.md').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} — declared but not shipped`));
   // A Peer bundle omits delegation.md and passes the routed catalog hash through.
   const route = catalogFixture(dir);
   const peer = launchPlan(installed, { ...request, repository: dir, role: 'peer', providers, route });
@@ -106,4 +116,7 @@ test('handoff plans carry modeId, spawnKit and orientation alongside the packet'
   assert.equal(plan.spawnKit.tools.length, 12);
   assert.equal(plan.orientation.installedRoot, installed);
   assert.equal(plan.handoff.previousAgentId, 'old-lead');
+  // Handed-off seats receive the carrier inside the prompt too.
+  assert.ok(plan.create.initialPrompt.includes('- create_agent(title: string'));
+  assert.match(plan.create.initialPrompt, /Provider handoff evidence:/);
 });

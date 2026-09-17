@@ -33,8 +33,9 @@ decisions change; the frontmatter is the single source for those fields.
   agents, to agent replies to the Human, and to the causal notebook. Keep
   technical identifiers, file paths, commands and proper nouns verbatim.
 - `agent_mode` records the intended Paseo modeId for agents spawned in this
-  repository (for example `bypass`); empty means undecided — the spawner must
-  ask rather than let agents fall back to the host default.
+  repository (for example `bypass`); empty falls back to the spawn bundle's own
+  modeId, and the spawner asks only when neither is set rather than letting
+  agents inherit the host default.
 
 ## Decision boundaries
 
