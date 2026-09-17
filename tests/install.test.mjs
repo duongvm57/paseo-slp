@@ -4,8 +4,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { install, verifyInstall, json, readJson } from '../src/package.mjs';
-import { installPaseo, uninstallPaseo, initWorkspace } from '../src/paseo-install.mjs';
+import { install, update, verifyInstall, json, readJson } from '../src/package.mjs';
+import { installPaseo, uninstallPaseo, initWorkspace, installHome } from '../src/paseo-install.mjs';
 import { configFile, writeConfig } from '../src/host-config.mjs';
 import { emptyCatalog } from '../src/routing.mjs';
 import { roleInstructions, roleBundle } from '../src/role-bundle.mjs';
@@ -232,6 +232,90 @@ test('a Human-edited user catalog survives uninstall; an existing catalog is nev
   writeFileSync(join(home2, 'slp-routing.json'), 'Human catalog');
   installPaseo(root, dest2, home2, true);
   assert.equal(readFileSync(join(home2, 'slp-routing.json'), 'utf8'), 'Human catalog');
+});
+
+// A minimal alternate candidate: enough structure for identity()/install()
+// without copying the whole repository.
+function fakeSource(dir, marker) {
+  const source = join(dir, `source-${marker}`);
+  mkdirSync(join(source, 'bin'), { recursive: true });
+  mkdirSync(join(source, 'src'), { recursive: true });
+  writeFileSync(join(source, 'package.json'), json({ name: 'paseo-slp', version: marker }));
+  writeFileSync(join(source, 'install.sh'), '#!/bin/sh\n');
+  for (const name of ['codex-role.mjs', 'pi-role.mjs', 'devin-role.mjs', 'claude-role.mjs', 'slp.mjs'])
+    writeFileSync(join(source, 'bin', name), `// ${marker}\n`);
+  writeFileSync(join(source, 'src', 'roles.md'), marker);
+  return source;
+}
+
+test('an intact installation updates in place, preserving tuned settings', t => {
+  const { dir, home, destination } = fixture(t);
+  installPaseo(root, destination, home, true);
+  const current = readJson(join(home, 'config.json'));
+  current.daemon.agentProfiles[0].modeId = 'full-access'; config(home, current);
+  const source2 = fakeSource(dir, 'v2');
+  const preview = installPaseo(source2, destination, home);
+  assert.equal(preview.updated, true);
+  assert.equal(preview.applied, false);
+  assert.equal(readFileSync(join(destination, 'src/monitor.mjs'), 'utf8').length > 0, true);
+  const applied = installPaseo(source2, destination, home, true);
+  assert.equal(applied.updated, true);
+  verifyInstall(destination);
+  assert.equal(readFileSync(join(destination, 'src/roles.md'), 'utf8'), 'v2');
+  assert.equal(existsSync(join(destination, 'src/monitor.mjs')), false);
+  const cfg = readJson(join(home, 'config.json'));
+  assert.equal(Object.keys(cfg.agents.providers).filter(id => id.startsWith('slp-')).length, 12);
+  assert.equal(cfg.daemon.agentProfiles[0].modeId, 'full-access');
+  assert.equal(readJson(join(destination, 'paseo-binding.json')).configPath, join(home, 'config.json'));
+  assert.equal(installPaseo(source2, destination, home, true).alreadyInstalled, true);
+});
+
+test('a modified installation refuses in-place update', t => {
+  const { dir, home, destination } = fixture(t);
+  installPaseo(root, destination, home, true);
+  const source2 = fakeSource(dir, 'v2');
+  writeFileSync(join(destination, 'src/monitor.mjs'), 'human tweak');
+  assert.throws(() => installPaseo(source2, destination, home, true), /candidate changed/);
+  assert.equal(readFileSync(join(destination, 'src/monitor.mjs'), 'utf8'), 'human tweak');
+});
+
+test('an extra top-level file refuses in-place update', t => {
+  const { dir, home, destination } = fixture(t);
+  installPaseo(root, destination, home, true);
+  const source2 = fakeSource(dir, 'v2');
+  writeFileSync(join(destination, 'notes.txt'), 'keep');
+  assert.throws(() => installPaseo(source2, destination, home, true), /Extra files/);
+  assert.equal(existsSync(join(destination, 'notes.txt')), true);
+});
+
+test('a standalone install updates in place and never drops extra files', t => {
+  const { dir, destination } = fixture(t);
+  install(root, destination);
+  const source2 = fakeSource(dir, 'v2');
+  const result = update(source2, destination);
+  assert.equal(result.updated, true);
+  verifyInstall(destination);
+  assert.equal(readFileSync(join(destination, 'src/roles.md'), 'utf8'), 'v2');
+  writeFileSync(join(destination, 'human.txt'), 'keep');
+  assert.throws(() => update(source2, destination), /Extra files/);
+  assert.equal(readFileSync(join(destination, 'human.txt'), 'utf8'), 'keep');
+});
+
+test('bare --paseo-home and SLP_HOME resolve the documented defaults', t => {
+  const { home, destination } = fixture(t);
+  const env = { ...process.env, PASEO_HOME: home, SLP_HOME: destination };
+  const result = JSON.parse(execFileSync(process.execPath,
+    [join(root, 'bin/slp.mjs'), 'install', '--paseo-home', '--apply'], { env, encoding: 'utf8', timeout: 5000 }));
+  assert.equal(result.destination, destination);
+  assert.equal(readJson(join(home, 'config.json')).daemon.agentProfiles.length, 2);
+});
+
+test('the default install dir follows the platform data convention', () => {
+  assert.equal(installHome('linux', {}, '/h'), '/h/.local/share/paseo-slp');
+  assert.equal(installHome('linux', { XDG_DATA_HOME: '/xdg' }, '/h'), '/xdg/paseo-slp');
+  assert.equal(installHome('darwin', {}, '/h'), '/h/Library/Application Support/paseo-slp');
+  assert.equal(installHome('win32', { LOCALAPPDATA: 'C:/LA' }, 'C:/u'), 'C:/LA/paseo-slp');
+  assert.equal(installHome('win32', {}, 'C:/u'), 'C:/u/AppData/Local/paseo-slp');
 });
 
 test('saved profiles default to the host\'s enabled provider family', t => {

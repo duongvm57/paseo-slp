@@ -1,12 +1,21 @@
-import { existsSync, readFileSync, writeFileSync, rmSync, lstatSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, rmSync, lstatSync, mkdirSync, renameSync } from 'node:fs';
 import { join, resolve, isAbsolute, relative } from 'node:path';
+import { homedir } from 'node:os';
 import { isDeepStrictEqual } from 'node:util';
-import { json, readJson, hash, identity, install, verifyInstall, files } from './package.mjs';
+import { json, readJson, hash, identity, install, verifyInstall, files, stageInstall, swapIn, verifyReplaceable } from './package.mjs';
 import { roles, profileRoles, families, profileId, providerId } from './profiles.mjs';
 import { transportOf } from './binding.mjs';
 import { validateCatalog, routingPath } from './routing.mjs';
 import { configFile, writeConfig, mcpFlags, requireMcp, verifyOwnedProviders, verifyOwnedProfiles,
   providers as hostProviders, agentProfiles as hostAgentProfiles } from './host-config.mjs';
+
+// Platform data dir: %LOCALAPPDATA% on Windows, ~/Library/Application Support
+// on macOS, $XDG_DATA_HOME (~/.local/share) elsewhere.
+export function installHome(platform = process.platform, env = process.env, home = homedir()) {
+  if (platform === 'win32') return join(env.LOCALAPPDATA ?? join(home, 'AppData', 'Local'), 'paseo-slp');
+  if (platform === 'darwin') return join(home, 'Library', 'Application Support', 'paseo-slp');
+  return join(env.XDG_DATA_HOME ?? join(home, '.local', 'share'), 'paseo-slp');
+}
 
 // Default saved-profile family follows the host's enabled base provider; every
 // role family is still installed, so this only picks the starting default.
@@ -53,13 +62,14 @@ export function installPaseo(source, destination, home, apply = false) {
   const file = configFile(home);
   if (existsSync(destination)) {
     const manifest = verifyInstall(destination);
-    if (manifest.candidate.sha256 !== identity(source).sha256) throw new Error('Different candidate already installed; detach the previous installation before upgrading');
     const binding = readJson(join(destination, 'paseo-binding.json'));
     if (binding.configPath !== file.path) throw new Error('Installation belongs to a different Paseo home');
     verifyOwnedProviders(file.config, binding.providers);
-    verifyOwnedProfiles(file.config, binding.profiles, 'bound');
+    const saved = verifyOwnedProfiles(file.config, binding.profiles, 'bound');
     requireMcp(file.config);
-    return { destination, configPath: file.path, applied: false, alreadyInstalled: true, reloadRequired: true };
+    if (manifest.candidate.sha256 === identity(source).sha256)
+      return { destination, configPath: file.path, applied: false, alreadyInstalled: true, reloadRequired: true };
+    return updatePaseo(source, destination, file, binding, saved, apply);
   }
   const proposal = configurationPlan(destination, file.config);
   const result = { destination, configPath: file.path, applied: apply, ...proposal,
@@ -89,6 +99,48 @@ export function installPaseo(source, destination, home, apply = false) {
     throw error;
   }
   return { ...result, candidate, userCatalog: userCatalog?.path ?? null };
+}
+
+// In-place update of an intact installation: provider commands keep pointing
+// at the same paths, so only files, the binding receipt and installed.json
+// change. Staged and swapped as one move; a drifted install was already
+// refused by verifyInstall, and extra files are refused rather than silently
+// dropped by the swap. Human-modified profiles keep their settings.
+function updatePaseo(source, destination, file, prior, saved, apply) {
+  const manifest = verifyInstall(destination);
+  verifyReplaceable(destination, manifest);
+  const base = structuredClone(file.config);
+  for (const id of Object.keys(prior.providers)) delete base.agents.providers[id];
+  base.daemon.agentProfiles = base.daemon.agentProfiles.filter(p => !saved.has(p.id));
+  const proposal = configurationPlan(destination, base);
+  proposal.profiles = proposal.profiles.map(p => saved.get(p.id) ?? p);
+  const retiredProfiles = [...saved.values()].filter(profile => !proposal.profiles.some(p => p.id === profile.id));
+  const result = { destination, configPath: file.path, applied: apply, ...proposal,
+    updated: true, retiredProfiles: retiredProfiles.map(p => p.id), reloadRequired: true };
+  if (!apply) return result;
+  const { staging, candidate } = stageInstall(source, destination);
+  try {
+    const binding = json({ configPath: file.path, ...proposal, mcpBefore: prior.mcpBefore,
+      retiredProfiles: [...(prior.retiredProfiles ?? []), ...retiredProfiles], userCatalog: prior.userCatalog ?? null });
+    writeFileSync(join(staging, 'paseo-binding.json'), binding, { flag: 'wx', mode: 0o600 });
+    const staged = readJson(join(staging, 'installed.json'));
+    writeFileSync(join(staging, 'installed.json'), json({ ...staged, paseoBindingSha256: hash(binding) }));
+    verifyInstall(staging);
+    const next = structuredClone(base);
+    next.agents.providers = { ...next.agents.providers, ...proposal.providers };
+    next.daemon.agentProfiles = [...next.daemon.agentProfiles, ...proposal.profiles];
+    const replaced = swapIn(staging, destination);
+    try { writeConfig(file, next); rmSync(replaced, { recursive: true, force: true }); }
+    catch (error) {
+      rmSync(destination, { recursive: true, force: true });
+      renameSync(replaced, destination);
+      throw error;
+    }
+    return { ...result, candidate };
+  } catch (error) {
+    rmSync(staging, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 export function uninstallPaseo(destination, apply = false) {
