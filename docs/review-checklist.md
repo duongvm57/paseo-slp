@@ -25,6 +25,12 @@ implicit cancel. If curated CLI logs omit launch input or final report, obtain
 actual host timeline evidence in the independent review; otherwise U2/U4 remain
 BLOCKED. Role candidates seen in text are only search hints.
 
+A coverage or parity claim on the package candidate requires an exhaustive
+enumeration-site list — README, manifest, examples/*, docs/*, src policy
+bytes and skills/* — every site checked in full, not sampled. Record the
+enumerated list in the review; an enumeration covering only README and the
+manifest while skipping examples/* leaves the claim unproven.
+
 Record stop/recovery/concurrency as unverified unless actually exercised. One
 successful job qualifies only that job, provider and candidate.
 

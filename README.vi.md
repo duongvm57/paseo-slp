@@ -229,8 +229,9 @@ authority; cadence và điều kiện dừng thuộc protocol/assignment. Refere
 được cài kèm hướng dẫn tạo/xóa heartbeat của đúng session, ghi causal
 notebook, recovery và 20 anti-pattern từ guide. Role chỉ dẫn đọc reference
 theo tình huống; Peer nhận các constraint liên quan qua assignment. Đây là
-policy cho agent sử dụng primitive Paseo, không có detector hay monitoring
-daemon riêng trong package.
+policy cho agent sử dụng primitive Paseo — package không có monitoring
+daemon hay semantic detector; `monitor` (bên dưới) là scan tín hiệu
+delta-only do caller chủ động gọi.
 
 ## Peer runtime pool
 
@@ -320,7 +321,18 @@ Option quyết định nguyên bundle và map sang
 `slp-pi-peer`/`slp-codex-peer`/`slp-devin-peer`; model chứa `/` được giữ
 nguyên. `binding` tường minh không kèm profiles chỉ hỗ trợ Supervisor/Lead
 khi được Human cho phép. Peer luôn phải chọn option trong pool, kể cả handoff
-và recovery. `prepare-handoff <request.json>` thêm snapshot và handoff vào
+và recovery.
+
+Plan cũng surface mode dự kiến của spawn — `modeId` top-level phản chiếu
+`create.settings.modeId`, kèm `warnings` khi binding thiếu — và hai payload
+locator được mang bên trong `create.initialPrompt` để seat được spawn thực
+sự nhận được: `spawnKit`, danh sách signature approximate của Paseo MCP tools
+theo role (verify với `mcp_list_tools` live), và `orientation`, các locator
+policy-byte (`path`, `bytes`, `sha256`, hoặc `missing: true` cho file đã
+declare nhưng bản cài không ship). Chỉ locators — việc diễn giải vẫn thuộc
+seat.
+
+`prepare-handoff <request.json>` thêm snapshot và handoff vào
 create_agent arguments; xem
 [ví dụ handoff](examples/provider-handoff.request.json). Hai lệnh chỉ chuẩn
 bị arguments; Supervisor/Lead dùng Paseo để thực sự tạo agent.
@@ -344,8 +356,8 @@ status}` (`enabled` có thể null với trạng thái không nhận diện đư
 config cho `{id, enabled, extends}`; profiles luôn đọc từ
 `daemon.agentProfiles`. Trên host nhiều daemon, listing live phản ánh daemon
 mà `paseo` CLI kết nối tới. `agents` liệt kê `<home>/agents/*/<id>.json`
-thành `{id, title, provider, cwd, workspaceId, status, nativeHandle,
-attach}`; `attach` là gợi ý `cd <cwd> && devin -r <nativeHandle>` đã
+thành `{id, title, provider, cwd, workspaceId, status, lastActivityAt,
+nativeHandle, attach}`; `attach` là gợi ý `cd <cwd> && devin -r <nativeHandle>` đã
 shell-quote cho provider devin có handle. Vì `paseo inspect`/`ls` không trả
 `persistence.nativeHandle`, lệnh này đọc persistence của daemon — chi tiết
 host best-effort, không phải contract.
@@ -359,6 +371,82 @@ snapshot đệ quy và ghi dưới `nested` (mỗi sub-repo có `{path, head, sh
 files}` riêng và có thể mang `nested` của chính nó, tính vào sha256 tổng).
 Gitlink submodule đã stage (mode 160000) và thư mục được liệt kê mà không
 phải repo vẫn không được hỗ trợ.
+
+### `materialize`
+
+`.paseo-slp/` là local state bị gitignore chứa absolute path, nên worktree
+mới thiếu hẳn protocol và catalog. `materialize` clone chúng từ một checkout
+có sẵn:
+
+```bash
+node bin/slp.mjs materialize /absolute/target-repo --from /absolute/source-repo
+# mặc định dry-run; thêm --apply để ghi
+```
+
+Lệnh chỉ copy `.paseo-slp/WORKSPACE_PROTOCOL.md` và
+`.paseo-slp/slp-routing.json` (đã validate) — `notebook.md` là state do
+Supervisor sở hữu và không bao giờ được copy. Absolute path nằm dưới source
+root trong YAML frontmatter của protocol được rebase sang target root (path
+anh em dài hơn kiểu `<source>-old` không khớp boundary nên giữ nguyên). Như
+`init`, file đã tồn tại ở target được preserve chứ không ghi đè; mỗi file
+báo `preserved`/`applied`, kèm `sha256` cho file sẽ ghi. Entry protocol còn
+báo `rebased`, và bản copy ghi ra mà không tìm thấy source-root path nào sẽ
+mang field `warning` thay vì lặng lẽ giữ path cũ. Không có fallback về
+catalog user-scope hay template — source checkout là tường minh.
+
+### `monitor`
+
+`monitor` là scan tín hiệu on-demand cho Supervisor/Lead quan sát — một lần
+gọi là một lần scan, không phải daemon, và chỉ emit candidate chứ không ra
+verdict:
+
+```bash
+node bin/slp.mjs monitor /absolute/request.json
+```
+
+Request khai `agents` (`id`, `cwd` tùy chọn — fallback về `cwd` trong state
+file — và `scope` tùy chọn là danh sách prefix/glob), cùng các trường tùy
+chọn `paseoHome` (mặc định `$PASEO_HOME`/`~/.paseo`), `devinSessionsDb`
+(absolute path, opt-in), `thresholds` (`idleMinutes`, `churnScans`;
+`toolWindow` mặc định 20, `toolShare` mặc định 0.8 và `cadenceEdits` mặc
+định 3 cho các signal sessions-db), subset `signals` và đường dẫn checkpoint
+`stateFile`. Evidence đến từ `<paseoHome>/agents/*/<id>.json` và `git
+status`/`git log` trong từng `cwd`; `cwd` thiếu hoặc không phải repo được
+ghi thành evidence gap thay vì crash. Có `devinSessionsDb` thì nó probe
+sessions db của devin CLI (read-only; thường
+`~/.local/share/devin/cli/sessions.db`) cho các agent devin-provider; db
+thiếu hoặc không đọc được là gap entry, không phải lỗi. Các loại signal:
+`attention` (chỉ khi
+`requiresAttention` là true — `attentionReason` cũ chỉ là evidence),
+`follow-up-round` (user bump mà không có commit xen giữa), `idle-dirty`,
+`scope-drift`, `test-mirror`, `file-churn` (cùng một path dirty bị sửa
+lại qua các scan, theo dõi bằng mtime), `tool-mix` và `correction-cadence`
+(candidate từ sessions-db, yêu cầu `devinSessionsDb`). Có `stateFile` thì chỉ fingerprint
+mới được emit và checkpoint — write duy nhất của lệnh — được ghi lại atomic
+mỗi run; không có thì scan gắn cờ `stateless` và emit mọi thứ phát hiện
+được. Output rendered của `paseo logs` không bao giờ được parse;
+`get_agent_activity` chỉ trả tail đã curated, giới hạn `limit` (session dài
+bị truncate vào overflow file) — structured timeline đầy đủ vẫn là host gap
+đã ghi nhận.
+
+### `notebook`
+
+`notebook` định vị governance notebook của một repository khi run đang hoạt
+động nằm ở checkout khác — record của Supervisor trong worktree nằm ở
+`<checkout-của-nó>/.paseo-slp/notebook.md`, không nhìn thấy từ main checkout:
+
+```bash
+node bin/slp.mjs notebook /absolute/repository [--paseo-home /absolute/paseo-home]
+```
+
+Lệnh resolve git common dir của repository — thuộc tính liên kết một
+worktree về repository của nó — rồi liệt kê các Supervisor agent (provider
+chứa `supervisor`, hoặc state file có title `Supervisor`) mà `cwd` chia sẻ
+common dir đó. Output chỉ là candidate: `{agentId, title, status, cwd,
+lastActivityAt, notebook, notebookExists}` sắp theo activity mới nhất, kèm
+`gaps` cho các cwd agent lỗi git probe. Read-only — không copy, merge hay
+sửa nội dung notebook, và không chọn candidate nào là authoritative; vị trí
+governance vẫn là per-checkout.
 
 ## Gỡ cài đặt
 
@@ -423,7 +511,6 @@ envelope. Đường này không đăng ký profile hay tự tạo agent.
 
 - [Hướng dẫn cài đặt cho agent](docs/agent-guide.md)
 - [File map và contract](docs/contract.md)
-- [Operating guide](docs/reference/agent-orchestration-complete-operating-guide.md)
 - [Trace guide → policy, procedure và protocol](docs/guide-coverage.md)
 - [Checklist nghiệm thu độc lập](docs/review-checklist.md)
 

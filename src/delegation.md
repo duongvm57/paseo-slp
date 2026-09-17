@@ -7,6 +7,11 @@ Peer runtime changes remain inside the project pool; quota fallback follows its 
    Inspect Paseo reachability, list_workspaces and relevant list_agents, plus Git
    changes in the target checkout. Establish baseline resources to preserve. Read
    the repository's .paseo-slp/WORKSPACE_PROTOCOL.md for tactics and budget.
+   A worktree target missing .paseo-slp/ — gitignored local state holding absolute
+   paths — needs catalog and protocol materialized before route resolution:
+   `slp.mjs materialize <target> --from <source>` when the installed copy supports
+   it, else copy .paseo-slp/ and rebase absolute paths that point under the
+   source root onto the target root.
    Supervisor/Lead runtime settings come from slp-supervisor/slp-lead saved profiles.
    Peer runtime settings come from this repository's .paseo-slp/slp-routing.json,
    or the user-scope catalog ($PASEO_HOME/slp-routing.json, default ~/.paseo) when
@@ -31,7 +36,12 @@ Peer runtime changes remain inside the project pool; quota fallback follows its 
    Map catalog provider pi/codex/devin to slp-pi-peer/slp-codex-peer/slp-devin-peer. Combine the wrapper
    ID with the exact model ID, preserving embedded slashes. Copy modeId,
    thinkingOptionId and features to settings, omitting absent fields; saved
-   profiles use featureValues as settings.features. Record selected profile ID or
+   profiles use featureValues as settings.features. `settings.modeId` resolves
+   by precedence: a prepare plan's binding `modeId` (emitted as
+   `create.settings.modeId` with top-level `modeId` and `warnings`), then the
+   protocol frontmatter `agent_mode` for direct spawns (Human→Supervisor),
+   then the copied bundle's own `modeId`. When none is set, ask the Human;
+   an agent must never silently inherit the caller's default. Record selected profile ID or
    catalog option ID/hash and exact bundle with the launch arguments.
    Use agent-scoped Paseo create_agent; it has no profile parameter.
    Pass the actual workspaceId, title and notifyOnFinish=true.

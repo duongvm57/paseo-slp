@@ -4,6 +4,9 @@ Supervisor and Lead read this before observing or waiting on work, and at settle
 An event signals attention; a detector recognizes a possible pattern; a heartbeat
 wakes a session periodically. Judgment and authority remain with Supervisor/Lead.
 The package supplies policy, not a background detector or a second lifecycle runner.
+Where the installed copy provides `slp.mjs monitor`, the observer may invoke it as
+an opt-in on-demand scan: it emits signal candidates only on delta, holds no live
+turn and issues no verdict.
 
 ## Establish the observation path
 
@@ -71,6 +74,13 @@ after discovering and validating role loading, placement, parentage and settings
 the normal create_agent profile mapping cannot simply be assumed for schedules.
 Record owned schedule IDs and stopping conditions when that separate path is used.
 
+Event coverage can miss a lost notification or a silent stall, so the observation
+plan may add a low-frequency sweep beside event-driven waits: one bounded pass
+over the owner map and timeline deltas per interval, then back to waiting. Sweep
+cadence is a repository/protocol choice — the guide's ~15-minute figure is
+illustration, not a rule. A sweep is not a status loop inside a live turn, and a
+heartbeat that carries it remains a safety net, not a worker.
+
 ## On a signal
 
 Inspect the indicated agent status/activity and only relevant timeline/Git/workspace
@@ -80,9 +90,12 @@ overflow files; widen the limit or read the overflow path rather than assuming
 the returned tail is complete.
 If a discovered host timeline path cannot recover it, report the evidence gap rather
 than infer an outcome. If action is needed, use observation → evidence → hypothesis →
-open question to Lead. Use references/anti-patterns.md for suspected drift and repeated
-failures. Distinguish idle, external waiting, permissions, missing prerequisites and
-actual lost momentum.
+open question to Lead. On every material event run the watch-list scan first:
+repeated corrections to the same file or scope, writes outside the declared scope,
+idle/finished/tests-pass promoted to acceptance, tests mirroring the implementation
+or mocks erasing a real failure path. A scan hit opens references/anti-patterns.md
+for investigation; the scan is a cheap trigger, not a diagnosis. Distinguish idle,
+external waiting, permissions, missing prerequisites and actual lost momentum.
 
 Before sending a corrective prompt, check current activity: an earlier tool error
 does not establish a stall if the agent has moved on. A prompt to a running agent
