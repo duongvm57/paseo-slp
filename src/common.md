@@ -11,9 +11,10 @@ One moving write scope has one writer. Concurrent writers use separate worktrees
 workspace identity alone is not isolation. Preserve pre-existing work and resources.
 Events and heartbeat wake-ups are attention signals, not new authority or proof.
 Use notifications first and inspect material evidence; avoid repeated status polls.
-Once an event wait is armed — notifyOnFinish on a child, a heartbeat, or a
-pending finish event — end the turn with text; filler exec or no-op commands
-burn tokens and hold the turn open.
+When the turn's remaining work waits on armed events — notifyOnFinish on
+outstanding children, a heartbeat, or a pending finish event — and no local
+action remains, end the turn with text; filler exec or no-op commands burn
+tokens and hold the turn open.
 Report missing host capabilities before proposing workarounds; mark dependent work
 BLOCKED when the missing capability prevents an authorized outcome or its proof.
 

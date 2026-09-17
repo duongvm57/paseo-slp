@@ -321,7 +321,18 @@ Option quyết định nguyên bundle và map sang
 `slp-pi-peer`/`slp-codex-peer`/`slp-devin-peer`; model chứa `/` được giữ
 nguyên. `binding` tường minh không kèm profiles chỉ hỗ trợ Supervisor/Lead
 khi được Human cho phép. Peer luôn phải chọn option trong pool, kể cả handoff
-và recovery. `prepare-handoff <request.json>` thêm snapshot và handoff vào
+và recovery.
+
+Plan cũng surface mode dự kiến của spawn — `modeId` top-level phản chiếu
+`create.settings.modeId`, kèm `warnings` khi binding thiếu — và hai payload
+locator được mang bên trong `create.initialPrompt` để seat được spawn thực
+sự nhận được: `spawnKit`, danh sách signature approximate của Paseo MCP tools
+theo role (verify với `mcp_list_tools` live), và `orientation`, các locator
+policy-byte (`path`, `bytes`, `sha256`, hoặc `missing: true` cho file đã
+declare nhưng bản cài không ship). Chỉ locators — việc diễn giải vẫn thuộc
+seat.
+
+`prepare-handoff <request.json>` thêm snapshot và handoff vào
 create_agent arguments; xem
 [ví dụ handoff](examples/provider-handoff.request.json). Hai lệnh chỉ chuẩn
 bị arguments; Supervisor/Lead dùng Paseo để thực sự tạo agent.
@@ -413,9 +424,10 @@ lại qua các scan, theo dõi bằng mtime), `tool-mix` và `correction-cadence
 (candidate từ sessions-db, yêu cầu `devinSessionsDb`). Có `stateFile` thì chỉ fingerprint
 mới được emit và checkpoint — write duy nhất của lệnh — được ghi lại atomic
 mỗi run; không có thì scan gắn cờ `stateless` và emit mọi thứ phát hiện
-được. Output rendered của `paseo logs` không bao giờ được parse: host không
-có đường đọc structured timeline rẻ (`get_agent_activity` thiếu
-tail/limit) — đây vẫn là host gap đã ghi nhận.
+được. Output rendered của `paseo logs` không bao giờ được parse;
+`get_agent_activity` chỉ trả tail đã curated, giới hạn `limit` (session dài
+bị truncate vào overflow file) — structured timeline đầy đủ vẫn là host gap
+đã ghi nhận.
 
 ### `notebook`
 

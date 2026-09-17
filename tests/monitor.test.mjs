@@ -209,7 +209,7 @@ sqliteTest('monitor devin probe emits tool-mix and suppresses the fingerprint on
   const calls = [...Array(18).fill(toolCall('exec')), toolCall('read'), toolCall('read')]
     .map(call => ['sess-1', null, call]);
   const dbPath = devinDbFixture(dir, [{ id: 'sess-1', cwd: repo, lastActivityAt: 1 }], calls);
-  agentState(home, 'a1', { lastStatus: 'working', cwd: repo, provider: 'slp-devin-peer' });
+  agentState(home, 'a1', { lastStatus: 'working', cwd: repo, provider: 'slp-devin-peer', persistence: { nativeHandle: 'sess-1' } });
   const stateFile = join(dir, 'state.json');
   const request = { paseoHome: home, agents: [{ id: 'a1', cwd: repo }], stateFile, devinSessionsDb: dbPath };
   const out = monitor(request);
@@ -220,16 +220,39 @@ sqliteTest('monitor devin probe emits tool-mix and suppresses the fingerprint on
   assert.equal(mix.evidence.sessionId, 'sess-1');
   assert.equal(readJson(stateFile).a1.devin.sessionId, 'sess-1');
   assert.deepEqual(monitor(request).signals, []);
-  // A newer session for the same cwd retires the old fingerprints.
+  // A new devin session (new nativeHandle) retires the old fingerprints.
   const db = new DatabaseSync(dbPath);
   db.prepare('INSERT INTO sessions (id, working_directory, last_activity_at) VALUES (?, ?, ?)').run('sess-2', repo, 2);
   calls.forEach((call, i) => db.prepare('INSERT INTO tool_call_state (session_id, tool_call_id, tool_call_json) VALUES (?, ?, ?)')
     .run('sess-2', `s2-${i}`, JSON.stringify(toolCall('read'))));
   db.close();
+  agentState(home, 'a1', { lastStatus: 'working', cwd: repo, provider: 'slp-devin-peer', persistence: { nativeHandle: 'sess-2' } });
   const rolled = monitor(request);
   const remixed = rolled.signals.find(s => s.kind === 'tool-mix');
   assert.equal(remixed.evidence.tool, 'read');
   assert.equal(remixed.evidence.sessionId, 'sess-2');
+});
+
+sqliteTest('monitor devin probe attributes sessions by nativeHandle, never by shared cwd', t => {
+  const dir = fixture(t), home = join(dir, 'home'), repo = gitRepo(join(dir, 'repo'));
+  const target = join(repo, 'src/foo.mjs');
+  // Lead and Supervisor share one worktree: newest-by-cwd would misattribute.
+  const dbPath = devinDbFixture(dir, [
+    { id: 'sess-sup', cwd: repo, lastActivityAt: 2 },
+    { id: 'sess-lead', cwd: repo, lastActivityAt: 1 },
+  ], [
+    ...Array(4).fill(toolCall('edit', { kind: 'edit', rawInput: { file_path: target } })).map(call => ['sess-lead', null, call]),
+    ...Array(3).fill(toolCall('exec')).map(call => ['sess-sup', null, call]),
+  ]);
+  agentState(home, 'lead', { lastStatus: 'working', cwd: repo, provider: 'devin', persistence: { nativeHandle: 'sess-lead' } });
+  agentState(home, 'sup', { lastStatus: 'working', cwd: repo, provider: 'slp-devin-peer', persistence: { nativeHandle: 'sess-sup' } });
+  const out = monitor({ paseoHome: home, agents: [{ id: 'lead', cwd: repo }, { id: 'sup', cwd: repo }], devinSessionsDb: dbPath });
+  const cadence = out.signals.find(s => s.kind === 'correction-cadence');
+  assert.equal(cadence.agentId, 'lead');
+  assert.equal(cadence.evidence.sessionId, 'sess-lead');
+  const mix = out.signals.find(s => s.agentId === 'sup' && s.kind === 'tool-mix');
+  assert.equal(mix.evidence.tool, 'exec');
+  assert.equal(mix.evidence.sessionId, 'sess-sup');
 });
 
 sqliteTest('monitor devin probe emits correction-cadence for repeated edits of one path', t => {
@@ -242,7 +265,7 @@ sqliteTest('monitor devin probe emits correction-cadence for repeated edits of o
     toolCall('read'),
   ].map(call => ['sess-1', null, call]);
   const dbPath = devinDbFixture(dir, [{ id: 'sess-1', cwd: repo, lastActivityAt: 1 }], calls);
-  agentState(home, 'a1', { lastStatus: 'working', cwd: repo, provider: 'slp-devin-peer' });
+  agentState(home, 'a1', { lastStatus: 'working', cwd: repo, provider: 'slp-devin-peer', persistence: { nativeHandle: 'sess-1' } });
   const out = monitor({ paseoHome: home, agents: [{ id: 'a1', cwd: repo }], devinSessionsDb: dbPath });
   const cadence = out.signals.find(s => s.kind === 'correction-cadence');
   assert.equal(cadence.evidence.path, target);
@@ -255,10 +278,12 @@ sqliteTest('monitor devin probe records gaps and skips non-devin or unopted agen
   const dir = fixture(t), home = join(dir, 'home'), repo = gitRepo(join(dir, 'repo'));
   mkdirSync(join(dir, 'other'));
   const dbPath = devinDbFixture(dir, [{ id: 'sess-1', cwd: join(dir, 'other'), lastActivityAt: 1 }], []);
-  agentState(home, 'a1', { lastStatus: 'working', cwd: repo, provider: 'slp-devin-peer' });
+  agentState(home, 'a1', { lastStatus: 'working', cwd: repo, provider: 'slp-devin-peer', persistence: { nativeHandle: 'no-such-session' } });
   agentState(home, 'a2', { lastStatus: 'working', cwd: repo, provider: 'slp-codex-peer' });
-  const out = monitor({ paseoHome: home, agents: [{ id: 'a1', cwd: repo }, { id: 'a2', cwd: repo }], devinSessionsDb: dbPath });
-  assert.equal(out.gaps.find(g => g.agentId === 'a1').gap, 'no devin session for cwd');
+  agentState(home, 'a3', { lastStatus: 'working', cwd: repo, provider: 'slp-devin-peer' });
+  const out = monitor({ paseoHome: home, agents: [{ id: 'a1', cwd: repo }, { id: 'a2', cwd: repo }, { id: 'a3', cwd: repo }], devinSessionsDb: dbPath });
+  assert.equal(out.gaps.find(g => g.agentId === 'a1').gap, 'no devin session for handle');
+  assert.equal(out.gaps.find(g => g.agentId === 'a3').gap, 'devin agent has no persistence.nativeHandle');
   assert.equal(out.gaps.some(g => g.agentId === 'a2'), false);
   const unreadable = monitor({ paseoHome: home, agents: [{ id: 'a1', cwd: repo }], devinSessionsDb: join(dir, 'missing.db') });
   assert.match(unreadable.gaps[0].gap, /devin sessions\.db unreadable/);

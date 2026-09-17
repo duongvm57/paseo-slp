@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { isAbsolute, join, resolve, basename } from 'node:path';
 import { paseoHome } from './routing.mjs';
+import { devinProviderPattern } from './binding.mjs';
 import { json, readJson } from './package.mjs';
 
 // On-demand signal scan for a Supervisor/Lead observer: one invocation is one
@@ -16,9 +17,11 @@ import { json, readJson } from './package.mjs';
 //
 // request.devinSessionsDb opts into a read-only probe of the devin CLI's
 // sessions.db (sqlite): agents whose state provider is devin-family are
-// linked by cwd === sessions.working_directory and their last tool calls are
-// scanned for tool-mix and correction-cadence candidates. Every failure is an
-// evidence gap, never a crash; absent the field nothing is probed.
+// linked by persistence.nativeHandle === sessions.id (the PK — cwd would
+// misattribute sessions when two agents share a worktree) and their last
+// tool calls are scanned for tool-mix and correction-cadence candidates.
+// Every failure is an evidence gap, never a crash; absent the field nothing
+// is probed.
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const text = value => typeof value === 'string' && value ? value : null;
 const millis = value => { const ms = typeof value === 'number' ? value : Date.parse(value); return Number.isFinite(ms) ? ms : null; };
@@ -102,12 +105,12 @@ function openDevinDb(path) {
   catch { return { gap: `devin sessions.db unreadable: ${path}` }; }
 }
 
-// Selective only — the real db is ~900MB. Latest session for the cwd wins;
-// rowid order approximates call recency inside the session.
-function probeDevin(db, cwd, window) {
+// Selective only — the real db is ~900MB. The nativeHandle is a direct PK
+// lookup; rowid order approximates call recency inside the session.
+function probeDevin(db, handle, window) {
   try {
-    const session = db.prepare('SELECT id, last_activity_at FROM sessions WHERE working_directory = ? ORDER BY last_activity_at DESC LIMIT 1').get(cwd);
-    if (!session) return { gap: 'no devin session for cwd' };
+    const session = db.prepare('SELECT id, last_activity_at FROM sessions WHERE id = ?').get(handle);
+    if (!session) return { gap: 'no devin session for handle' };
     const rows = db.prepare('SELECT tool_call_json FROM tool_call_state WHERE session_id = ? AND tool_call_json IS NOT NULL ORDER BY rowid DESC LIMIT ?').all(session.id, window);
     const calls = [];
     for (const row of rows) {
@@ -227,31 +230,37 @@ export function monitor(request) {
       }
     }
     // Devin session probe: opt-in via devinSessionsDb, devin providers only.
+    // The join key is persistence.nativeHandle (= sessions.id); a devin agent
+    // without one is a gap — guessing by cwd would misattribute a session.
     const provider = text(state?.provider) ?? text(state?.persistence?.provider);
     let devin = null;
-    if (request.devinSessionsDb && provider?.includes('devin') && cwd) {
-      devinDb ??= openDevinDb(request.devinSessionsDb);
-      devin = devinDb.db ? probeDevin(devinDb.db, cwd, thresholds.toolWindow) : devinDb;
-      if (devin.gap) gaps.push({ agentId: id, gap: devin.gap });
+    if (request.devinSessionsDb && devinProviderPattern.test(provider ?? '')) {
+      const handle = text(state?.persistence?.nativeHandle);
+      if (!handle) gaps.push({ agentId: id, gap: 'devin agent has no persistence.nativeHandle' });
       else {
-        // A new session for the same cwd retires the previous fingerprints.
-        if (record(prev.devin) && prev.devin.sessionId !== devin.sessionId) {
-          for (const fp of [...emitted]) {
-            if (fp.startsWith(`${id}|tool-mix|`) || fp.startsWith(`${id}|correction-cadence|`)) emitted.delete(fp);
+        devinDb ??= openDevinDb(request.devinSessionsDb);
+        devin = devinDb.db ? probeDevin(devinDb.db, handle, thresholds.toolWindow) : devinDb;
+        if (devin.gap) gaps.push({ agentId: id, gap: devin.gap });
+        else {
+          // A new session for the same agent retires the previous fingerprints.
+          if (record(prev.devin) && prev.devin.sessionId !== devin.sessionId) {
+            for (const fp of [...emitted]) {
+              if (fp.startsWith(`${id}|tool-mix|`) || fp.startsWith(`${id}|correction-cadence|`)) emitted.delete(fp);
+            }
           }
-        }
-        const window = devin.calls.length;
-        const counts = {};
-        for (const call of devin.calls) counts[call.tool] = (counts[call.tool] ?? 0) + 1;
-        for (const [tool, count] of Object.entries(counts)) {
-          if (count / window >= thresholds.toolShare) emit('tool-mix', { tool, share: count / window, window, sessionId: devin.sessionId }, tool);
-        }
-        const edits = {};
-        for (const call of devin.calls) {
-          if (call.path) edits[call.path] = (edits[call.path] ?? 0) + 1;
-        }
-        for (const [path, count] of Object.entries(edits)) {
-          if (count >= thresholds.cadenceEdits) emit('correction-cadence', { path, count, window, sessionId: devin.sessionId }, path);
+          const window = devin.calls.length;
+          const counts = {};
+          for (const call of devin.calls) counts[call.tool] = (counts[call.tool] ?? 0) + 1;
+          for (const [tool, count] of Object.entries(counts)) {
+            if (count / window >= thresholds.toolShare) emit('tool-mix', { tool, share: count / window, window, sessionId: devin.sessionId }, tool);
+          }
+          const edits = {};
+          for (const call of devin.calls) {
+            if (call.path) edits[call.path] = (edits[call.path] ?? 0) + 1;
+          }
+          for (const [path, count] of Object.entries(edits)) {
+            if (count >= thresholds.cadenceEdits) emit('correction-cadence', { path, count, window, sessionId: devin.sessionId }, path);
+          }
         }
       }
     }

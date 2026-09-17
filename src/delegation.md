@@ -36,11 +36,12 @@ Peer runtime changes remain inside the project pool; quota fallback follows its 
    Map catalog provider pi/codex/devin to slp-pi-peer/slp-codex-peer/slp-devin-peer. Combine the wrapper
    ID with the exact model ID, preserving embedded slashes. Copy modeId,
    thinkingOptionId and features to settings, omitting absent fields; saved
-   profiles use featureValues as settings.features. Every spawn path carries the
-   intended modeId — prepare emits `create.settings.modeId` in the plan (with
-   top-level `modeId` and `warnings`) and direct spawns (Human→Supervisor)
-   read it from the protocol frontmatter `agent_mode`; an agent must never
-   silently inherit the caller's default. Record selected profile ID or
+   profiles use featureValues as settings.features. `settings.modeId` resolves
+   by precedence: a prepare plan's binding `modeId` (emitted as
+   `create.settings.modeId` with top-level `modeId` and `warnings`), then the
+   protocol frontmatter `agent_mode` for direct spawns (Human→Supervisor),
+   then the copied bundle's own `modeId`. When none is set, ask the Human;
+   an agent must never silently inherit the caller's default. Record selected profile ID or
    catalog option ID/hash and exact bundle with the launch arguments.
    Use agent-scoped Paseo create_agent; it has no profile parameter.
    Pass the actual workspaceId, title and notifyOnFinish=true.
