@@ -10,8 +10,8 @@ import { json, readJson } from './package.mjs';
 // scan — not a daemon, no held turn, no verdicts. Candidates come only from
 // daemon-owned agent state files and each declared worktree's git status; the
 // host exposes no cheap structured timeline read (`paseo logs` renders for
-// humans and get_agent_activity has no tail/limit), so rendered output is
-// never parsed. With a stateFile checkpoint only new fingerprints are emitted
+// humans and get_agent_activity is per-agent detail, not a tree timeline),
+// so rendered output is never parsed. With a stateFile checkpoint only new fingerprints are emitted
 // and the checkpoint is always rewritten — it is the only write. Without one
 // the scan emits everything detectable and is flagged stateless.
 //
