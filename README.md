@@ -26,12 +26,25 @@ role prompt.
 ## Installation
 
 ```bash
-./install.sh
-# or: npm run install:slp
+npm run install:slp
+# or: ./install.sh
 ```
 
-This installs the Markdown policies and CLI into `~/.local/share/paseo-slp`,
-adds the twelve providers `slp-codex-{supervisor,lead,peer}`,
+Without a local clone, straight from GitHub:
+
+```bash
+npx --yes --package github:duongvm57/paseo-slp -- paseo-slp install --paseo-home --apply --reload
+```
+
+Every `slp.mjs` command below works through npx the same way — except the
+commands that operate on the installed copy (`init`, `materialize`,
+`monitor`, `uninstall`): run those from the installation itself so the
+version stays identical to what the providers reference.
+
+This installs the Markdown policies and CLI into the platform data
+directory — `$XDG_DATA_HOME/paseo-slp` (`~/.local/share/paseo-slp`),
+`~/Library/Application Support/paseo-slp` on macOS, `%LOCALAPPDATA%\paseo-slp`
+on Windows — adds the twelve providers `slp-codex-{supervisor,lead,peer}`,
 `slp-pi-{supervisor,lead,peer}`, `slp-devin-{supervisor,lead,peer}` and
 `slp-claude-{supervisor,lead,peer}`, plus
 two saved profiles **SLP Supervisor** and **SLP Lead** to
@@ -43,24 +56,26 @@ reloads.
   the project pool in `.paseo-slp/slp-routing.json`.
 - Repos keep their tactics in `.paseo-slp/workspace-protocol.md`; onboarding
   guides you through both files.
-- Override the install location with `SLP_HOME=/absolute/path` and the host
-  config with `PASEO_HOME=/absolute/home`. Run the installer on the daemon's
-  host.
-- Reinstalling the same candidate does not overwrite settings you have tuned.
-  A different candidate or a conflicting ID is refused, preserving the
-  current install.
+- Override the install location with `SLP_HOME=/absolute/path` (or pass the
+  path to `slp.mjs install`) and the host config with
+  `PASEO_HOME=/absolute/home` (or a path after `--paseo-home`). Run the
+  installer on the daemon's host.
+- Running the same command again updates an intact installation in place:
+  files are swapped atomically, tuned profile settings are kept, and a
+  hand-modified install is preserved rather than overwritten.
 
 To preview the entries before writing:
 
 ```bash
-node bin/slp.mjs install /absolute/new/destination --paseo-home /absolute/paseo-home
+node bin/slp.mjs install --paseo-home /absolute/paseo-home
 # add --apply to write; add --reload to activate on the running daemon
 ```
 
 ## Upgrading
 
-To upgrade an installed copy, cut over to a new directory; the command keeps
-profile settings and leaves the old files for sessions still using them:
+`install` already updates in place; `upgrade` is only for moving the
+installation to a different directory. The command keeps profile settings
+and leaves the old files for sessions still using them:
 
 ```bash
 node bin/slp.mjs upgrade "$HOME/.local/share/paseo-slp.next" \
@@ -77,11 +92,8 @@ profiles. An existing catalog and user-owned profiles outside this install
 are preserved.
 
 Keep the old directory around until dependent sessions have finished; do not
-uninstall the old copy to remove entries that moved to the new one. `.next`
-is only a temporary cutover path: after old sessions settle, move the
-verified candidate back to the canonical `~/.local/share/paseo-slp`, reload,
-then delete the temporary directory. Always use the path the providers
-actually reference for `init` and `prepare`.
+uninstall the old copy to remove entries that moved to the new one. Always
+use the path the providers actually reference for `init` and `prepare`.
 
 ## Getting started
 

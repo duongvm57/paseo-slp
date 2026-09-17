@@ -25,11 +25,24 @@ Supervisor đã có, không cần nhập lại prompt role.
 ## Cài đặt
 
 ```bash
-./install.sh
-# hoặc: npm run install:slp
+npm run install:slp
+# hoặc: ./install.sh
 ```
 
-Lệnh này cài Markdown và CLI vào `~/.local/share/paseo-slp`, bổ sung mười hai
+Không cần clone, chạy thẳng từ GitHub:
+
+```bash
+npx --yes --package github:duongvm57/paseo-slp -- paseo-slp install --paseo-home --apply --reload
+```
+
+Mọi lệnh `slp.mjs` bên dưới chạy qua npx tương tự — trừ các lệnh thao tác
+trên bản đã cài (`init`, `materialize`, `monitor`, `uninstall`): chạy chúng
+từ chính thư mục cài đặt để version khớp với cái providers đang tham chiếu.
+
+Lệnh này cài Markdown và CLI vào thư mục dữ liệu của nền tảng —
+`$XDG_DATA_HOME/paseo-slp` (`~/.local/share/paseo-slp`),
+`~/Library/Application Support/paseo-slp` trên macOS,
+`%LOCALAPPDATA%\paseo-slp` trên Windows — bổ sung mười hai
 provider `slp-codex-{supervisor,lead,peer}`, `slp-pi-{supervisor,lead,peer}`,
 `slp-devin-{supervisor,lead,peer}` và `slp-claude-{supervisor,lead,peer}`, cùng hai saved profile
 **SLP Supervisor** và **SLP Lead** vào `$PASEO_HOME/config.json` (mặc định
@@ -40,22 +53,25 @@ provider `slp-codex-{supervisor,lead,peer}`, `slp-pi-{supervisor,lead,peer}`,
   project trong `.paseo-slp/slp-routing.json`.
 - Repo giữ tactics trong `.paseo-slp/workspace-protocol.md`; onboarding
   hướng dẫn cấu hình cả hai file.
-- Đổi nơi cài bằng `SLP_HOME=/absolute/path`; đổi host config bằng
-  `PASEO_HOME=/absolute/home`. Chạy installer trên máy của daemon.
-- Cài lại cùng candidate không ghi đè settings đã chỉnh. Candidate khác hoặc
-  ID xung đột sẽ được từ chối để giữ bản cài hiện tại.
+- Đổi nơi cài bằng `SLP_HOME=/absolute/path` (hoặc truyền path cho
+  `slp.mjs install`); đổi host config bằng `PASEO_HOME=/absolute/home`
+  (hoặc path sau `--paseo-home`). Chạy installer trên máy của daemon.
+- Chạy lại cùng lệnh sẽ cập nhật tại chỗ một bản cài còn nguyên vẹn: file
+  được đổi nguyên tử, settings profile đã chỉnh được giữ, bản cài bị sửa tay
+  được bảo toàn thay vì bị ghi đè.
 
 Muốn xem các entry sẽ thêm trước khi ghi:
 
 ```bash
-node bin/slp.mjs install /absolute/new/destination --paseo-home /absolute/paseo-home
+node bin/slp.mjs install --paseo-home /absolute/paseo-home
 # thêm --apply để ghi; thêm --reload để kích hoạt trên daemon đang chạy
 ```
 
 ## Nâng cấp
 
-Để nâng cấp bản đã cài, dùng cutover sang thư mục mới; lệnh giữ settings của
-profile và giữ nguyên file cũ cho session đang dùng:
+`install` đã cập nhật tại chỗ; `upgrade` chỉ dùng khi muốn chuyển bản cài
+sang thư mục khác. Lệnh giữ settings của profile và giữ nguyên file cũ cho
+session đang dùng:
 
 ```bash
 node bin/slp.mjs upgrade "$HOME/.local/share/paseo-slp.next" \
@@ -71,11 +87,8 @@ sửa hay tự động điền từ profile cũ. Catalog đã có và profile c�
 thuộc bản cài được giữ.
 
 Bản cũ được giữ để bạn quản lý sau khi các session phụ thuộc đã kết thúc;
-không dùng uninstall bản cũ để gỡ các entry đã chuyển sang bản mới. `.next`
-chỉ là đường dẫn cutover tạm. Sau khi settle các session cũ, đưa candidate đã
-xác minh trở lại đường dẫn chuẩn `~/.local/share/paseo-slp`, reload, rồi xóa
-thư mục tạm. Dùng đường dẫn đang được provider tham chiếu cho `init` và
-`prepare`.
+không dùng uninstall bản cũ để gỡ các entry đã chuyển sang bản mới. Dùng
+đường dẫn đang được provider tham chiếu cho `init` và `prepare`.
 
 ## Bắt đầu
 

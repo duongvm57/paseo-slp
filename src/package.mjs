@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, readdirSync, lstatSync, readlinkSync, mkdirSync, writeFileSync, copyFileSync, rmSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, lstatSync, readlinkSync, mkdirSync, writeFileSync, copyFileSync, rmSync, renameSync, realpathSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
@@ -29,7 +29,9 @@ export function verifyInstall(root) {
 }
 export function install(source, destination) {
   const candidate = identity(source);
-  // Exclusive destination: no current binding, runtime configuration or session is touched.
+  // Exclusive destination: parents may be created, but the destination itself
+  // must not exist — no current binding, runtime configuration or session is touched.
+  mkdirSync(resolve(destination, '..'), { recursive: true });
   mkdirSync(destination);
   try {
     for (const entry of candidate.files) {
@@ -44,6 +46,41 @@ export function install(source, destination) {
     throw error;
   }
   return { destination: realpathSync(destination), candidate };
+}
+// A staged sibling keeps a failed update from ever leaving a half-written
+// installation; the caller writes its receipts (installed.json,
+// paseo-binding.json) into staging before swapIn.
+export function stageInstall(source, destination) {
+  const staging = `${destination}.staging-${process.pid}`;
+  rmSync(staging, { recursive: true, force: true });
+  const { candidate } = install(source, staging);
+  return { staging, candidate };
+}
+export function swapIn(staging, destination) {
+  const replaced = `${destination}.replaced-${process.pid}`;
+  rmSync(replaced, { recursive: true, force: true });
+  renameSync(destination, replaced);
+  try { renameSync(staging, destination); }
+  catch (error) { renameSync(replaced, destination); throw error; }
+  return replaced;
+}
+// Same rule as uninstall: a swap would silently drop user-added files.
+export function verifyReplaceable(destination, manifest) {
+  const receipts = ['installed.json', ...(manifest.paseoBindingSha256 ? ['paseo-binding.json'] : [])];
+  const expected = [...manifest.candidate.files.map(f => f.path), ...receipts].sort();
+  if (json(files(destination).sort()) !== json(expected)) throw new Error('Extra files: preserve directory for manual review');
+}
+export function update(source, destination) {
+  destination = resolve(destination);
+  const manifest = verifyInstall(destination);
+  if (manifest.paseoBindingSha256) throw new Error('Paseo-integrated installation; rerun install with --paseo-home');
+  verifyReplaceable(destination, manifest);
+  const { staging, candidate } = stageInstall(source, destination);
+  try {
+    const replaced = swapIn(staging, destination);
+    rmSync(replaced, { recursive: true, force: true });
+  } catch (error) { rmSync(staging, { recursive: true, force: true }); throw error; }
+  return { destination: realpathSync(destination), candidate, updated: true };
 }
 export function uninstall(destination) {
   const manifest = verifyInstall(destination);

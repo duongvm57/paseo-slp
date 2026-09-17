@@ -4,8 +4,11 @@
   "private": true,
   "type": "module",
   "engines": { "node": ">=22" },
+  "bin": {
+    "paseo-slp": "bin/slp.mjs"
+  },
   "scripts": {
-    "install:slp": "bash install.sh",
+    "install:slp": "node bin/slp.mjs install --paseo-home --apply --reload",
     "test": "node --test tests/*.test.mjs",
     "e2e": "node e2e/cli.mjs",
     "check": "node bin/slp.mjs identity"
