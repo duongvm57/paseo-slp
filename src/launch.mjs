@@ -1,10 +1,11 @@
 import { join, isAbsolute, basename } from 'node:path';
-import { statSync, accessSync, constants } from 'node:fs';
+import { statSync, accessSync, readFileSync, constants } from 'node:fs';
 import { savedProfileBinding, roleProvider, roles } from './profiles.mjs';
-import { verifyInstall, snapshot, readJson } from './package.mjs';
+import { verifyInstall, snapshot, readJson, files, hash } from './package.mjs';
 import { catalogBinding } from './routing.mjs';
 import { bindingCheck, dispositionPattern } from './binding.mjs';
 import { roleInstructions, orchestrates } from './role-bundle.mjs';
+import { spawnKit } from './spawn-kit.mjs';
 
 // Every Binding source normalises to { binding, routing? } right here, so nothing
 // downstream unwraps a source-specific shape. Order is precedence, highest first.
@@ -104,6 +105,48 @@ function assignmentFile(path) {
   return path;
 }
 
+// The orientation manifest carries mechanical locators only — installed root,
+// routing catalog hash, and the byte size + sha256 of each policy file the
+// role's bundle loads — so a new seat skips the filesystem hunt. It must never
+// pre-solve interpretation: entries sort by path so the list carries no
+// bundle/load-order hint, and there are no load-bearing markers or digested
+// content (note #33: seat-side re-derivation is the check that catches upstream
+// premise errors). A declared file absent from the installed package is still
+// listed, marked missing, so the seat learns it is not shipped.
+function orientation(root, role, routing) {
+  const declared = ['docs/contract.md', 'src/common.md', `src/roles/${role}.md`,
+    ...(orchestrates(role) ? ['src/delegation.md'] : []),
+    ...files(root, 'src/references')];
+  return {
+    installedRoot: root,
+    catalogSha256: routing?.catalogSha256 ?? null,
+    policyBytes: declared.map(path => {
+      const absolute = join(root, path);
+      let stat;
+      try { stat = statSync(absolute); }
+      catch (error) { if (error.code !== 'ENOENT') throw error; }
+      if (!stat?.isFile()) return { path: absolute, missing: true };
+      const bytes = readFileSync(absolute);
+      return { path: absolute, bytes: bytes.length, sha256: hash(bytes) };
+    }).sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
+  };
+}
+
+// The carrier is the self-contained block that actually reaches the spawned
+// seat: create_agent transmits only create.initialPrompt, so plan-level
+// spawnKit/orientation alone would never arrive. It repeats the same data in
+// compact text — absolute policy locators (missing markers included) and the
+// approximate kit signatures — with no file contents inlined.
+function carrierBlock(kit, manifest) {
+  const locators = manifest.policyBytes.map(entry => entry.missing
+    ? `- ${entry.path} — declared but not shipped in this install`
+    : `- ${entry.path} — ${entry.bytes} bytes, sha256 ${entry.sha256}`);
+  return `\nSpawn kit — role-scoped Paseo MCP signatures (${kit.note}):\n`
+    + kit.tools.map(tool => `- ${tool}`).join('\n')
+    + '\nPolicy locators — absolute paths; size/sha256 are plan-time values for verifying the file found is the one prepare checked:\n'
+    + locators.join('\n') + '\n';
+}
+
 function agentTitle(role, disposition, request, packet) {
   const label = request.taskLabel ?? (basename(request.repository) || 'Task');
   if (typeof label !== 'string' || !label.trim() || label.trim().length > 100 || /[\x00-\x1f\x7f]/.test(label)) {
@@ -131,9 +174,16 @@ function plan(root, request, packet) {
   roleProvider(role, binding?.provider);
   const assignment = `Repository: ${request.repository}\nWorkspace ID: ${request.workspaceId}\n${disposition ? `Disposition: ${disposition}\n` : ''}${request.assignment}`
     + (file ? `\nAssignment file: ${file} — read it first; it is authoritative for scope details.` : '');
+  // Surface the intended mode once, at plan level: a binding without modeId
+  // silently falls back to the caller's default mode at create_agent time.
+  const warnings = binding?.modeId == null ? ['no modeId in binding — spawn inherits caller default'] : [];
+  const kit = spawnKit(role);
+  const manifest = orientation(root, role, routing);
   return {
     transport: 'Paseo create_agent; settings.features must be preserved',
     role, instructionPath: join(root, `src/roles/${role}.md`),
+    modeId: binding?.modeId ?? null,
+    ...(warnings.length ? { warnings } : {}),
     ...(routing ? { routing } : {}),
     ...(binding?.profileId ? { profileId: binding.profileId } : {}),
     create: {
@@ -141,13 +191,15 @@ function plan(root, request, packet) {
       notifyOnFinish: true,
       provider: `${binding.provider}/${binding.model}`,
       workspaceId: request.workspaceId,
-      initialPrompt: prompt(root, role, assignment, binding) + (packet ? handoffNotice(role, packet) : ''),
+      initialPrompt: prompt(root, role, assignment, binding) + carrierBlock(kit, manifest) + (packet ? handoffNotice(role, packet) : ''),
       settings: {
         ...(binding.modeId ? { modeId: binding.modeId } : {}),
         ...(binding.thinkingOptionId ? { thinkingOptionId: binding.thinkingOptionId } : {}),
         features: binding.features ?? {},
       },
     },
+    spawnKit: kit,
+    orientation: manifest,
     ...(packet ? { handoff: packet, activation: 'Paseo create_agent after current settlement verification; no agent started by this command' } : {}),
   };
 }
