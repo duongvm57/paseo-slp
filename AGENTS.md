@@ -20,3 +20,12 @@ skills/paseo-slp-e2e/SKILL.md and execute the requested scenarios from this sess
 (the whole manifest for a full-suite request). Resume an existing run when requested;
 report every scenario, including blocked and unrun branches. Repository E2E tactics
 live in e2e/workspace-protocol.md.
+
+## Commits and releases
+
+Commit messages must be conventional (`feat:`, `fix:`, `docs:`, `chore:`,
+`refactor:`, `perf:`; optional scope; `!` suffix or `BREAKING CHANGE:` footer
+for breaking changes). release-please generates CHANGELOG.md and version bumps
+from these messages — never edit CHANGELOG.md release sections or the
+package.json version field by hand, and never create git tags or GitHub
+releases. Tags and releases are Human authority.
