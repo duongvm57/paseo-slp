@@ -6,7 +6,7 @@ canonical procedure — this file is the same workflow in standalone form.
 
 ## What you are setting up
 
-- `.paseo-slp/WORKSPACE_PROTOCOL.md` — operating tactics for this repo's
+- `.paseo-slp/workspace-protocol.md` — operating tactics for this repo's
   agent teams. Human-readable: risk levels, proof gates, budget, fallback
   authority, communication language, notebook location.
 - `.paseo-slp/slp-routing.json` — the Peer runtime pool. Machine-readable
@@ -22,7 +22,7 @@ require a `slp-peer` profile.
 1. The package is installed: locate `bin/slp.mjs` (default
    `~/.local/share/paseo-slp/bin/slp.mjs`). If it is missing, tell the Human
    to run the installer — installation is not part of onboarding.
-2. Read `src/templates/WORKSPACE_PROTOCOL.md` and
+2. Read `src/templates/workspace-protocol.md` and
    `src/references/provider-routing.md` from that install.
 3. Read the repo's `AGENTS.md` and any existing `.paseo-slp/` files. Preserve
    existing Human choices and unrelated work.

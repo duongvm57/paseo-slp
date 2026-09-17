@@ -6,7 +6,7 @@ Peer runtime changes remain inside the project pool; quota fallback follows its 
 1. Resolve project/task identity, repository root, authority and existing ownership.
    Inspect Paseo reachability, list_workspaces and relevant list_agents, plus Git
    changes in the target checkout. Establish baseline resources to preserve. Read
-   the repository's .paseo-slp/WORKSPACE_PROTOCOL.md for tactics and budget.
+   the repository's .paseo-slp/workspace-protocol.md for tactics and budget.
    A worktree target missing .paseo-slp/ — gitignored local state holding absolute
    paths — needs catalog and protocol materialized before route resolution:
    `slp.mjs materialize <target> --from <source>` when the installed copy supports

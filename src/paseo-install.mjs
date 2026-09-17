@@ -203,9 +203,9 @@ export function initWorkspace(source, repository, apply = false, routingFrom) {
     ? validateCatalog(readJson(join(source, 'src/templates/slp-routing.json')))
     : validateCatalog(readJson(routingFrom));
   const entries = [
-    { path: join(repository, '.paseo-slp/WORKSPACE_PROTOCOL.md'), bytes: readFileSync(join(source, 'src/templates/WORKSPACE_PROTOCOL.md')) },
+    { path: join(repository, '.paseo-slp/workspace-protocol.md'), bytes: readFileSync(join(source, 'src/templates/workspace-protocol.md')) },
     { path: catalogPath, bytes: json(catalog) },
-    { path: join(repository, '.paseo-slp/notebook.md'), bytes: '# Supervisor notebook\n\nPurpose and owner are recorded in .paseo-slp/WORKSPACE_PROTOCOL.md.\n' },
+    { path: join(repository, '.paseo-slp/notebook.md'), bytes: '# Supervisor notebook\n\nPurpose and owner are recorded in .paseo-slp/workspace-protocol.md.\n' },
   ];
   const result = stageEntries(entries, repository, apply);
   return { repository, files: result, applied: result.some(file => file.applied), preserved: result.every(file => file.preserved) };
@@ -240,13 +240,13 @@ export function materializeWorkspace(from, repository, apply = false) {
     return path;
   };
   const catalog = validateCatalog(readJson(sourceFile('slp-routing.json')));
-  const protocol = rebaseFrontmatter(readFileSync(sourceFile('WORKSPACE_PROTOCOL.md'), 'utf8'), source, repository);
+  const protocol = rebaseFrontmatter(readFileSync(sourceFile('workspace-protocol.md'), 'utf8'), source, repository);
   const entries = [
-    { path: join(repository, '.paseo-slp/WORKSPACE_PROTOCOL.md'), bytes: protocol.text },
+    { path: join(repository, '.paseo-slp/workspace-protocol.md'), bytes: protocol.text },
     { path: join(repository, '.paseo-slp/slp-routing.json'), bytes: json(catalog) },
   ];
   const result = stageEntries(entries, repository, apply);
-  const protocolFile = result.find(file => file.path.endsWith('WORKSPACE_PROTOCOL.md'));
+  const protocolFile = result.find(file => file.path.endsWith('workspace-protocol.md'));
   protocolFile.rebased = protocol.rebased;
   // A protocol may legitimately carry no absolute path, so silence is a
   // warning on the file entry, not an error — but an applied file that kept

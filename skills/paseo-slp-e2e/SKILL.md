@@ -21,7 +21,7 @@ exchanges inside the tree are unaffected.
 
 Locate the paseo-slp source checkout from the assignment/current workspace. Read
 its AGENTS.md, docs/contract.md, docs/review-checklist.md and
-e2e/WORKSPACE_PROTOCOL.md. The source checkout is required because the suite tests
+e2e/workspace-protocol.md. The source checkout is required because the suite tests
 the package and includes development fixtures; an installed runtime alone is not
 the suite. Read e2e/scenarios.mjs for the authoritative scenario inventory and
 e2e/README.md for collector commands and evidence formats.
@@ -35,7 +35,7 @@ basic flow does not require running the separate onboarding acceptance scenarios
 ## Basic flows
 
 For `basic-*` scenarios, follow **Basic flow launch** in
-`e2e/WORKSPACE_PROTOCOL.md` instead of the prelaunch confirmer procedure below.
+`e2e/workspace-protocol.md` instead of the prelaunch confirmer procedure below.
 Use the current authorized host and a separate fixture; no isolated daemon or
 paid prelaunch confirmer is required. The coordinator completes the config and
 uses the checked-in public contract/outcome check. After candidate/profile checks,
@@ -61,7 +61,7 @@ window on an explicit new run request, preserving previous elapsed history.
 2. Initialize a run, or inspect its summary to resume. Initialization freezes the
    package identity, scenario manifest, checklist and harness identity. Complete
    the concrete prelaunch config before requesting independent confirmation;
-   follow **Prelaunch confirmation** in e2e/WORKSPACE_PROTOCOL.md. Record the
+   follow **Prelaunch confirmation** in e2e/workspace-protocol.md. Record the
    run deadline, resource baseline, permission policy and retention choice; pass
    `scope`/`budget`/`deadline` to `init` through run-config.json so `begin`
    enforces the bound on new launches.
@@ -80,7 +80,7 @@ window on an explicit new run request, preserving previous elapsed history.
    candidate and settle task activity. Re-read actor lifecycle state after finish;
    resolve an active/finished mismatch before writing the version 1 resource
    settlement. Apply **Before sealing** in
-   e2e/WORKSPACE_PROTOCOL.md: collect final transcript copies through handback and
+   e2e/workspace-protocol.md: collect final transcript copies through handback and
    settlement, collect the coordinator's native session with `collect-coordinator`,
    freeze the settlement with `collect-resources`, reconcile interventions, and
    verify receipts before sealing. `status <attempt>` previews which collected
@@ -110,7 +110,7 @@ the coordinating agent must then carry out this workflow.
 
 The source checkout hosts the coordinator; the fixture hosts the SLP task.
 Missing .paseo-slp files in the package checkout are normal. Use the fixture's
-absolute root. e2e/WORKSPACE_PROTOCOL.md governs testing, not the fixture's role tactics.
+absolute root. e2e/workspace-protocol.md governs testing, not the fixture's role tactics.
 
 For ordinary tasks, Supervisor/Lead use saved profiles and Peer uses the project pool:
 

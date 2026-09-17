@@ -38,7 +38,7 @@ provider `slp-codex-{supervisor,lead,peer}`, `slp-pi-{supervisor,lead,peer}`,
 - Không tạo agent trong lúc cài. Ba role vẫn giữ nguyên.
 - **Peer không cần saved profile** — Lead chọn runtime Peer từ pool theo
   project trong `.paseo-slp/slp-routing.json`.
-- Repo giữ tactics trong `.paseo-slp/WORKSPACE_PROTOCOL.md`; onboarding
+- Repo giữ tactics trong `.paseo-slp/workspace-protocol.md`; onboarding
   hướng dẫn cấu hình cả hai file.
 - Đổi nơi cài bằng `SLP_HOME=/absolute/path`; đổi host config bằng
   `PASEO_HOME=/absolute/home`. Chạy installer trên máy của daemon.
@@ -148,7 +148,7 @@ node "$HOME/.local/share/paseo-slp/bin/slp.mjs" init /absolute/job-repo --apply
 
 Lệnh chỉ tạo các file còn thiếu và giữ nguyên từng file đã có:
 
-- `.paseo-slp/WORKSPACE_PROTOCOL.md`: quy trình, mức rủi ro, proof gate,
+- `.paseo-slp/workspace-protocol.md`: quy trình, mức rủi ro, proof gate,
   budget và quyền fallback.
 - `.paseo-slp/slp-routing.json`: pool runtime của Peer. Init seed sẵn
   [skeleton theo loại việc](src/templates/slp-routing.json) — các ghế đều
@@ -385,7 +385,7 @@ node bin/slp.mjs materialize /absolute/target-repo --from /absolute/source-repo
 # mặc định dry-run; thêm --apply để ghi
 ```
 
-Lệnh chỉ copy `.paseo-slp/WORKSPACE_PROTOCOL.md` và
+Lệnh chỉ copy `.paseo-slp/workspace-protocol.md` và
 `.paseo-slp/slp-routing.json` (đã validate) — `notebook.md` là state do
 Supervisor sở hữu và không bao giờ được copy. Absolute path nằm dưới source
 root trong YAML frontmatter của protocol được rebase sang target root (path
