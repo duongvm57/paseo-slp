@@ -55,7 +55,7 @@ does; the Human decides, you supply discovered facts:
    discovered `slp-*-peer` provider/model/settings fill each seat, which
    seats to drop or add, their `priority`, and the `quotaFallback` policy.
 3. Communication language — used for reports, assignments, handbacks between
-   agents and replies to the Human.
+   agents, replies to the Human, and the causal notebook.
 4. Where the Supervisor notebook lives and how to retrieve it.
 
 Present the options you actually discovered. Never invent model IDs,

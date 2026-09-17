@@ -52,6 +52,13 @@ After interruption, read the ledger and inspect the recorded resources before
 resuming; an unfinished attempt is resumed, not launched again. Do not infer
 parentage from labels or relocate existing user agents into the suite.
 
+Every prompt entering the SLP tree from outside reads as a direct Human
+instruction. A driving session never reveals an intermediate layer: no
+"via coordinator", "on behalf of Human", or "Human says resume". Exposing an
+intermediate agent layer adds an authority gradient and distorts what the run
+measures. This conductor rule binds the coordinator and any external driving
+session; it does not govern Supervisor/Lead/Peer exchanges inside the tree.
+
 ## Preflight and authority
 
 Resolve the Human's existing mandate once for the whole run: fixture locations,
@@ -255,12 +262,47 @@ recovery. Killing an individual wrapper process is not a valid boundary: the
 daemon does not respawn dead children and the next prompt stalls — record that
 host gap rather than working around it.
 
+Use the same boundary for recovery when an actor's transport dies mid-run but
+its native persistence survives (observed: an ACP transport error failing even
+a retried prompt). The ordering is reload > respawn > reassign: `paseo agent
+reload` first, preserving parentage and context; respawn a fresh actor only
+when reload cannot recover it; reassign the assignment to a new owner only
+after the old owner's settlement is verified. Retrying a prompt on the dead
+transport is not a recovery move. Record whether each reload was stimulus (a
+declared role-transport intervention) or recovery (a repair on the attempt
+timeline); only the former satisfies a resume-* assertion.
+
 Use Paseo's finish/error/permission notifications; collect evidence when signalled.
 Heartbeat trials use actual timed delivery to the caller/owner with maxRuns or
 expiry and owner-scoped deletion receipts. Discover the host's actual semantics.
 Neither a manual prompt nor a new-agent schedule substitutes for a heartbeat.
 Record gaps in list/delete/access capabilities instead of assuming a schedule
 inventory lists heartbeats.
+
+Polling/loop debt (§9.10) binds in-tree agents holding a live turn with
+sleep/status loops. It does not bind sessions outside the tree — a
+coordinator or observer between turns — whose periodic external inspection
+is bounded by its declared cadence, logging and settlement instead. Keep one
+fixed file-backed poller running for the whole run: it accumulates
+observations while the coordinator is asleep, and on each wake the
+coordinator diffs its log against the Supervisor notebook. Removing the
+poller "because §9.10" is a misapplication; fix its defects in place.
+
+An observer outside the tree may poll friction and evidence at its declared
+cadence and feed the Supervisor open questions — never verdicts, and never
+direct prompts to Peers (§9.17 supervisor overreach). It is a supplementary
+observation channel beside event-driven waits, not an actor with authority
+in the tree.
+
+A non-agent coordinating session has no agent-scoped wake source: it cannot
+arm a heartbeat, and notifyOnFinish covers only the prompted turn. The
+default coordinator-wake design is a cheap watcher agent that runs
+`paseo agent wait` on the tree (or its root actor) and finishes; the
+watcher's own finish notification wakes the coordinator. An accepted
+alternative is the Supervisor pinging a coordinator-visible channel at
+declared milestones. The watcher is a coordinator-owned resource: record its
+ID and spawn receipt, and cancel it during settlement once the awaited actors
+reach terminal state or observation closes.
 
 A time budget ending closes observation, not lifecycle. Execute only authorized
 stop/cleanup. Settle descendants, pending permissions, scripts, terminals,
