@@ -2,7 +2,7 @@
 
 Lead reads this procedure for project framing, session continuity, topology,
 independent review, design reconciliation or dependency splitting. Repository thresholds and routing belong
-to .paseo-slp/WORKSPACE_PROTOCOL.md; these branches describe how to execute a selected method.
+to .paseo-slp/workspace-protocol.md; these branches describe how to execute a selected method.
 All creation uses the installed delegation procedure and current task authority.
 
 ## Frame and select

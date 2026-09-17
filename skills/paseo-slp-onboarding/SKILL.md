@@ -5,7 +5,7 @@ description: Set up or revise a repository's Paseo SLP protocol and Peer runtime
 
 # Paseo SLP repo onboarding
 
-Configure tactics in .paseo-slp/WORKSPACE_PROTOCOL.md and Peer runtime options in
+Configure tactics in .paseo-slp/workspace-protocol.md and Peer runtime options in
 .paseo-slp/slp-routing.json. Supervisor/Lead use saved slp-supervisor/slp-lead
 profiles. Peer uses the project pool, falling back to the user-scope catalog
 ($PASEO_HOME/slp-routing.json, default ~/.paseo) when the repository has none;
@@ -16,7 +16,7 @@ needed. Engineer, Architect and Reviewer are dispositions of the same Peer role.
 
 Resolve the assigned repository and host. Read AGENTS.md, existing protocol/pool
 and relevant project scripts/docs. Locate installed bin/slp.mjs and read its
-src/templates/WORKSPACE_PROTOCOL.md and src/references/provider-routing.md.
+src/templates/workspace-protocol.md and src/references/provider-routing.md.
 Missing installation is a prerequisite; onboarding does not grant host installation
 or saved-profile edits. Preserve existing Human choices and unrelated work.
 

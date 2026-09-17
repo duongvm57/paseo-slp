@@ -41,7 +41,7 @@ reloads.
 - No agent is created during install. The three roles stay intact.
 - **Peers need no saved profile** — the Lead picks each Peer's runtime from
   the project pool in `.paseo-slp/slp-routing.json`.
-- Repos keep their tactics in `.paseo-slp/WORKSPACE_PROTOCOL.md`; onboarding
+- Repos keep their tactics in `.paseo-slp/workspace-protocol.md`; onboarding
   guides you through both files.
 - Override the install location with `SLP_HOME=/absolute/path` and the host
   config with `PASEO_HOME=/absolute/home`. Run the installer on the daemon's
@@ -155,7 +155,7 @@ node "$HOME/.local/share/paseo-slp/bin/slp.mjs" init /absolute/job-repo --apply
 
 Init only creates missing files and never overwrites existing ones:
 
-- `.paseo-slp/WORKSPACE_PROTOCOL.md`: operating procedure, risk levels,
+- `.paseo-slp/workspace-protocol.md`: operating procedure, risk levels,
   proof gates, budget and fallback authority.
 - `.paseo-slp/slp-routing.json`: the Peer runtime pool. Init seeds the
   [task-type skeleton](src/templates/slp-routing.json) — disabled seats
@@ -405,7 +405,7 @@ node bin/slp.mjs materialize /absolute/target-repo --from /absolute/source-repo
 # dry-run by default; add --apply to write
 ```
 
-It copies only `.paseo-slp/WORKSPACE_PROTOCOL.md` and
+It copies only `.paseo-slp/workspace-protocol.md` and
 `.paseo-slp/slp-routing.json` (validated) — `notebook.md` is Supervisor-owned
 state and is never copied. Absolute source-root paths inside the protocol's
 YAML frontmatter are rebased to the target root (a longer sibling path like

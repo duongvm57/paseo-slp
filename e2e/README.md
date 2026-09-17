@@ -21,7 +21,7 @@ The coordinator validates candidate/profiles, prepares the fixture and failing
 baseline, then launches Supervisor → Lead → Peer. Final outcome checks,
 independent review and settlement remain required. Missing observability is
 reported in the final verdict rather than blocking task creation. See
-[Basic flow launch](WORKSPACE_PROTOCOL.md#basic-flow-launch) for budget and scope.
+[Basic flow launch](workspace-protocol.md#basic-flow-launch) for budget and scope.
 
 ## Commands
 
@@ -40,7 +40,7 @@ npm run e2e -- collect .e2e-runs/run-001/basic-codex/attempt-001 launch /absolut
 # the frozen report hash, declared gaps, source drift and recorded review.
 npm run e2e -- status .e2e-runs/run-001/basic-codex/attempt-001
 # After handback: settle activity, collect final transcripts and actual receipts,
-# then complete WORKSPACE_PROTOCOL.md's Before sealing audit.
+# then complete workspace-protocol.md's Before sealing audit.
 npm run e2e -- seal .e2e-runs/run-001/basic-codex/attempt-001
 npm run e2e -- review .e2e-runs/run-001/basic-codex/attempt-001 /absolute/independent-review.json
 # If the same reviewer corrects its assessment against the frozen report,
@@ -74,7 +74,7 @@ enforces these operational requirements; JSON shape validation alone does not
 confirm that authorization, discovery or independent review occurred.
 
 Complete the draft before independent confirmation; see
-[Prelaunch confirmation](WORKSPACE_PROTOCOL.md#prelaunch-confirmation) for its scope.
+[Prelaunch confirmation](workspace-protocol.md#prelaunch-confirmation) for its scope.
 For basic-* scenarios, Human configures slp-supervisor/slp-lead with the
 matching family and chosen models/settings. Coordinator prepares a fixture Peer
 pool within project setup authority. No saved Peer profile is required.
@@ -103,7 +103,7 @@ need an authorized fixture base commit and actual Paseo worktree receipts.
 
 ## Fixture setup
 
-The task uses `<attempt>/workspace/.paseo-slp/WORKSPACE_PROTOCOL.md` and
+The task uses `<attempt>/workspace/.paseo-slp/workspace-protocol.md` and
 `<attempt>/workspace/.paseo-slp/slp-routing.json`. The coordinating session's package
 repo needs neither file. With `fixtureRoot` resolved to that absolute workspace
 path and `<installed>` verified against the pinned host candidate:
@@ -119,7 +119,7 @@ Read and apply <installed>/skills/paseo-slp-onboarding/SKILL.md:
 These are ordered setup steps, not a shell script: init leaves a template and an
 empty catalog. Complete the protocol and Peer pool before delegation. Saved profiles
 supply Supervisor/Lead settings; the selected pool option supplies Peer settings. The exact completion gate and
-root launch binding are in [WORKSPACE_PROTOCOL.md](WORKSPACE_PROTOCOL.md#fixture-setup-and-launch-gate).
+root launch binding are in [workspace-protocol.md](workspace-protocol.md#fixture-setup-and-launch-gate).
 Record fixture files, exact saved profiles, discovery receipts and validation output with
 `collect ... preflight <source-file>` before creating the task's Supervisor.
 For `onboarding-*` rows, let the fresh setup actor create/update the files instead.
@@ -282,9 +282,9 @@ Use `gateReady`, not historical `status` alone, for a new acceptance gate; for a
 run initialized with a declared `scope`, `scopeReady` reports only the in-scope
 rows while `gateReady` still covers the whole manifest. The JSON
 is an evidence index and status matrix, not a substitute for the Human handback
-required in WORKSPACE_PROTOCOL.md. Preserve its output as the run's final report.
+required in workspace-protocol.md. Preserve its output as the run's final report.
 
-Before `seal`, use [Before sealing](WORKSPACE_PROTOCOL.md#before-sealing) to check
+Before `seal`, use [Before sealing](workspace-protocol.md#before-sealing) to check
 the decoded evidence for the completed chain, real check outputs, all operator
 interventions and actual settlement receipts. Evidence kind presence alone does not
 prove completeness. Keep task outcome and the independent E2E verdict separate;
