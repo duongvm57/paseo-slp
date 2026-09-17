@@ -30,8 +30,8 @@ decisions change; the frontmatter is the single source for those fields.
 - Criticality, dominant risks and expensive-to-reverse decisions: establish per repo.
 - External effects and cost/model budget: use explicit assignment boundaries.
 - `communication_language` applies to reports, assignments and handbacks between
-  agents and to agent replies to the Human. Keep technical identifiers, file
-  paths, commands and proper nouns verbatim.
+  agents, to agent replies to the Human, and to the causal notebook. Keep
+  technical identifiers, file paths, commands and proper nouns verbatim.
 - `agent_mode` records the intended Paseo modeId for agents spawned in this
   repository (for example `bypass`); empty means undecided — the spawner must
   ask rather than let agents fall back to the host default.
