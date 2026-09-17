@@ -8,7 +8,7 @@ Local installation/transport checks do not constitute workflow acceptance.
 | Files | Responsibility |
 |---|---|
 | install.sh | One-command local install into the selected destination and Paseo home; reload configuration. |
-| src/paseo-install.mjs | Merge owned provider/profile entries, preserve existing preferences, record rollback binding, initialize repository protocol and Supervisor notebook scaffold. |
+| src/paseo-install.mjs | Merge owned provider/profile entries, preserve existing preferences, record rollback binding, initialize repository protocol and Supervisor notebook scaffold; materialize clones a source checkout's protocol and catalog into a target checkout with frontmatter paths rebased (Supervisor notebook excluded). |
 | src/host-config.mjs | Sole reader/writer of the Paseo host configuration; one rule each for owned provider and owned profile verification and the two MCP flags. |
 | bin/codex-role.mjs, src/role-transport.mjs | Transparent Codex stdio adapter; append installed role instructions at start/resume and existing turn overrides. |
 | bin/pi-role.mjs, src/role-transport.mjs | Pi native append-system-prompt adapter; preserve RPC bytes, host extensions and session/model/thinking arguments. |
@@ -28,8 +28,9 @@ Local installation/transport checks do not constitute workflow acceptance.
 | src/launch.mjs, src/profiles.mjs | Select one Binding source (saved profiles, catalog routing or an explicit binding), then compose the create_agent argument record. launchPlan and handoffPlan share one builder; nothing edits that record afterwards. Handoff adds explicit authority, old-owner evidence, resources and current work snapshot; no lifecycle mutations. request.inventoryFile fills providers/profiles the request did not inline; request.assignmentFile appends a read-first pointer to the emitted prompt without inlining file bytes. |
 | src/inventory.mjs | Provider/profile inventory in the exact shapes prepare consumes: `paseo provider ls --json` only when the requested home's paseo.pid names a live process, else that home's own config.json `agents.providers` — never another daemon's providers, no directory materialization; provider `enabled` may be null for unrecognized states; profiles always from `daemon.agentProfiles`. Read-only; on multi-daemon hosts the live listing reflects whichever daemon the paseo CLI reaches. |
 | src/agents.mjs | Agent listing from daemon persistence (`<paseoHome>/agents/*/<id>.json`) with shell-quoted devin-family `devin -r` attach hints; works around `paseo inspect`/`ls` not surfacing `persistence.nativeHandle`. Read-only, best-effort host detail. |
+| src/monitor.mjs | On-demand signal scan over daemon-owned agent state plus each declared worktree's git status; emits `{agentId, kind, evidence, observedAt}` candidates (attention, follow-up-round, idle-dirty, scope-drift, test-mirror, file-churn) only for new fingerprints when a stateFile checkpoint is supplied — that checkpoint is the only write. Never a verdict, daemon or rendered-log parse; broken cwd becomes an evidence gap. |
 | src/package.mjs | Package identity, exclusive staging, integrity checks and stable Git work snapshot; untracked nested Git work-tree roots are snapshotted recursively under `nested`, and sub-repos can carry their own `nested`. |
-| bin/slp.mjs | Install/upgrade/preview, verify/uninstall, init, routes, prepare/handoff, inventory, agents, identity and snapshot entrypoints. |
+| bin/slp.mjs | Install/upgrade/preview, verify/uninstall, init, materialize, routes, prepare/handoff, inventory, agents, monitor, identity and snapshot entrypoints. |
 | skills/paseo-slp-e2e/SKILL.md | Single-session full-suite execution procedure; requires the source checkout and authorized Paseo actors. |
 | e2e/evidence.mjs | One contract per evidence kind: what may enter the ledger and what discharges the kind's requirement at seal. |
 | e2e/criteria.mjs | U1–U7 as code, each naming the evidence kinds that can support it; the mapping a reviewer previously held in their head. |
@@ -91,8 +92,9 @@ the context needed for their bounded assignments.
 
 The policy describes monitoring, council, recovery and parallel ownership, but these
 paths are not E2E-qualified by this revision. Heartbeat uses discovered host wake
-primitives; no semantic detector, lifecycle runner, tool filter or schedule adapter
-is added. Missing capabilities remain explicit before any fallback. See
+primitives; `slp.mjs monitor` adds a caller-invoked, delta-only signal scan that
+emits candidates without verdicts — it is not a semantic detector, and no
+lifecycle runner, tool filter or schedule adapter is added. Missing capabilities remain explicit before any fallback. See
 [guide coverage](guide-coverage.md) for requirement mapping, load paths and host gaps.
 
 Codex and Pi share role bytes through their respective adapters. Human configures

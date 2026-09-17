@@ -13,6 +13,12 @@ correction and re-review do not require new actors merely because the candidate
 changed. Explicit scenario requirements for independent seats, replacement or
 transport resume still apply. One user-facing session does not mean one actor.
 
+Every prompt entering the SLP tree from outside reads as a direct Human
+instruction. A driving session never reveals an intermediate layer: no
+"via coordinator", "on behalf of Human", or "Human says resume". This
+conductor rule binds this coordinating session; Supervisor/Lead/Peer
+exchanges inside the tree are unaffected.
+
 Locate the paseo-slp source checkout from the assignment/current workspace. Read
 its AGENTS.md, docs/contract.md, docs/review-checklist.md and
 e2e/WORKSPACE_PROTOCOL.md. The source checkout is required because the suite tests

@@ -229,8 +229,9 @@ authority; cadence và điều kiện dừng thuộc protocol/assignment. Refere
 được cài kèm hướng dẫn tạo/xóa heartbeat của đúng session, ghi causal
 notebook, recovery và 20 anti-pattern từ guide. Role chỉ dẫn đọc reference
 theo tình huống; Peer nhận các constraint liên quan qua assignment. Đây là
-policy cho agent sử dụng primitive Paseo, không có detector hay monitoring
-daemon riêng trong package.
+policy cho agent sử dụng primitive Paseo — package không có monitoring
+daemon hay semantic detector; `monitor` (bên dưới) là scan tín hiệu
+delta-only do caller chủ động gọi.
 
 ## Peer runtime pool
 
@@ -359,6 +360,55 @@ snapshot đệ quy và ghi dưới `nested` (mỗi sub-repo có `{path, head, sh
 files}` riêng và có thể mang `nested` của chính nó, tính vào sha256 tổng).
 Gitlink submodule đã stage (mode 160000) và thư mục được liệt kê mà không
 phải repo vẫn không được hỗ trợ.
+
+### `materialize`
+
+`.paseo-slp/` là local state bị gitignore chứa absolute path, nên worktree
+mới thiếu hẳn protocol và catalog. `materialize` clone chúng từ một checkout
+có sẵn:
+
+```bash
+node bin/slp.mjs materialize /absolute/target-repo --from /absolute/source-repo
+# mặc định dry-run; thêm --apply để ghi
+```
+
+Lệnh chỉ copy `.paseo-slp/WORKSPACE_PROTOCOL.md` và
+`.paseo-slp/slp-routing.json` (đã validate) — `notebook.md` là state do
+Supervisor sở hữu và không bao giờ được copy. Absolute path nằm dưới source
+root trong YAML frontmatter của protocol được rebase sang target root (path
+anh em dài hơn kiểu `<source>-old` không khớp boundary nên giữ nguyên). Như
+`init`, file đã tồn tại ở target được preserve chứ không ghi đè; mỗi file
+báo `preserved`/`applied`, kèm `sha256` cho file sẽ ghi. Entry protocol còn
+báo `rebased`, và bản copy ghi ra mà không tìm thấy source-root path nào sẽ
+mang field `warning` thay vì lặng lẽ giữ path cũ. Không có fallback về
+catalog user-scope hay template — source checkout là tường minh.
+
+### `monitor`
+
+`monitor` là scan tín hiệu on-demand cho Supervisor/Lead quan sát — một lần
+gọi là một lần scan, không phải daemon, và chỉ emit candidate chứ không ra
+verdict:
+
+```bash
+node bin/slp.mjs monitor /absolute/request.json
+```
+
+Request khai `agents` (`id`, `cwd` tùy chọn — fallback về `cwd` trong state
+file — và `scope` tùy chọn là danh sách prefix/glob), cùng các trường tùy
+chọn `paseoHome` (mặc định `$PASEO_HOME`/`~/.paseo`), `thresholds`
+(`idleMinutes`, `churnScans`), subset `signals` và đường dẫn checkpoint
+`stateFile`. Evidence chỉ đến từ `<paseoHome>/agents/*/<id>.json` và `git
+status`/`git log` trong từng `cwd`; `cwd` thiếu hoặc không phải repo được
+ghi thành evidence gap thay vì crash. Các loại signal: `attention` (chỉ khi
+`requiresAttention` là true — `attentionReason` cũ chỉ là evidence),
+`follow-up-round` (user bump mà không có commit xen giữa), `idle-dirty`,
+`scope-drift`, `test-mirror` và `file-churn` (cùng một path dirty bị sửa
+lại qua các scan, theo dõi bằng mtime). Có `stateFile` thì chỉ fingerprint
+mới được emit và checkpoint — write duy nhất của lệnh — được ghi lại atomic
+mỗi run; không có thì scan gắn cờ `stateless` và emit mọi thứ phát hiện
+được. Output rendered của `paseo logs` không bao giờ được parse: host không
+có đường đọc structured timeline rẻ (`get_agent_activity` thiếu
+tail/limit) — đây vẫn là host gap đã ghi nhận.
 
 ## Gỡ cài đặt
 

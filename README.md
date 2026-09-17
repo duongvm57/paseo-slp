@@ -240,8 +240,9 @@ the protocol/assignment. The installed references cover creating/removing
 heartbeats on the right session, keeping a causal notebook, recovery and the
 20 anti-patterns from the guide. Roles read references per situation; Peers
 receive the relevant constraints through assignments. This is a policy pack
-for agents using Paseo primitives — there is no detector or monitoring daemon
-in the package.
+for agents using Paseo primitives — there is no monitoring daemon or semantic
+detector in the package; `monitor` (below) is a caller-invoked, delta-only
+signal scan.
 
 ## Peer runtime pool
 
@@ -379,6 +380,56 @@ recursively and recorded under `nested` (each sub-repo gets its own `{path,
 head, sha256, files}` and may carry its own `nested`, all counted in the
 overall sha256). Staged submodule gitlinks (mode 160000) and listed
 directories that are not repos remain unsupported.
+
+### `materialize`
+
+`.paseo-slp/` is gitignored local state with absolute paths, so a fresh
+worktree lacks the protocol and catalog entirely. `materialize` clones them
+from an existing checkout:
+
+```bash
+node bin/slp.mjs materialize /absolute/target-repo --from /absolute/source-repo
+# dry-run by default; add --apply to write
+```
+
+It copies only `.paseo-slp/WORKSPACE_PROTOCOL.md` and
+`.paseo-slp/slp-routing.json` (validated) — `notebook.md` is Supervisor-owned
+state and is never copied. Absolute source-root paths inside the protocol's
+YAML frontmatter are rebased to the target root (a longer sibling path like
+`<source>-old` is not a boundary match and stays put). Like `init`, existing
+target files are preserved rather than overwritten; each file reports
+`preserved`/`applied`, plus `sha256` for files it would write. The protocol
+entry also reports `rebased`, and a written copy that found no source-root
+path carries a `warning` instead of silently keeping stale paths. There is
+no fallback to the user-scope catalog or the package template — the source
+checkout is explicit.
+
+### `monitor`
+
+`monitor` is an on-demand signal scan for an observing Supervisor/Lead —
+one invocation is one scan, not a daemon, and it emits candidates, never
+verdicts:
+
+```bash
+node bin/slp.mjs monitor /absolute/request.json
+```
+
+The request names `agents` (`id`, optional `cwd` — falls back to the state
+file's `cwd` — and optional `scope` prefix/glob list), plus optional
+`paseoHome` (default `$PASEO_HOME`/`~/.paseo`), `thresholds` (`idleMinutes`,
+`churnScans`), a `signals` subset and a `stateFile` checkpoint path.
+Evidence comes only from `<paseoHome>/agents/*/<id>.json` and `git
+status`/`git log` in each `cwd`; a missing or non-repo `cwd` is recorded as
+an evidence gap instead of crashing. Signal kinds: `attention` (only when
+`requiresAttention` is true — a stale `attentionReason` is just evidence),
+`follow-up-round` (user bumps without an intervening commit), `idle-dirty`,
+`scope-drift`, `test-mirror` and `file-churn` (the same dirty path edited
+again across scans, tracked by mtime). With `stateFile`, only new
+fingerprints are emitted and the checkpoint — the command's only write — is
+rewritten atomically every run; without it the scan is flagged `stateless`
+and emits everything detectable. Rendered `paseo logs` output is never
+parsed: the host has no cheap structured timeline read (`get_agent_activity`
+lacks tail/limit), which stays a recorded host gap.
 
 ## Uninstall
 
