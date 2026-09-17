@@ -29,7 +29,7 @@ running the work → Agents → Agent profiles → edit the profile → pick the
 MCP write path for profiles — do not hand-edit the daemon config. Do not create or
 require slp-peer.
 
-For the Peer pool, discover slp-pi-peer/slp-codex-peer/slp-devin-peer and their exact models,
+For the Peer pool, discover slp-pi-peer/slp-codex-peer/slp-devin-peer/slp-claude-peer and their exact models,
 thinking/mode/features. Then interview the Human: they decide; you supply
 discovered facts and write what they pick. Ask in plain terms — name the files
 and what each choice does. For example:
@@ -90,8 +90,8 @@ fallback rather than copying a catalog verbatim; --routing-from imports an
 explicitly selected source as a starting point for that decision, not as the
 decision itself. Every option has:
 
-- id: unique lowercase identifier; provider: pi, codex or devin; exact discovered
-  model. Devin options accept swe-2 models only.
+- id: unique lowercase identifier; provider: pi, codex, devin or claude; exact
+  discovered model. Devin options accept swe-2 models only.
 - roles: ["peer"]; enabled: boolean; availability: ready, paused, quota-exhausted
   or unknown. Only enabled/ready options may launch.
 - Optional thinkingOptionId, modeId and features, verified for that runtime.
@@ -107,7 +107,7 @@ The catalog envelope is version: 1, a nonempty policy describing selection/budge
 boundaries, and options: an array of these bundles. Lead chooses an option per
 assignment; do not hard-code Engineer/Architect/Reviewer to one model. Multiple
 options may use the same provider with different model/settings, or different
-providers. Both Peer wrappers load the same policy.
+providers. Every Peer wrapper loads the same policy.
 
 Validate with `node <slp-cli> routes <absolute-repo>`. It returns the catalog hash
 and complete options. For each intended eligible option, use prepare with

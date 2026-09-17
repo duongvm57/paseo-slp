@@ -29,9 +29,9 @@ Supervisor đã có, không cần nhập lại prompt role.
 # hoặc: npm run install:slp
 ```
 
-Lệnh này cài Markdown và CLI vào `~/.local/share/paseo-slp`, bổ sung chín
-provider `slp-codex-{supervisor,lead,peer}`, `slp-pi-{supervisor,lead,peer}`
-và `slp-devin-{supervisor,lead,peer}`, cùng hai saved profile
+Lệnh này cài Markdown và CLI vào `~/.local/share/paseo-slp`, bổ sung mười hai
+provider `slp-codex-{supervisor,lead,peer}`, `slp-pi-{supervisor,lead,peer}`,
+`slp-devin-{supervisor,lead,peer}` và `slp-claude-{supervisor,lead,peer}`, cùng hai saved profile
 **SLP Supervisor** và **SLP Lead** vào `$PASEO_HOME/config.json` (mặc định
 `~/.paseo`), bật MCP injection rồi reload.
 
@@ -118,8 +118,8 @@ first, then walk me through it step by step.
 
 1. Mở **Settings → host chạy công việc → Agents → Agent profiles**.
 2. Sửa **SLP Supervisor** hoặc **SLP Lead**.
-3. Chọn provider `slp-codex-{role}`, `slp-pi-{role}` hoặc
-   `slp-devin-{role}` tương ứng, rồi chọn **Model**, **Thinking**, **Mode**
+3. Chọn provider `slp-codex-{role}`, `slp-pi-{role}`, `slp-devin-{role}` hoặc
+   `slp-claude-{role}` tương ứng, rồi chọn **Model**, **Thinking**, **Mode**
    nếu provider có và features rồi **Save**.
 4. Khi tạo session trực tiếp, chọn profile đã lưu trong model picker. Với
    Peer, dùng onboarding để thiết lập pool trong repo; Lead tự chọn option
@@ -187,8 +187,10 @@ Sau khi package được publish lên GitHub, thay đường dẫn local bằng
 URL/repository đã publish, ví dụ `duongvm57/paseo-slp`. Dùng project mode
 hoặc thêm `--global` như trên; truyền `--agent <name>` nếu muốn chỉ cài cho
 một agent thay vì mọi agent được phát hiện. Với lệnh này, project skill nằm ở
-`.agents/skills`, global skill nằm ở `~/.agents/skills`; Codex và Pi đều
-discover hai scope đó. Kiểm tra bằng `npx skills@latest list` hoặc thêm
+`.agents/skills`, global skill nằm ở `~/.agents/skills`; Codex và Pi discover
+trực tiếp hai scope đó, còn installer cũng link chúng vào thư mục skill riêng
+của từng agent (ví dụ `.claude/skills`) nên Claude cũng nhận được theo cùng
+cách. Kiểm tra bằng `npx skills@latest list` hoặc thêm
 `--global` cho user scope. Mở session mới sau khi cài, rồi yêu cầu
 onboard/setup SLP cho repo; description của skill sẽ trigger workflow. Xem
 [skill nguồn](skills/paseo-slp-onboarding/SKILL.md).
@@ -237,7 +239,7 @@ daemon riêng trong package.
 **Nguồn runtime:** Supervisor/Lead dùng hai saved profile Human cấu hình
 trong Paseo. Peer dùng pool `.paseo-slp/slp-routing.json` của repo, hoặc
 catalog user-scope `$PASEO_HOME/slp-routing.json` khi repo chưa có. Mỗi
-option có provider `pi`/`codex`/`devin`, model, settings, `suitableFor`,
+option có provider `pi`/`codex`/`devin`/`claude`, model, settings, `suitableFor`,
 `avoidFor`, `notes`, `priority` và trạng thái `enabled`/`availability`. Lead
 chọn theo công việc, không gán cứng Engineer/Architect/Reviewer vào model.
 Hai Peer có thể khác provider/model/effort mà không thêm saved profile.
@@ -317,7 +319,7 @@ chọn nữa, áp dụng cho cả `prepare-handoff`:
   for scope details.`; nội dung file không được inline.
 
 Option quyết định nguyên bundle và map sang
-`slp-pi-peer`/`slp-codex-peer`/`slp-devin-peer`; model chứa `/` được giữ
+`slp-pi-peer`/`slp-codex-peer`/`slp-devin-peer`/`slp-claude-peer`; model chứa `/` được giữ
 nguyên. `binding` tường minh không kèm profiles chỉ hỗ trợ Supervisor/Lead
 khi được Human cho phép. Peer luôn phải chọn option trong pool, kể cả handoff
 và recovery. `prepare-handoff <request.json>` thêm snapshot và handoff vào
@@ -389,7 +391,7 @@ Kiểm tra local gồm cài–gỡ, bảo toàn cấu hình, protocol và adapte
 chúng không chứng minh role tuân thủ operating guide. Transport trước đây
 được đối chiếu với Paseo 0.7.2/Codex 0.153.4; chưa có E2E acceptance cho
 revision này. Role là instruction hành vi, không phải filesystem/MCP sandbox.
-Transport hỗ trợ Codex và Pi; routing, adapter, upgrade và handoff có kiểm
+Transport hỗ trợ Codex, Pi, Devin và Claude; routing, adapter, upgrade và handoff có kiểm
 tra local. Live provider switching, heartbeat, council, recovery và
 concurrent writers chưa được nghiệm thu E2E. Capability và đường nạp policy
 được ghi trong bảng trace bên dưới.
@@ -407,7 +409,7 @@ mô tả trong [hướng dẫn E2E](e2e/README.md). Bộ hỗ trợ này chưa c
 acceptance; việc thêm entrypoint không đổi các trạng thái E2E chưa được kiểm
 chứng ở trên.
 
-Để chạy `basic-codex` hoặc `basic-pi`, cấu hình hai profile Supervisor/Lead
+Để chạy một scenario `basic-*`, cấu hình hai profile Supervisor/Lead
 và pool Peer của fixture theo family tương ứng. Coordinator chuẩn bị
 fixture/protocol, pool và baseline; Supervisor tạo Lead theo saved profile,
 Lead tự chọn Peer option. Không có confirmer trước launch cho basic. U2 đối

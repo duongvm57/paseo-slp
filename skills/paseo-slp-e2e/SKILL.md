@@ -28,7 +28,7 @@ basic flow does not require running the separate onboarding acceptance scenarios
 
 ## Basic flows
 
-For `basic-pi`/`basic-codex`, follow **Basic flow launch** in
+For `basic-*` scenarios, follow **Basic flow launch** in
 `e2e/WORKSPACE_PROTOCOL.md` instead of the prelaunch confirmer procedure below.
 Use the current authorized host and a separate fixture; no isolated daemon or
 paid prelaunch confirmer is required. The coordinator completes the config and
@@ -43,7 +43,7 @@ window on an explicit new run request, preserving previous elapsed history.
 
 1. Resolve current authority, host, installed candidate, model/effort choices and
    budget from the Human assignment and existing repo settings. Reuse authorized
-   choices. For basic-codex/basic-pi, first read the saved Supervisor/Lead profiles
+   choices. For basic-* scenarios, first read the saved Supervisor/Lead profiles
    and the intended project Peer pool;
    both profiles and eligible pool options must match the basic row family.
    Resolve missing setup before task actors. Do not edit saved profiles to satisfy

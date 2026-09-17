@@ -13,6 +13,7 @@ Local installation/transport checks do not constitute workflow acceptance.
 | bin/codex-role.mjs, src/role-transport.mjs | Transparent Codex stdio adapter; append installed role instructions at start/resume and existing turn overrides. |
 | bin/pi-role.mjs, src/role-transport.mjs | Pi native append-system-prompt adapter; preserve RPC bytes, host extensions and session/model/thinking arguments. |
 | bin/devin-role.mjs, src/role-transport.mjs | Generic ACP adapter; prepend installed role instructions to the first session prompt of each session; re-arm on load/resume/fork. |
+| bin/claude-role.mjs, src/role-transport.mjs | Claude Agent SDK stream-json adapter; append installed role instructions to the initialize control request's system-prompt append field; all other frames pass through. |
 | src/common.md, src/roles/*.md | Authority and role behavior; no repository tactics or model IDs. |
 | src/delegation.md | Paseo profile discovery, agent-scoped delegation, notification and report retrieval. Only Supervisor/Lead load it. |
 | src/references/orchestration.md | Lead's conditional topology, independent review/council, dependency and integration procedure. |
@@ -43,9 +44,9 @@ only owned entries and the prior values of two MCP flags, never credentials.
 The shell installer and installed CLI share the same installation code.
 
 Three roles remain Supervisor, Lead and Peer. Only two saved profiles are managed:
-slp-supervisor and slp-lead. The nine providers remain slp-codex-{role},
-slp-pi-{role} and slp-devin-{role}; Peer chooses runtime from the project pool,
-not a saved profile. Devin bindings accept swe-2 models only.
+slp-supervisor and slp-lead. The twelve providers remain slp-codex-{role},
+slp-pi-{role}, slp-devin-{role} and slp-claude-{role}; Peer chooses runtime from
+the project pool, not a saved profile. Devin bindings accept swe-2 models only.
 Peer disposition belongs to the assignment, independent of pool option choice.
 Installation refuses collisions with owned provider and Supervisor/Lead profile
 IDs; unrelated configuration is preserved.
@@ -95,7 +96,7 @@ primitives; no semantic detector, lifecycle runner, tool filter or schedule adap
 is added. Missing capabilities remain explicit before any fallback. See
 [guide coverage](guide-coverage.md) for requirement mapping, load paths and host gaps.
 
-Codex and Pi share role bytes through their respective adapters. Human configures
+Codex, Pi, Devin and Claude share role bytes through their respective adapters. Human configures
 slp-supervisor/slp-lead with matching role providers and chosen models/settings.
 Supervisor/Lead launches refresh these saved profiles and copy their complete
 provider/model/mode/thinking/features bundles. Missing or incompatible settings
@@ -107,7 +108,7 @@ first; when the repository has no catalog, the user-scope catalog
 Onboarding prepares a pool of complete provider/model/settings options with
 suitableFor, avoidFor, notes, priority and explicit eligibility. Lead reads the pool,
 selects an option per task/budget, explains why it fits and validates its fresh hash
-with prepare. Provider pi/codex/devin maps to the matching installed Peer wrapper; policy
+with prepare. Provider pi/codex/devin/claude maps to the matching installed Peer wrapper; policy
 and disposition stay separate from runtime choice. Neither the Lead's family nor
 a saved slp-peer limits the pool. No catalog in either scope, or an
 empty/no-eligible pool, blocks Peer creation until setup is completed — never a

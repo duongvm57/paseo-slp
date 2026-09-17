@@ -1,7 +1,7 @@
 # Draft workflow E2E review — NOT CONFIRMED
 
 Derived from supplied guide §11 .
-For basic-pi/basic-codex, the coordinator uses this checklist and the checked-in
+For basic-* scenarios, the coordinator uses this checklist and the checked-in
 outcome check without a prelaunch confirmer. Other scenarios require Human or an
 independent reviewer to confirm the checklist and job-specific check before launch.
 All scenarios retain independent final review of frozen evidence; coordinator

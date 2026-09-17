@@ -22,7 +22,7 @@ Read the assigned repository's .paseo-slp/slp-routing.json with
 Resolution is skill-style: the repository catalog wins when present; when the
 repository has no catalog, routes resolves the user-scope catalog
 ($PASEO_HOME/slp-routing.json, default ~/.paseo) and reports scope/path.
-Each option contains an id, provider family (pi/codex/devin), model, optional modeId,
+Each option contains an id, provider family (pi/codex/devin/claude), model, optional modeId,
 thinkingOptionId/features, roles, enabled, availability, priority, suitableFor,
 avoidFor and notes. Human/onboarding establishes the pool and suitability under
 project setup authority; Lead chooses within it for each task and budget.
@@ -34,9 +34,9 @@ receiving the same Peer policy. Supervisor/Lead profiles need not match their fa
 
 Validate the exact model/settings against live provider capabilities. Refresh the
 catalog hash and use prepare with role=peer and route.optionId/catalogSha256 before
-calling Paseo create_agent. The selected pi/codex/devin option maps to
-slp-pi-peer, slp-codex-peer or slp-devin-peer, whose installed wrapper supplies
-common/Peer instructions.
+calling Paseo create_agent. The selected pi/codex/devin/claude option maps to
+slp-pi-peer, slp-codex-peer, slp-devin-peer or slp-claude-peer, whose installed
+wrapper supplies common/Peer instructions.
 Record the option, hash, suitability reason, create arguments and actual settings.
 
 No slp-peer saved profile is installed or required. Profile inventories may accompany
@@ -92,11 +92,19 @@ seat. prepare renders the naming convention from delegation.md; omitted taskLabe
 uses the repository directory name, and omitted Peer disposition displays General.
 Catalog hash validation is not atomic with host creation; record actual launches.
 
-Installed providers are slp-codex-{role}, slp-pi-{role} and slp-devin-{role}.
+Installed providers are slp-codex-{role}, slp-pi-{role}, slp-devin-{role} and
+slp-claude-{role}.
 Every Peer wrapper loads the same policy. Codex receives developer instructions;
 Pi uses --append-system-prompt while preserving host extensions/MCP arguments;
 Devin runs a generic ACP adapter, so its wrapper prepends the role policy to the
-first session prompt of each session. Devin bindings accept swe-2 models only.
+first session prompt of each session; Claude runs the Agent SDK stream-json
+transport, so its wrapper appends the role policy to the appendSystemPrompt
+field of the initialize control request (SDK 0.3.246 hoists a preset
+systemPrompt's append there; the wrapper also covers a verbatim preset object).
+Each wrapper spawns the family CLI resolved on PATH; SLP_CODEX_BIN,
+SLP_PI_BIN, SLP_DEVIN_BIN and SLP_CLAUDE_BIN override the binary, so
+daemon-side executable overrides on the stock provider do not reach the
+wrappers. Devin bindings accept swe-2 models only.
 Pi model IDs may contain endpoint prefixes and slashes; preserve the exact
 discovered ID.
 

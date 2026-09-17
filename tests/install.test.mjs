@@ -241,4 +241,13 @@ test('saved profiles default to the host\'s enabled provider family', t => {
   const profiles = readJson(join(home, 'config.json')).daemon.agentProfiles;
   assert.equal(profiles.find(p => p.id === 'slp-lead').provider, 'slp-pi-lead');
   assert.equal(profiles.find(p => p.id === 'slp-supervisor').provider, 'slp-pi-supervisor');
+  // Claude is a valid default and never outranks an earlier enabled family.
+  const second = fixture(t);
+  config(second.home, { version: 1, agents: { providers: { claude: { enabled: true } } }, daemon: {} });
+  installPaseo(root, second.destination, second.home, true);
+  assert.equal(readJson(join(second.home, 'config.json')).daemon.agentProfiles.find(p => p.id === 'slp-lead').provider, 'slp-claude-lead');
+  const third = fixture(t);
+  config(third.home, { version: 1, agents: { providers: { codex: { enabled: true }, claude: { enabled: true } } }, daemon: {} });
+  installPaseo(root, third.destination, third.home, true);
+  assert.equal(readJson(join(third.home, 'config.json')).daemon.agentProfiles.find(p => p.id === 'slp-lead').provider, 'slp-codex-lead');
 });
