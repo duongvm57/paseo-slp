@@ -11,7 +11,7 @@ is a repair. Complete required checks or waits before dependent actions; their
 failure or expiry returns BLOCKED to Lead, not permission to proceed. Start a
 later write phase only when its stated conditions and write grant are satisfied.
 Read the task-relevant constraints supplied by Lead, not the whole repository
-.paseo-slp/WORKSPACE_PROTOCOL.md or orchestration procedures. Choose micro skills for the
+.paseo-slp/workspace-protocol.md or orchestration procedures. Choose micro skills for the
 assigned language, domain, research, testing or diagnosis. A typed path can fail
 on Unicode normalization (NFD on disk, NFC in the typed name); enumerate the
 containing directory first.

@@ -70,7 +70,7 @@ generalizing. Separate durable cross-repo role invariants from repository tactic
 and one-task details. Propose the smallest change supported by that evidence, with
 the expected benefit, counterargument and possible ceremony/attention cost.
 
-Update the repository .paseo-slp/WORKSPACE_PROTOCOL.md only with the relevant write mandate;
+Update the repository .paseo-slp/workspace-protocol.md only with the relevant write mandate;
 Human approves material authority changes. Record owner, version/review date, evidence
 and change history; observe later effects and reversal conditions. Proposals to
 global role/profile policy belong to its maintained source and authorized release

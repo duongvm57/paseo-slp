@@ -83,7 +83,7 @@ test('workspace init creates only protocol, routing and notebook once and preser
   assert.equal(existsSync(join(dir, '.paseo-slp')), false);
   const initialized = initWorkspace(destination, dir, true);
   assert.equal(initialized.files.length, 3);
-  const protocol = join(dir, '.paseo-slp/WORKSPACE_PROTOCOL.md');
+  const protocol = join(dir, '.paseo-slp/workspace-protocol.md');
   const routing = join(dir, '.paseo-slp/slp-routing.json');
   const notebook = join(dir, '.paseo-slp/notebook.md');
   assert.match(readFileSync(protocol, 'utf8'), /Lead reads this file/);
@@ -126,7 +126,7 @@ test('repo init imports only an explicit catalog, preserves existing files and r
   const other = join(dir, 'another-job'); mkdirSync(other);
   symlinkSync(home, join(other, '.paseo-slp'));
   assert.throws(() => initWorkspace(destination, other, true), /Expected repo directory/);
-  assert.equal(existsSync(join(other, '.paseo-slp/WORKSPACE_PROTOCOL.md')), false);
+  assert.equal(existsSync(join(other, '.paseo-slp/workspace-protocol.md')), false);
 });
 
 test('installed adapter injects every role over stdio while preserving host prompts, permissions and protocol replies', t => {

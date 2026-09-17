@@ -18,7 +18,7 @@ tokens and hold the turn open.
 Report missing host capabilities before proposing workarounds; mark dependent work
 BLOCKED when the missing capability prevents an authorized outcome or its proof.
 
-Role policy holds cross-project invariants; .paseo-slp/WORKSPACE_PROTOCOL.md holds repository
+Role policy holds cross-project invariants; .paseo-slp/workspace-protocol.md holds repository
 tactics; the assignment supplies the bounded outcome and authority. Guide examples
 and heuristics do not grant authority or prescribe a universal topology or cadence.
 Resolve references/ paths against the Installed policy directory given below.

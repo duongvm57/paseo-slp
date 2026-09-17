@@ -16,7 +16,7 @@ function fixture(t) {
 }
 function slpCheckout(dir) {
   mkdirSync(join(dir, '.paseo-slp'), { recursive: true });
-  writeFileSync(join(dir, '.paseo-slp/WORKSPACE_PROTOCOL.md'),
+  writeFileSync(join(dir, '.paseo-slp/workspace-protocol.md'),
     `---\nversion: '1'\nowner: 'tester'\napplies_to: 'repo (${realpathSync(dir)})'\nsupervisor_notebook: '.paseo-slp/notebook.md (owner: Supervisor)'\n---\n\n# Workspace Protocol\n`);
   writeFileSync(join(dir, '.paseo-slp/slp-routing.json'), json({ version: 1, policy: 'test pool', options: [] }));
   writeFileSync(join(dir, '.paseo-slp/notebook.md'), '# Supervisor notebook\n');
@@ -33,9 +33,9 @@ test('materialize dry-runs, applies and rebases frontmatter paths without copyin
   assert.equal(applied.applied, true);
   assert.equal(applied.files.length, 2);
   assert.ok(applied.files.every(file => file.applied && file.sha256));
-  const protocolFile = applied.files.find(file => file.path.endsWith('WORKSPACE_PROTOCOL.md'));
+  const protocolFile = applied.files.find(file => file.path.endsWith('workspace-protocol.md'));
   assert.equal(protocolFile.rebased, true);
-  const protocol = readFileSync(join(target, '.paseo-slp/WORKSPACE_PROTOCOL.md'), 'utf8');
+  const protocol = readFileSync(join(target, '.paseo-slp/workspace-protocol.md'), 'utf8');
   assert.ok(protocol.includes(`applies_to: 'repo (${realpathSync(target)})'`));
   assert.ok(!protocol.includes(realpathSync(source)));
   assert.deepEqual(readJson(join(target, '.paseo-slp/slp-routing.json')), { version: 1, policy: 'test pool', options: [] });
@@ -51,21 +51,21 @@ test('materialize warns instead of silently keeping stale paths, and respects pa
   mkdirSync(target);
   const root = realpathSync(source);
   // Frontmatter with no source-root path at all: copied file warns.
-  writeFileSync(join(source, '.paseo-slp/WORKSPACE_PROTOCOL.md'),
+  writeFileSync(join(source, '.paseo-slp/workspace-protocol.md'),
     `---\nversion: '1'\napplies_to: 'somewhere else'\n---\n\n# Workspace Protocol\n`);
   const out = materializeWorkspace(source, target, true);
-  const stale = out.files.find(file => file.path.endsWith('WORKSPACE_PROTOCOL.md'));
+  const stale = out.files.find(file => file.path.endsWith('workspace-protocol.md'));
   assert.equal(stale.rebased, false);
   assert.match(stale.warning, /no source-root path/);
   // A longer sibling path (`<source>-old`) is not a boundary match and stays.
-  writeFileSync(join(source, '.paseo-slp/WORKSPACE_PROTOCOL.md'),
+  writeFileSync(join(source, '.paseo-slp/workspace-protocol.md'),
     `---\nversion: '1'\napplies_to: 'repo (${root})'\nprevious: '${root}-old'\n---\n\n# Workspace Protocol\n`);
-  rmSync(join(target, '.paseo-slp/WORKSPACE_PROTOCOL.md'));
+  rmSync(join(target, '.paseo-slp/workspace-protocol.md'));
   const rebound = materializeWorkspace(source, target, true);
-  const fixed = rebound.files.find(file => file.path.endsWith('WORKSPACE_PROTOCOL.md'));
+  const fixed = rebound.files.find(file => file.path.endsWith('workspace-protocol.md'));
   assert.equal(fixed.rebased, true);
   assert.equal(fixed.warning, undefined);
-  const protocol = readFileSync(join(target, '.paseo-slp/WORKSPACE_PROTOCOL.md'), 'utf8');
+  const protocol = readFileSync(join(target, '.paseo-slp/workspace-protocol.md'), 'utf8');
   assert.ok(protocol.includes(`applies_to: 'repo (${realpathSync(target)})'`));
   assert.ok(protocol.includes(`previous: '${root}-old'`));
 });
@@ -77,8 +77,8 @@ test('materialize validates the catalog and refuses missing source files before 
   assert.throws(() => materializeWorkspace(source, target, true), /routing option id/i);
   assert.equal(existsSync(join(target, '.paseo-slp')), false);
   writeFileSync(join(source, '.paseo-slp/slp-routing.json'), json({ version: 1, policy: 'test pool', options: [] }));
-  rmSync(join(source, '.paseo-slp/WORKSPACE_PROTOCOL.md'));
-  assert.throws(() => materializeWorkspace(source, target, true), /lacks \.paseo-slp\/WORKSPACE_PROTOCOL\.md/);
+  rmSync(join(source, '.paseo-slp/workspace-protocol.md'));
+  assert.throws(() => materializeWorkspace(source, target, true), /lacks \.paseo-slp\/workspace-protocol\.md/);
   assert.throws(() => materializeWorkspace(join(dir, 'gone'), target, true), /ENOENT/);
   assert.throws(() => materializeWorkspace(source, 'relative-target', true), /Absolute repository directory required/);
 });
@@ -93,7 +93,7 @@ test('materialize preserves existing target files and the CLI reports per-file r
   const catalog = out.files.find(file => file.path.endsWith('slp-routing.json'));
   assert.equal(catalog.preserved, true);
   assert.equal(readJson(join(target, '.paseo-slp/slp-routing.json')).policy, 'target-owned');
-  const protocol = out.files.find(file => file.path.endsWith('WORKSPACE_PROTOCOL.md'));
+  const protocol = out.files.find(file => file.path.endsWith('workspace-protocol.md'));
   assert.equal(protocol.applied, true);
   for (const [argv, pattern] of [
     [[cli, 'materialize', target], /materialize requires --from/],

@@ -161,7 +161,7 @@ the fixture as its role protocol. The fixture helper creates only the code task.
 The E2E skill's **Prepare the task repository** procedure supplies the missing
 onboarding step, even when only a basic scenario is selected.
 
-Complete the fixture's `.paseo-slp/WORKSPACE_PROTOCOL.md` from the installed
+Complete the fixture's `.paseo-slp/workspace-protocol.md` from the installed
 template and current assignment. Set the actual root/owner, writable and excluded
 scope, task class, topology/proof gates, concrete time/agent budget, allowed
 operations, quota fallback boundary, observation and cleanup policy. For
