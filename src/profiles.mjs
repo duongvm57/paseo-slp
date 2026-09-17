@@ -3,7 +3,7 @@ import { dispositionPattern, rejectRouteKeys, verifyProvider,
 
 export const roles = ['supervisor', 'lead', 'peer'];
 export const profileRoles = ['supervisor', 'lead'];
-export const families = ['codex', 'pi', 'devin'];
+export const families = ['codex', 'pi', 'devin', 'claude'];
 const profilePrefix = 'slp-';
 export const profileId = role => `${profilePrefix}${role}`;
 // Inverse of profileId. Only Peer ever had legacy `slp-peer-<disposition>` profiles.

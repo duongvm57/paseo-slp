@@ -15,7 +15,7 @@ Live execution and skill discovery remain NOT_RUN until exercised on a real host
 
 ## Basic flows
 
-`basic-pi`, `basic-codex` and `basic-devin` use the current authorized Paseo host with a separate
+`basic-pi`, `basic-codex`, `basic-devin` and `basic-claude` use the current authorized Paseo host with a separate
 fixture. They require no prelaunch confirmer (`config.confirmer` may be omitted).
 The coordinator validates candidate/profiles, prepares the fixture and failing
 baseline, then launches Supervisor → Lead → Peer. Final outcome checks,
@@ -75,7 +75,7 @@ confirm that authorization, discovery or independent review occurred.
 
 Complete the draft before independent confirmation; see
 [Prelaunch confirmation](WORKSPACE_PROTOCOL.md#prelaunch-confirmation) for its scope.
-For basic-codex/basic-pi, Human configures slp-supervisor/slp-lead with the
+For basic-* scenarios, Human configures slp-supervisor/slp-lead with the
 matching family and chosen models/settings. Coordinator prepares a fixture Peer
 pool within project setup authority. No saved Peer profile is required.
 Basic config uses settings.source="profiles-and-peer-pool", profiles/providers

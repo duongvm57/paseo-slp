@@ -6,7 +6,7 @@ candidate on explicitly identified host/provider/model/effort configurations.
 
 ## Basic flow launch
 
-For `basic-pi` and `basic-codex`, this section takes precedence over the
+For `basic-*` scenarios, this section takes precedence over the
 independent prelaunch confirmation and evidence-access launch gates below.
 The objective is to exercise Supervisor → Lead → Peer on a real repair.
 
@@ -104,7 +104,7 @@ cleanup are postlaunch evidence, not prerequisites for approving this plan.
 Correct an incomplete draft and have the same confirmer reassess the corrections.
 
 Compare the installed candidate with the frozen source and verify host bindings.
-For basic-pi/basic-codex, Supervisor/Lead saved profiles use the corresponding
+For basic-* scenarios, Supervisor/Lead saved profiles use the corresponding
 slp-{family}-{role} providers. Human chooses their models/settings in Paseo.
 Peer uses the fixture's project pool; prepare eligible options for the row family
 under setup authority. No saved slp-peer is required. Mixed-peer uses both Peer
@@ -127,7 +127,7 @@ access. Any permission response during observation remains an intervention.
 ## Execution and evidence gate
 
 Honor a Human-selected subset; record unselected rows NOT_RUN with the scope reason.
-For full-suite runs, run isolated setup/onboarding and basic-codex/basic-pi first. Advanced
+For full-suite runs, run isolated setup/onboarding and basic-* rows first. Advanced
 rows list their basic-flow dependencies in the manifest. These gates apply to
 the same candidate and host setup. A gate failure blocks dependent rows; direct
 Lead, transport, routing and independently runnable notification checks may
@@ -165,7 +165,7 @@ Complete the fixture's `.paseo-slp/WORKSPACE_PROTOCOL.md` from the installed
 template and current assignment. Set the actual root/owner, writable and excluded
 scope, task class, topology/proof gates, concrete time/agent budget, allowed
 operations, quota fallback boundary, observation and cleanup policy. For
-`basic-codex`/`basic-pi`, require Supervisor → Lead → an Engineer Peer for this
+`basic-*` scenarios, require Supervisor → Lead → an Engineer Peer for this
 test, followed by proof, Lead inspection/verdict and Supervisor handback. This is
 a fixture tactic, not a global prohibition on Lead direct work. Preserve the
 public task contract and Human note; use bounded event-driven observation and

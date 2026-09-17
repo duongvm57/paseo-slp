@@ -9,8 +9,8 @@ export const dispositionPattern = /^[a-z][a-z0-9-]*$/i;
 
 // Paseo resolves an installed wrapper through its `extends` base adapter.
 // Devin itself is a derived ACP provider (`extends: acp`), so slp-devin-*
-// wrappers must extend the acp adapter; codex/pi extend their own builtins.
-export const providerTransports = { codex: 'codex', pi: 'pi', devin: 'acp' };
+// wrappers must extend the acp adapter; codex/pi/claude extend their own builtins.
+export const providerTransports = { codex: 'codex', pi: 'pi', devin: 'acp', claude: 'claude' };
 export const transportOf = family => providerTransports[family] ?? family;
 
 // Devin bindings run swe-2 models only (host policy for this provider family).

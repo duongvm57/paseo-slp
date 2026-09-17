@@ -81,8 +81,8 @@ test('launcher loads installed role bytes, excludes private review material, pre
     const child = launchPlan(installed, { ...request, role });
     assert.ok(child.create.initialPrompt.includes(readFileSync(join(installed, `src/roles/${role}.md`), 'utf8')));
     assert.equal(child.create.notifyOnFinish, true);
-    for (const family of ['pi', 'codex', 'devin']) {
-      const model = family === 'devin' ? 'swe-2-medium' : binding.model;
+    for (const family of ['pi', 'codex', 'devin', 'claude']) {
+      const model = family === 'devin' ? 'swe-2-medium' : family === 'claude' ? 'claude-synthetic-1' : binding.model;
       const wrapped = launchPlan(installed, { ...request, role, binding: { ...binding, model, provider: `slp-${family}-${role}` } });
       assert.ok(wrapped.create.initialPrompt.includes(request.assignment));
       assert.ok(!wrapped.create.initialPrompt.includes(readFileSync(join(installed, `src/roles/${role}.md`), 'utf8')), 'Wrapper policy must not be broadcast again as task input');

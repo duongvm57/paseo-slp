@@ -10,6 +10,8 @@
   },
   "providers": [
     { "id": "slp-codex-peer", "extends": "codex" },
-    { "id": "slp-pi-peer", "extends": "pi" }
+    { "id": "slp-pi-peer", "extends": "pi" },
+    { "id": "slp-devin-peer", "extends": "acp" },
+    { "id": "slp-claude-peer", "extends": "claude" }
   ]
 }

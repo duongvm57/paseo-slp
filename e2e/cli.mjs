@@ -12,7 +12,7 @@ try {
     case 'help':
     case '--help':
       result = { execution: 'SESSION_REQUIRED', skill: 'skills/paseo-slp-e2e/SKILL.md',
-        instruction: 'Read the skill and execute the Human-selected scenarios (the entire manifest for a full-suite request) using Paseo from this session. Human must configure saved SLP profiles for basic-codex/basic-pi before testing; verify them and complete fixture protocol before launch. Continue through collection, independent review and cleanup; this help output ran no live tests.',
+        instruction: 'Read the skill and execute the Human-selected scenarios (the entire manifest for a full-suite request) using Paseo from this session. Human must configure saved SLP profiles for basic-* scenarios before testing; verify them and complete fixture protocol before launch. Continue through collection, independent review and cleanup; this help output ran no live tests.',
         scenarios: scenarios.length, commands: ['plan [scenario-id]', 'init <new-run-directory> [run-config.json]', 'begin <run> <scenario-id> <config.json>', 'fixture <attempt>', 'collect <attempt> <kind> <source-file>', 'collect-coordinator <attempt> <native-session.jsonl> <native-session-id>', 'collect-resources <attempt> <settlement.json>', 'seal <attempt> [gaps.json]', 'status <attempt>', 'review <attempt> <review.json>', 'review-addendum <attempt> <review.json>', 'defer <run> <scenario-id> <reason.json>', 'summary <run>', 'runs <directory>'] };
       if (!command) process.exitCode = 2;
       break;
