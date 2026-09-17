@@ -1,9 +1,11 @@
 {
   "name": "paseo-slp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "install:slp": "bash install.sh",
     "test": "node --test tests/*.test.mjs",
