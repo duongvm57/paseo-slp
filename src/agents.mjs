@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, lstatSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import { paseoHome } from './routing.mjs';
+import { resolveHome } from './managed-home.mjs';
 import { devinProviderPattern } from './binding.mjs';
 
 // Agent state lives under <paseoHome>/agents/<group>/<agentId>.json; the daemon
@@ -15,7 +15,9 @@ const attachHint = (provider, cwd, nativeHandle) =>
     ? `cd ${shellQuote(cwd)} && devin -r ${shellQuote(nativeHandle)}`
     : null;
 
-export function agents(home = paseoHome()) {
+// resolveHome(): under SLP_MANAGED_RUNTIME=1 an absent home must come from
+// SLP_DAEMON_HOME/PASEO_HOME or throw — never infer ~/.paseo (spec §10).
+export function agents(home = resolveHome()) {
   if (typeof home !== 'string' || !isAbsolute(home)) throw new Error('Absolute Paseo home required');
   const dir = join(home, 'agents');
   let groups;

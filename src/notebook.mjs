@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { lstatSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { agents } from './agents.mjs';
-import { paseoHome } from './routing.mjs';
+import { resolveHome } from './managed-home.mjs';
 
 // The Supervisor notebook lives at <checkout>/.paseo-slp/notebook.md —
 // checkout-local by contract. A Human browsing another checkout of the same
@@ -23,7 +23,9 @@ const commonDir = dir => {
   return realpathSync(resolve(dir, out));
 };
 
-export function notebook(repository, home = paseoHome()) {
+// resolveHome(): under SLP_MANAGED_RUNTIME=1 an absent home must come from
+// SLP_DAEMON_HOME/PASEO_HOME or throw — never infer ~/.paseo (spec §10).
+export function notebook(repository, home = resolveHome()) {
   if (typeof repository !== 'string' || !isAbsolute(repository)) throw new Error('Absolute repository path required');
   const repoDir = realpathSync(repository);
   let root;

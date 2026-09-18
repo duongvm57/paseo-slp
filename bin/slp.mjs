@@ -5,7 +5,8 @@ import { existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { identity, install, uninstall, update, verifyInstall, snapshot, readJson, json } from '../src/package.mjs';
 import { launchPlan, handoffPlan } from '../src/launch.mjs';
-import { readCatalog, paseoHome } from '../src/routing.mjs';
+import { readCatalog } from '../src/routing.mjs';
+import { resolveHome } from '../src/managed-home.mjs';
 import { installPaseo, uninstallPaseo, upgradePaseo, initWorkspace, materializeWorkspace, installHome } from '../src/paseo-install.mjs';
 import { inventory } from '../src/inventory.mjs';
 import { agents } from '../src/agents.mjs';
@@ -29,7 +30,7 @@ try {
       if (args[i + 1] && !args[i + 1].startsWith('--')) {
         if (!isAbsolute(args[i + 1])) throw new Error(`Absolute path required for ${key}`);
         options[key] = args[++i];
-      } else options[key] = paseoHome();
+      } else options[key] = resolveHome(); // bare flag: managed mode resolves SLP_DAEMON_HOME/PASEO_HOME or fails, never ~/.paseo
     } else throw new Error(`Unknown flag ${key}`);
   }
   const commandFlags = { install: ['--paseo-home', '--apply', '--reload'], uninstall: ['--apply', '--reload'], upgrade: ['--from', '--apply', '--reload'], init: ['--routing-from', '--apply'], materialize: ['--from', '--apply'], routes: ['--paseo-home'], inventory: ['--paseo-home'], agents: ['--paseo-home'], monitor: [], notebook: ['--paseo-home'] };

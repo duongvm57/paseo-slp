@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, lstatSync, mkdirSync, writeFileSync, renameS
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { isAbsolute, join, resolve, basename } from 'node:path';
-import { paseoHome } from './routing.mjs';
+import { resolveHome } from './managed-home.mjs';
 import { devinProviderPattern } from './binding.mjs';
 import { json, readJson } from './package.mjs';
 
@@ -127,7 +127,9 @@ function probeDevin(db, handle, window) {
 
 export function monitor(request) {
   if (!record(request)) throw new Error('Monitor request must be a JSON object');
-  const home = request.paseoHome ?? paseoHome();
+  // Managed mode (SLP_MANAGED_RUNTIME=1) fails closed: an absent paseoHome
+  // resolves via SLP_DAEMON_HOME/PASEO_HOME or throws, never ~/.paseo (§10).
+  const home = resolveHome(request.paseoHome);
   if (typeof home !== 'string' || !isAbsolute(home)) throw new Error('Absolute paseoHome required');
   if (!Array.isArray(request.agents) || !request.agents.length) throw new Error('request.agents required');
   const seen = new Set();
