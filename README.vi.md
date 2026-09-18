@@ -44,12 +44,9 @@ ref vào thư mục quản lý `$PASEO_HOME/plugins/paseo-slp/<id>/` rồi chạ
 tra bằng `paseo plugin ls` — plugin phải đạt trạng thái `running`.
 
 Cài đặt chỉ đăng ký plugin; chưa thay đổi cấu hình agent. Kích hoạt là bước
-riêng và tường minh (bên dưới).
-
-> **Không trộn hai đường cài.** Đường cũ `install.sh`/`slp.mjs install` ghi
-> cùng provider/profile IDs trực tiếp — chạy song song với plugin khiến các
-> entry đó thành foreign với journal của plugin và chặn kích hoạt bằng
-> `COLLISION`/`OWNERSHIP_DRIFT`. Nếu đã dùng installer cũ, gỡ nó trước.
+riêng và tường minh (bên dưới). Installer standalone trước plugin được ghi
+tại [docs/legacy-install.md](docs/legacy-install.md) — không chạy song song
+với plugin.
 
 ## Kích hoạt
 
@@ -548,10 +545,11 @@ chiếu profiles cho Supervisor/Lead và option/hash cho Peer. `mixed-peer` ki�
 tra pool có cả Codex/Pi, không cần thêm saved profile hay ép family của Lead
 theo mỗi Peer. Các scenario ngoài scope giữ NOT_RUN.
 
-Đường offline vẫn có: `install <dir> --apply` (chạy từ `bin/slp.mjs` của
-source checkout) chỉ stage package; `prepare <request.json>` xuất
-create_agent arguments có role envelope. Đường này không đăng ký profile
-hay tự tạo agent.
+Đường CLI offline vẫn có: `prepare <request.json>` (từ `bin/slp.mjs` của
+source checkout) xuất create_agent arguments có role envelope, và
+`install <dir> --apply` chỉ stage package — xem
+[docs/legacy-install.md](docs/legacy-install.md). Đường này không đăng ký
+profile hay tự tạo agent.
 
 ## Tài liệu
 
@@ -559,6 +557,7 @@ hay tự tạo agent.
 - [File map và contract](docs/contract.md)
 - [Trace guide → policy, procedure và protocol](docs/guide-coverage.md)
 - [Checklist nghiệm thu độc lập](docs/review-checklist.md)
+- [Installer standalone cũ](docs/legacy-install.md)
 
 Cơ chế host tham chiếu:
 [custom providers](https://paseo.sh/docs/custom-providers.md),

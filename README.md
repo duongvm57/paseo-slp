@@ -46,14 +46,10 @@ loading it. Verify with `paseo plugin ls` — the plugin should reach
 `running`.
 
 Installing registers the plugin; it does not change your agent
-configuration yet. Activation is a separate, explicit step (below).
-
-> **Do not mix install paths.** The legacy `install.sh`/`slp.mjs install`
-> path writes the same provider/profile IDs directly — running it alongside
-> the plugin makes those entries foreign to the plugin's journal and blocks
-> activation with `COLLISION`/`OWNERSHIP_DRIFT`. If you used the standalone
-> installer before, uninstall it first (or let `deactivate` clean up only
-> after the plugin owns the entries).
+configuration yet. Activation is a separate, explicit step (below). The
+pre-plugin standalone installer is documented in
+[docs/legacy-install.md](docs/legacy-install.md) — do not run it alongside
+the plugin.
 
 ## Activation
 
@@ -570,9 +566,10 @@ and option/hash for the Peer. `mixed-peer` checks a pool containing both
 Codex/Pi — no extra saved profile needed and no forcing the Lead's family per
 Peer. Scenarios outside the scope stay NOT_RUN.
 
-The offline path remains: `install <dir> --apply` (run from a source
-checkout's `bin/slp.mjs`) only stages the package; `prepare <request.json>`
-emits create_agent arguments with a role envelope. This path registers no
+The offline CLI path remains: `prepare <request.json>` (from a source
+checkout's `bin/slp.mjs`) emits create_agent arguments with a role envelope,
+and `install <dir> --apply` stages the package — see
+[docs/legacy-install.md](docs/legacy-install.md). This path registers no
 profile and creates no agent itself.
 
 ## Documentation
@@ -581,6 +578,7 @@ profile and creates no agent itself.
 - [File map and contract](docs/contract.md)
 - [Guide → policy, procedure and protocol trace](docs/guide-coverage.md)
 - [Independent acceptance checklist](docs/review-checklist.md)
+- [Legacy standalone installer](docs/legacy-install.md)
 
 Referenced host mechanisms:
 [custom providers](https://paseo.sh/docs/custom-providers.md),
