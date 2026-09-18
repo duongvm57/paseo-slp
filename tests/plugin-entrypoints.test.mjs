@@ -1,7 +1,7 @@
 // tests/plugin-entrypoints.test.mjs — §13 row 1 coverage: the shipped
 // paseo-plugin.json parses through the host's REAL manifest validator
 // (readPluginManifest from the installed @getpaseo/server), and the real
-// contribution function in plugin/index.server.ts registers exactly the four
+// contribution function in plugin/index.server.ts registers exactly the five
 // RPCs and returns a working cleanup.
 //
 // contribute() itself only CONSTRUCTS its lane deps — the resolve hook below
@@ -113,7 +113,7 @@ export const createLauncherBuilder = () => ({
   return file;
 }
 
-test('contribute() registers the four RPCs and returns a callable cleanup', async t => {
+test('contribute() registers the five RPCs and returns a callable cleanup', async t => {
   const stubFile = writeLaneStubs(t);
   const stubUrl = pathToFileURL(stubFile).href;
   const hooks = registerHooks({
@@ -145,7 +145,7 @@ test('contribute() registers the four RPCs and returns a callable cleanup', asyn
   const cleanup = contribute(server);
   assert.deepEqual(
     registrations.map(r => r.name).sort(),
-    ['activate', 'deactivate', 'reconcile', 'status'],
+    ['activate', 'deactivate', 'local-target', 'reconcile', 'status'],
   );
   for (const { handler } of registrations) {
     assert.equal(typeof handler, 'function');

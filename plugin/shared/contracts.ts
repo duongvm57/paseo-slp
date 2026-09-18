@@ -121,10 +121,22 @@ export const StatusOutput = z.object({
   retainedRuntimeCount: z.number().int().nonnegative(),
   liveAcceptance: z.literal("not-established-by-this-rpc"),
 }).strict();
+export const LocalTargetInput = z.object({
+  schemaVersion: z.literal(1),
+}).strict();
+export const LocalTargetOutput = z.object({
+  // The daemon home the plugin process believes it serves: $PASEO_HOME when the
+  // daemon exported it, else the platform default ~/.paseo. The client may
+  // prefill from this but the verifiedHostHomeMapping acknowledgment stays a
+  // human decision — detection is a suggestion, never proof.
+  daemonHome: AbsolutePath,
+  source: z.enum(["env", "default"]),
+}).strict();
 export const activate = defineRpc({ name: "activate", input: ActivateInput, output: StartOutput });
 export const reconcile = defineRpc({ name: "reconcile", input: ReconcileInput, output: StartOutput });
 export const deactivate = defineRpc({ name: "deactivate", input: DeactivateInput, output: StartOutput });
 export const status = defineRpc({ name: "status", input: StatusInput, output: StatusOutput });
+export const localTarget = defineRpc({ name: "local-target", input: LocalTargetInput, output: LocalTargetOutput });
 
 // ---------------------------------------------------------------------------
 // §7 receipt / operation-intent journal schemas (server-internal; the client

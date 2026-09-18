@@ -20,7 +20,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { activate, deactivate, reconcile, status } from "../shared/contracts.ts";
+import { activate, deactivate, reconcile, status, localTarget } from "../shared/contracts.ts";
 import type { FamilyName, StartResult, StatusResult, TargetValue } from "../shared/contracts.ts";
 import {
   DISABLE_REMOVE_NOTICE,
@@ -51,6 +51,7 @@ import {
 import type { ReconcileAction, TargetView } from "./manager-state.ts";
 
 const FAMILIES: readonly FamilyName[] = ["codex", "pi", "devin", "claude"];
+const FAMILY_LABEL: Record<FamilyName, string> = { codex: "Codex", pi: "Pi", devin: "Devin", claude: "Claude Code" };
 const AUTHORITY = { exclusiveAdministrativeWindow: true, verifiedHostHomeMapping: true } as const;
 
 type Colors = PluginTheme["colors"];
@@ -297,8 +298,10 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   const callActivate = useRpc(activate);
   const callReconcile = useRpc(reconcile);
   const callDeactivate = useRpc(deactivate);
+  const callLocalTarget = useRpc(localTarget);
 
-  const [homeInput, setHomeInput] = useState("");
+  const [detectedHome, setDetectedHome] = useState<string | null>(null);
+  const [homeOverride, setHomeOverride] = useState("");
   const [exclusiveWindow, setExclusiveWindow] = useState(false);
   const [mappingConfirmed, setMappingConfirmed] = useState(false);
   const [adoptIdentical, setAdoptIdentical] = useState(false);
@@ -312,10 +315,26 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   const [store] = useState(createTargetViews);
   const [view, setView] = useState<TargetView>(emptyTargetView);
 
-  const home = homeInput.trim();
+  const home = homeOverride.trim() !== "" ? homeOverride.trim() : (detectedHome ?? "");
   const target: TargetValue | null = isDaemonHome(home) ? { hostId: host.id, daemonHome: home } : null;
   const key = target ? targetKey(target) : null;
   const keyRef = useRef<string | null>(key);
+  const autoLoadedFor = useRef<string | null>(null);
+
+  // Prefill the daemon home from the plugin process's own environment
+  // (PASEO_HOME else ~/.paseo). A suggestion only — the §4 mapping
+  // acknowledgment remains a human decision, and Advanced can override it.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const detected = await callLocalTarget({ schemaVersion: 1 });
+        if (!cancelled) setDetectedHome(detected.daemonHome);
+      } catch { /* detection unavailable — the field stays empty for manual input */ }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
+  }, []);
 
   // Two-host isolation: each (hostId, daemonHome) keeps its own view state in
   // the store; switching the target swaps in that target's snapshot.
@@ -343,6 +362,15 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
       return null;
     }
   }, [callStatus, update]);
+
+  // Once a target is known (detected or typed), fetch status automatically —
+  // read-only, so no authority acknowledgment is needed to inspect.
+  useEffect(() => {
+    if (!target || !key || view.status || view.busy || autoLoadedFor.current === key) return;
+    autoLoadedFor.current = key;
+    void refresh(target);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- key captures target
+  }, [key, view.status, view.busy]);
 
   // Poll the tracked operation until it reaches a terminal outcome. The first
   // delay is the server's pollAfterMs; later polls run every STATUS_POLL_MS.
@@ -480,17 +508,16 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
 
       <Card
         colors={colors}
-        title="1 · Daemon home"
-        subtitle="The host API exposes no daemon-home mapping — enter the absolute path on this host and confirm it below."
+        title="1 · Target"
+        subtitle="Detected from this daemon's environment — open Advanced to manage a different home."
       >
-        <Field
-          colors={colors}
-          label="Daemon home"
-          hint={home.length > 0 && !isDaemonHome(home) ? "Enter an absolute path" : undefined}
-          value={homeInput}
-          onChangeText={setHomeInput}
-          placeholder="/absolute/path/to/paseo-home"
-        />
+        {home ? (
+          <KV colors={colors} label="Daemon home" value={home} />
+        ) : (
+          <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+            No daemon home detected — set one under Advanced.
+          </Text>
+        )}
         <Button
           colors={colors}
           label={statusView ? "Refresh status" : "Check status"}
@@ -520,7 +547,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                   ]}
                 >
                   <Text style={[styles.chipLabel, { color: colors.foreground }]}>
-                    {family.family} · {familyHint(family, { compact: true })}
+                    {FAMILY_LABEL[family.family]} · {familyHint(family, { compact: true })}
                   </Text>
                 </View>
               ))}
@@ -583,7 +610,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
               value={profileFamily}
               options={[
                 { label: "Automatic", value: "auto" as const },
-                ...FAMILIES.map(family => ({ label: family, value: family })),
+                ...FAMILIES.map(family => ({ label: FAMILY_LABEL[family], value: family })),
               ]}
               onChange={setProfileFamily}
               disabled={!canMutate}
@@ -606,6 +633,17 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
         open={showAdvanced}
         onToggle={setShowAdvanced}
       >
+        <Field
+          colors={colors}
+          label="Daemon home override"
+          hint="Detected automatically — edit only to manage a different daemon home"
+          value={homeOverride}
+          onChangeText={setHomeOverride}
+          placeholder={detectedHome ?? "/absolute/path/to/paseo-home"}
+        />
+        {homeOverride.trim() !== "" && !isDaemonHome(homeOverride.trim()) ? (
+          <Text style={[styles.mutedSmall, { color: colors.statusDanger }]}>Enter an absolute path</Text>
+        ) : null}
         <CheckRow
           colors={colors}
           checked={adoptIdentical}
@@ -627,7 +665,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
           <Field
             key={family}
             colors={colors}
-            label={`${family} binary (optional)`}
+            label={`${FAMILY_LABEL[family]} binary (optional)`}
             value={binaries[family]}
             onChangeText={text => setBinaries(previous => ({ ...previous, [family]: text }))}
             placeholder={`/absolute/path/to/${family}`}
