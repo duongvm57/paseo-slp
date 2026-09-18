@@ -11,7 +11,10 @@ import { embeddedPayload } from "./server/generated/runtime-payload.ts";
 import { createExecutableResolver } from "./server/executables.ts";
 import { createLauncherBuilder } from "./server/launchers.ts";
 
-const contribute: PluginServerContribution = server => {
+// Host note: this must stay a hoisted function declaration, not a const —
+// the daemon compiler's Hermes interop eagerly copies export values before
+// module bodies run, so `export default const` evaluates to undefined.
+export default function contribute(server: Parameters<PluginServerContribution>[0]): ReturnType<PluginServerContribution> {
   const manager: Manager = createManager({
     payload: embeddedPayload,
     materializer: createMaterializer(embeddedPayload),
@@ -23,5 +26,4 @@ const contribute: PluginServerContribution = server => {
   server.handle(deactivate, (input, { paseo }) => manager.deactivate(input, paseo));
   server.handle(status, (input, { paseo }) => manager.status(input, paseo));
   return () => manager.close();
-};
-export default contribute;
+}

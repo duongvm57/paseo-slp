@@ -4,11 +4,13 @@
 import type { PluginClientContribution } from "@getpaseo/plugin/client";
 import { SettingsScreen } from "./client/SettingsScreen.tsx";
 
-const contribute: PluginClientContribution = client =>
-  client.addSettingsScreen({
+// Host note: keep this a hoisted function declaration — the bundler's eager
+// export interop resolves `export default const` to undefined at load time.
+export default function contribute(client: Parameters<PluginClientContribution>[0]): ReturnType<PluginClientContribution> {
+  return client.addSettingsScreen({
     id: "manager",
     title: "SLP",
-    icon: "settings",
+    icon: "Settings",
     Component: SettingsScreen,
   });
-export default contribute;
+}
