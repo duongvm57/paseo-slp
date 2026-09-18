@@ -7,92 +7,134 @@
 
 <p align="center">Bộ role Supervisor–Lead–Peer độc lập dành cho Paseo.</p>
 
-Cài một lần, chọn **SLP Supervisor** trong Paseo và giao mục tiêu. Role
-instruction tự nạp; Supervisor quan sát Lead hiện có hoặc tạo Lead theo
-assignment, Lead giao Peer qua Paseo. Bạn có thể nhắn tiếp trong session
-Supervisor đã có, không cần nhập lại prompt role.
+Cài plugin, kích hoạt trên daemon của bạn, chọn **SLP Supervisor** trong
+Paseo và giao mục tiêu. Role instruction tự nạp; Supervisor quan sát Lead
+hiện có hoặc tạo Lead theo assignment, Lead giao Peer qua Paseo. Bạn có thể
+nhắn tiếp trong session Supervisor đã có, không cần nhập lại prompt role.
 
 ## Yêu cầu
 
-- Node >=22, Paseo CLI/daemon và Codex/Pi CLI tương ứng với provider bạn muốn
-  dùng.
-- Credentials của từng provider trên máy daemon.
+- Paseo `>=0.8.0 <0.9.0` với `pluginsEnabled: true` trong `config.json` của
+  daemon.
+- Node >=22 trên máy daemon (plugin tự resolve Node ổn định — không dùng
+  binary Electron — lúc kích hoạt).
+- Codex/Pi/Devin/Claude CLI tương ứng với các family provider bạn muốn dùng,
+  cùng credentials của từng family trên máy daemon.
 - Pi cần hỗ trợ `--append-system-prompt` lặp lại (bản Pi hiện được kiểm tra
   có hỗ trợ).
-- Installer tích hợp vào Paseo hiện có; không tải hay thay phiên bản
-  Paseo/Codex.
+- `mcp.enabled` trong effective config của daemon phải là `true` để kích
+  hoạt.
 
 ## Cài đặt
 
-```bash
-npm run install:slp
-# hoặc: ./install.sh
-```
-
-Không cần clone, chạy thẳng từ GitHub:
+Package phân phối dưới dạng Paseo plugin. Cài lên daemon chạy công việc:
 
 ```bash
-npx --yes --package github:duongvm57/paseo-slp -- paseo-slp install --paseo-home --apply --reload
+# Từ Git source — plugin nằm trong thư mục plugin/ của repo:
+paseo plugin install <git-source>:plugin --ref <ref>
+
+# Từ checkout local (development):
+paseo plugin install /absolute/path/to/paseo-slp/plugin
 ```
 
-Mọi lệnh `slp.mjs` bên dưới chạy qua npx tương tự — trừ các lệnh thao tác
-trên bản đã cài (`init`, `materialize`, `monitor`, `uninstall`): chạy chúng
-từ chính thư mục cài đặt để version khớp với cái providers đang tham chiếu.
+`<git-source>` là mọi thứ `git clone` chấp nhận — ví dụ URL GitHub của repo
+hoặc `file:///absolute/path/to/paseo-slp` cho clone local. Daemon checkout
+ref vào thư mục quản lý `$PASEO_HOME/plugins/paseo-slp/<id>/` rồi chạy bước
+`build` trong manifest (`npm install` trong `plugin/`) trước khi nạp. Kiểm
+tra bằng `paseo plugin ls` — plugin phải đạt trạng thái `running`.
 
-Lệnh này cài Markdown và CLI vào thư mục dữ liệu của nền tảng —
-`$XDG_DATA_HOME/paseo-slp` (`~/.local/share/paseo-slp`),
-`~/Library/Application Support/paseo-slp` trên macOS,
-`%LOCALAPPDATA%\paseo-slp` trên Windows — bổ sung mười hai
-provider `slp-codex-{supervisor,lead,peer}`, `slp-pi-{supervisor,lead,peer}`,
-`slp-devin-{supervisor,lead,peer}` và `slp-claude-{supervisor,lead,peer}`, cùng hai saved profile
-**SLP Supervisor** và **SLP Lead** vào `$PASEO_HOME/config.json` (mặc định
-`~/.paseo`), bật MCP injection rồi reload.
+Cài đặt chỉ đăng ký plugin; chưa thay đổi cấu hình agent. Kích hoạt là bước
+riêng và tường minh (bên dưới).
 
-- Không tạo agent trong lúc cài. Ba role vẫn giữ nguyên.
+> **Không trộn hai đường cài.** Đường cũ `install.sh`/`slp.mjs install` ghi
+> cùng provider/profile IDs trực tiếp — chạy song song với plugin khiến các
+> entry đó thành foreign với journal của plugin và chặn kích hoạt bằng
+> `COLLISION`/`OWNERSHIP_DRIFT`. Nếu đã dùng installer cũ, gỡ nó trước.
+
+## Kích hoạt
+
+Mở settings của daemon — **Settings → Plugins → SLP → Open** — hoặc gọi RPC
+`activate`. Màn hình hỏi daemon home cần quản lý (mặc định là home của
+daemon đang kết nối), xác nhận mapping host/home, và yêu cầu cửa sổ chỉnh
+sửa quản trị độc quyền: trong lúc một operation chạy, không writer nào khác
+được sửa `config.json` — plugin tự kiểm tra điều kiện này và báo conflict
+thay vì chạy đua.
+
+Kích hoạt sẽ:
+
+- Materialize payload nhúng vào
+  `<paseo-home>/slp-runtime/<candidate-sha256>/` — bất biến theo release.
+- Resolve Node ổn định cùng executable của bốn family provider (probe
+  `--version` thật; family không resolve được thì fail closed).
+- Ghi launch shim vào `slp-runtime/launchers/<launchset-sha256>/` — đường
+  dẫn ổn định mà providers tham chiếu, để đổi runtime không làm hỏng session
+  đang chạy.
+- Patch `config.json` với mười hai provider
+  `slp-{codex,pi,devin,claude}-{supervisor,lead,peer}`, hai saved profile
+  **SLP Supervisor** và **SLP Lead**, đồng thời bật MCP injection.
+- Ghi receipt vào `slp-runtime/state/receipt.json` — journal của mọi
+  operation, dùng cho drift detection và recovery.
+
+Nút **Load status** trên màn hình là read-only — dùng nó để xem trạng thái
+(`INACTIVE`/`ACTIVE`/`RECOVERY_REQUIRED`), binding hiện tại, availability
+của từng family và conflicts trước khi đổi gì.
+
+- Không tạo agent trong lúc cài hay kích hoạt. Ba role vẫn giữ nguyên.
 - **Peer không cần saved profile** — Lead chọn runtime Peer từ pool theo
   project trong `.paseo-slp/slp-routing.json`.
 - Repo giữ tactics trong `.paseo-slp/workspace-protocol.md`; onboarding
   hướng dẫn cấu hình cả hai file.
-- Đổi nơi cài bằng `SLP_HOME=/absolute/path` (hoặc truyền path cho
-  `slp.mjs install`); đổi host config bằng `PASEO_HOME=/absolute/home`
-  (hoặc path sau `--paseo-home`). Chạy installer trên máy của daemon.
-- Chạy lại cùng lệnh sẽ cập nhật tại chỗ một bản cài còn nguyên vẹn: file
-  được đổi nguyên tử, settings profile đã chỉnh được giữ, bản cài bị sửa tay
-  được bảo toàn thay vì bị ghi đè.
-
-Muốn xem các entry sẽ thêm trước khi ghi:
-
-```bash
-node bin/slp.mjs install --paseo-home /absolute/paseo-home
-# thêm --apply để ghi; thêm --reload để kích hoạt trên daemon đang chạy
-```
+- Nếu entry có sẵn đã chiếm một provider/profile ID của SLP, kích hoạt fail
+  với `COLLISION` và giữ nguyên entry đó — `adoptIdentical` chỉ nhận entry
+  khớp chính xác.
+- Nếu raw config và live config lệch nhau, hoặc một entry thuộc sở hữu bị
+  sửa ngoài journal, trạng thái chuyển `RECOVERY_REQUIRED`; chạy **Reconcile
+  → inspect** để kiểm tra lại và resolve trước khi thử lại.
 
 ## Nâng cấp
 
-`install` đã cập nhật tại chỗ; `upgrade` chỉ dùng khi muốn chuyển bản cài
-sang thư mục khác. Lệnh giữ settings của profile và giữ nguyên file cũ cho
-session đang dùng:
+Bản cài qua Git được cập nhật qua Paseo:
 
 ```bash
-node bin/slp.mjs upgrade "$HOME/.local/share/paseo-slp.next" \
-  --from "$HOME/.local/share/paseo-slp" --apply --reload
+paseo plugin update paseo-slp
 ```
 
-Bỏ `--apply --reload` để xem trước. Các session cũ vẫn dùng provider process
-cũ; profile mới áp dụng cho launch sau. Upgrade lưu nguyên settings hiện tại
-của `slp-peer` và các profile disposition cũ do SLP sở hữu trong
-`paseo-binding.json` → `retiredProfiles`, rồi gỡ chúng khỏi profiles đang
-dùng. Hai profile Supervisor/Lead giữ nguyên lựa chọn; project pool không bị
-sửa hay tự động điền từ profile cũ. Catalog đã có và profile cá nhân không
-thuộc bản cài được giữ.
+Daemon fetch source, build checkout mới và reload plugin. Kích hoạt lại sau
+đó sẽ rebind sang candidate mới: runtime mới materialize cạnh runtime cũ
+trong `slp-runtime/`, launchers được build lại, còn session đang chạy giữ
+provider process cũ cho tới khi xong — đường dẫn launch shim ổn định qua các
+candidate. Rebind là idempotent: kích hoạt hai lần cùng một candidate là
+`no-op`.
 
-Bản cũ được giữ để bạn quản lý sau khi các session phụ thuộc đã kết thúc;
-không dùng uninstall bản cũ để gỡ các entry đã chuyển sang bản mới. Dùng
-đường dẫn đang được provider tham chiếu cho `init` và `prepare`.
+Bản cài directory thì reload:
+
+```bash
+paseo plugin reload paseo-slp
+```
+
+## Gỡ kích hoạt và gỡ cài
+
+**Deactivate** (màn hình SLP, hoặc RPC `deactivate`) tháo pack ra: gỡ mười
+hai provider và hai profile, khôi phục cờ MCP injection về giá trị trước
+kích hoạt, đồng thời giữ nguyên mọi thứ khác trong `config.json`. File
+runtime, launchers và receipt được **giữ lại** trong `slp-runtime/` để các
+session đang chạy không gián đoạn — deactivate không bao giờ xóa chúng. Nếu
+giá trị `enabled` của MCP đổi, hoặc một entry được quản lý bị sửa ngoài
+journal, deactivate sẽ bị chặn thay vì ghi đè ngầm.
+
+Sau khi deactivate (hoặc với bản cài chưa từng kích hoạt), gỡ đăng ký
+plugin:
+
+```bash
+paseo plugin remove paseo-slp
+```
+
+`remove` chỉ xóa cấu hình plugin — không đụng `slp-runtime/`, trạng thái
+`.paseo-slp/` trong repo, hay managed checkout.
 
 ## Bắt đầu
 
-1. Cài package (ở trên), rồi mở workspace công việc trong Paseo.
+1. Cài và kích hoạt plugin (ở trên), rồi mở workspace công việc trong Paseo.
 2. Chọn **SLP Supervisor**, nhập objective và phạm vi quyền bình thường, ví
    dụ: "Sửa lỗi hiển thị tổng giỏ hàng; được sửa code/test trong repo này,
    không commit/push/deploy."
@@ -153,10 +195,13 @@ session tương lai. Xem
 
 ## Cấu hình repository
 
-Khởi tạo repo công việc một lần:
+Khởi tạo repo công việc một lần. CLI nằm trong runtime đã materialize —
+`runtimePath` của binding đang active (xem trên màn hình SLP/status) là
+`<paseo-home>/slp-runtime/<candidate-sha256>`:
 
 ```bash
-node "$HOME/.local/share/paseo-slp/bin/slp.mjs" init /absolute/job-repo --apply
+SLP_RT="$HOME/.paseo/slp-runtime/<candidate-sha256>"
+node "$SLP_RT/bin/slp.mjs" init /absolute/job-repo --apply
 ```
 
 Lệnh chỉ tạo các file còn thiếu và giữ nguyên từng file đã có:
@@ -171,12 +216,12 @@ Lệnh chỉ tạo các file còn thiếu và giữ nguyên từng file đã có
 - `.paseo-slp/notebook.md`: notebook mặc định của Supervisor; protocol ghi
   nhận owner và cách truy xuất thực tế (file này hoặc `timeline:<agentId>`).
 
-Catalog user-scope `$PASEO_HOME/slp-routing.json` tồn tại vì
-`install`/`upgrade --apply` seed cùng skeleton đó khi file chưa có; file đã
-tồn tại thì không bị ghi đè. Các ghế giữ nguyên disabled cho tới khi
-onboarding hoặc Human điền model — catalog user chỉ có skeleton nghĩa là
-chưa có pool fallback, không phải lỗi. `uninstall` chỉ xóa nó khi file còn nguyên vẹn như lúc
-scaffold (hash ghi trong `paseo-binding.json`); đã sửa thì uninstall giữ lại.
+Catalog user-scope `$PASEO_HOME/slp-routing.json` **không** do plugin tạo —
+kích hoạt chỉ quản lý `config.json` và `slp-runtime/`. File này do
+`slp.mjs init` hoặc onboarding ghi giúp bạn; khi chưa có, repo không có
+catalog riêng đơn giản là chưa có pool fallback (không phải lỗi).
+Deactivation và `plugin remove` không bao giờ đụng nó — đã tồn tại là của
+bạn.
 
 ### Onboarding
 
@@ -221,7 +266,7 @@ chính nó.
 Nếu đã có bảng global từ bản trước, import một lần vào repo muốn dùng:
 
 ```bash
-node "$HOME/.local/share/paseo-slp/bin/slp.mjs" init /absolute/job-repo \
+node "$SLP_RT/bin/slp.mjs" init /absolute/job-repo \
   --routing-from /absolute/previous/slp-routing.json --apply
 ```
 
@@ -358,8 +403,8 @@ Hai lệnh read-only hỗ trợ discovery, chạy được offline (không cần
 `paseo` trên PATH):
 
 ```bash
-node bin/slp.mjs inventory [--paseo-home /absolute/paseo-home]
-node bin/slp.mjs agents [--paseo-home /absolute/paseo-home]
+node "$SLP_RT/bin/slp.mjs" inventory [--paseo-home /absolute/paseo-home]
+node "$SLP_RT/bin/slp.mjs" agents [--paseo-home /absolute/paseo-home]
 ```
 
 `inventory` in `{providers, profiles, source}` đúng shape `prepare` nhận.
@@ -394,7 +439,7 @@ mới thiếu hẳn protocol và catalog. `materialize` clone chúng từ một 
 có sẵn:
 
 ```bash
-node bin/slp.mjs materialize /absolute/target-repo --from /absolute/source-repo
+node "$SLP_RT/bin/slp.mjs" materialize /absolute/target-repo --from /absolute/source-repo
 # mặc định dry-run; thêm --apply để ghi
 ```
 
@@ -416,7 +461,7 @@ gọi là một lần scan, không phải daemon, và chỉ emit candidate chứ
 verdict:
 
 ```bash
-node bin/slp.mjs monitor /absolute/request.json
+node "$SLP_RT/bin/slp.mjs" monitor /absolute/request.json
 ```
 
 Request khai `agents` (`id`, `cwd` tùy chọn — fallback về `cwd` trong state
@@ -451,7 +496,7 @@ bị truncate vào overflow file) — structured timeline đầy đủ vẫn là
 `<checkout-của-nó>/.paseo-slp/notebook.md`, không nhìn thấy từ main checkout:
 
 ```bash
-node bin/slp.mjs notebook /absolute/repository [--paseo-home /absolute/paseo-home]
+node "$SLP_RT/bin/slp.mjs" notebook /absolute/repository [--paseo-home /absolute/paseo-home]
 ```
 
 Lệnh resolve git common dir của repository — thuộc tính liên kết một
@@ -463,24 +508,6 @@ lastActivityAt, notebook, notebookExists}` sắp theo activity mới nhất, kè
 sửa nội dung notebook, và không chọn candidate nào là authoritative; vị trí
 governance vẫn là per-checkout.
 
-## Gỡ cài đặt
-
-Gỡ sau khi các session dùng bản cài đã hoàn tất:
-
-```bash
-node bin/slp.mjs uninstall "$HOME/.local/share/paseo-slp" --apply --reload
-```
-
-Uninstall bỏ các entry do bản cài tạo và khôi phục hai cờ MCP trước cài; giữ
-các config khác và catalog Human đã sửa. Scaffold catalog user-scope chỉ bị
-xóa khi còn nguyên vẹn (theo hash đã ghi), nên catalog đã điền được giữ lại.
-Nếu profile/provider/file cài đã được
-sửa, lệnh dừng và giữ nguyên để bạn quyết định cách giữ thay đổi. Protocol
-trong repo công việc được giữ lại. Reload lỗi không đảo ngược việc ghi file:
-output báo `reloadRequired`/`reloadError`; chạy lại `PASEO_HOME=/absolute/home
-paseo reload --json` sau khi xử lý nguyên nhân. Installer không tự restart
-daemon hay trả lời permission của agent.
-
 ## Kiểm thử
 
 ```bash
@@ -488,14 +515,17 @@ npm test
 npm run check
 ```
 
-Kiểm tra local gồm cài–gỡ, bảo toàn cấu hình, protocol và adapter stdio;
-chúng không chứng minh role tuân thủ operating guide. Transport trước đây
-được đối chiếu với Paseo 0.7.2/Codex 0.153.4; chưa có E2E acceptance cho
-revision này. Role là instruction hành vi, không phải filesystem/MCP sandbox.
-Transport hỗ trợ Codex, Pi, Devin và Claude; routing, adapter, upgrade và handoff có kiểm
-tra local. Live provider switching, heartbeat, council, recovery và
-concurrent writers chưa được nghiệm thu E2E. Capability và đường nạp policy
-được ghi trong bảng trace bên dưới.
+Kiểm tra local gồm transaction/recovery của manager, materializer, sinh
+launch-shim, bảo toàn cấu hình, protocol và adapter stdio; chúng không
+chứng minh role tuân thủ operating guide. Plugin đã được kiểm chứng live
+trên daemon Paseo 0.8.0 thật: cài qua Git source, màn hình settings, các RPC
+activate/deactivate/reconcile, patch provider/profile, từ chối collision và
+drift, cùng phân loại recovery — xem `.local-checks/` cho evidence ledger.
+Role là instruction hành vi, không phải filesystem/MCP sandbox. Transport
+hỗ trợ Codex, Pi, Devin và Claude; routing, adapter và handoff có kiểm tra
+local. Live provider switching, heartbeat, council và toàn bộ E2E manifest
+chưa được nghiệm thu E2E. Capability và đường nạp policy được ghi trong
+bảng trace bên dưới.
 
 ## E2E
 
@@ -518,9 +548,10 @@ chiếu profiles cho Supervisor/Lead và option/hash cho Peer. `mixed-peer` ki�
 tra pool có cả Codex/Pi, không cần thêm saved profile hay ép family của Lead
 theo mỗi Peer. Các scenario ngoài scope giữ NOT_RUN.
 
-Đường offline vẫn có: `install <dir> --apply` không có `--paseo-home` chỉ
-stage package; `prepare <request.json>` xuất create_agent arguments có role
-envelope. Đường này không đăng ký profile hay tự tạo agent.
+Đường offline vẫn có: `install <dir> --apply` (chạy từ `bin/slp.mjs` của
+source checkout) chỉ stage package; `prepare <request.json>` xuất
+create_agent arguments có role envelope. Đường này không đăng ký profile
+hay tự tạo agent.
 
 ## Tài liệu
 
