@@ -1,4 +1,4 @@
-// Pure view-state helpers for the SLP manager settings screen (spec §3, §9–§11).
+// Pure view-state helpers for the SLP manager surface (spec §3, §9–§11).
 // No react/host imports: this module is unit-tested directly under node, and
 // the client bundle check proves it pulls in no server-only or node code.
 import { AbsolutePath, Id } from "../shared/contracts.ts";

@@ -53,9 +53,9 @@ the plugin.
 
 ## Activation
 
-Open the daemon's settings — **Settings → Plugins → SLP → Open** — or call
-the `activate` RPC. The screen asks for the daemon home to manage (defaults
-to the connected daemon's own home), confirms the host/home mapping, and
+Open **SLP** in the sidebar (or "Open SLP manager" from the command palette) —
+or call the `activate` RPC. The surface asks for the daemon home to manage,
+confirms the host/home mapping, and
 requires the exclusive administrative edit window: while an operation runs,
 no other writer should edit `config.json` — the plugin verifies this
 precondition and reports conflicts rather than racing.
@@ -535,7 +535,7 @@ Local checks cover the manager's transaction/recovery logic, the
 materializer, launch-shim generation, config preservation, protocol and the
 stdio adapter; they do not prove role compliance with the operating guide.
 The plugin has additionally been verified live on a real Paseo 0.8.0 daemon:
-Git-source install, settings screen, activate/deactivate/reconcile RPCs,
+Git-source install, management surface, activate/deactivate/reconcile RPCs,
 provider/profile patching, collision and drift refusals, and recovery
 classification — see `.local-checks/` for the evidence ledger. Roles are
 behavioral instructions, not a filesystem/MCP sandbox. The transport supports

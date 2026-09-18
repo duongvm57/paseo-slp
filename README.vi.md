@@ -50,9 +50,9 @@ với plugin.
 
 ## Kích hoạt
 
-Mở settings của daemon — **Settings → Plugins → SLP → Open** — hoặc gọi RPC
-`activate`. Màn hình hỏi daemon home cần quản lý (mặc định là home của
-daemon đang kết nối), xác nhận mapping host/home, và yêu cầu cửa sổ chỉnh
+Mở **SLP** trên sidebar (hoặc "Open SLP manager" từ command palette) — hoặc
+gọi RPC `activate`. Surface hỏi daemon home cần quản lý, xác nhận mapping
+host/home, và yêu cầu cửa sổ chỉnh
 sửa quản trị độc quyền: trong lúc một operation chạy, không writer nào khác
 được sửa `config.json` — plugin tự kiểm tra điều kiện này và báo conflict
 thay vì chạy đua.
@@ -515,7 +515,7 @@ npm run check
 Kiểm tra local gồm transaction/recovery của manager, materializer, sinh
 launch-shim, bảo toàn cấu hình, protocol và adapter stdio; chúng không
 chứng minh role tuân thủ operating guide. Plugin đã được kiểm chứng live
-trên daemon Paseo 0.8.0 thật: cài qua Git source, màn hình settings, các RPC
+trên daemon Paseo 0.8.0 thật: cài qua Git source, surface quản lý, các RPC
 activate/deactivate/reconcile, patch provider/profile, từ chối collision và
 drift, cùng phân loại recovery — xem `.local-checks/` cho evidence ledger.
 Role là instruction hành vi, không phải filesystem/MCP sandbox. Transport

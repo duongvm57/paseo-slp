@@ -368,15 +368,25 @@ test('client entry bundles against host externals with no server-only or node co
     format: 'esm',
     platform: 'neutral',
     logLevel: 'silent',
-    external: ['@getpaseo/plugin*', 'zod', 'react', 'react/jsx-runtime'],
+    // Mirrors the host compiler's client externals (compiler.js): the plugin
+    // SDK specifiers plus the host-provided UI runtime.
+    external: [
+      '@getpaseo/plugin*',
+      'zod',
+      'react',
+      'react/jsx-runtime',
+      'react-native',
+      '@tanstack/react-query',
+    ],
   });
   const bundle = result.outputFiles[0].text;
   assert.ok(bundle.length > 0);
-  // The screen and shared contracts were actually inlined.
-  assert.ok(bundle.includes('SLP runtime manager'));
+  // The surface and shared contracts were actually inlined.
+  assert.ok(bundle.includes('Daemon home'));
   assert.ok(bundle.includes('exclusiveAdministrativeWindow'));
   // Host externals stay external.
   assert.match(bundle, /from\s*"react"/);
+  assert.match(bundle, /from\s*"react-native"/);
   assert.match(bundle, /from\s*"zod"/);
   assert.match(bundle, /from\s*"@getpaseo\/plugin\/client"/);
   // No node builtins or server modules leaked into the client bundle.
