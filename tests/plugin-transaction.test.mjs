@@ -87,7 +87,9 @@ test('happy activate: INACTIVE → ACTIVE, providers/profiles/injection written,
   for (const id of OWNED_IDS) {
     const family = id.split('-')[1];
     const entry = providers[id];
-    assert.equal(entry.label, `SLP ${family} ${id.split('-')[2]}`);
+    const familyLabel = { codex: 'Codex', pi: 'Pi', devin: 'Devin', claude: 'Claude Code' }[family];
+    const roleLabel = id.split('-')[2][0].toUpperCase() + id.split('-')[2].slice(1);
+    assert.equal(entry.label, `SLP ${familyLabel} ${roleLabel}`);
     assert.equal(entry.enabled, true);
     assert.equal(entry.command.length, 1);
     assert.ok(entry.command[0].includes(`${home}/slp-runtime/launchers/`), `command for ${id}`);
@@ -617,6 +619,120 @@ test('initialProfileFamily selects the profile provider family', async t => {
   assert.equal(done.state, 'ACTIVE');
   const lead = readConfigJson(home).daemon.agentProfiles.find(p => p.id === 'slp-lead');
   assert.equal(lead.provider, 'slp-pi-lead');
+});
+
+test('profiles on first activation write the supplied values verbatim', async t => {
+  const home = makeHome(t);
+  const binaries = makeBinaries(t);
+  const daemon = await makeDaemon(t, home);
+  const deps = makeDeps({ execOpts: { binaries } });
+  const manager = createManager(deps);
+  const act = await manager.activate(
+    activateInput(home, deps.payload, randomUUID(), {
+      profiles: {
+        supervisor: { model: 'swe-2-high', modeId: 'bypass', featureValues: { auto_accept: true } },
+        lead: { family: 'devin', model: 'swe-2-max' },
+      },
+    }),
+    daemon,
+  );
+  const done = await waitTerminal(manager, home, act.operation.operationId, daemon);
+  assert.equal(done.state, 'ACTIVE');
+  const profiles = readConfigJson(home).daemon.agentProfiles;
+  const supervisor = profiles.find(p => p.id === 'slp-supervisor');
+  const lead = profiles.find(p => p.id === 'slp-lead');
+  assert.equal(supervisor.model, 'swe-2-high');
+  assert.equal(supervisor.modeId, 'bypass');
+  assert.deepEqual(supervisor.featureValues, { auto_accept: true });
+  assert.equal(supervisor.provider, 'slp-codex-supervisor', 'default family applies without a per-role override');
+  assert.equal(lead.provider, 'slp-devin-lead', 'per-role family override repoints the provider');
+  assert.equal(lead.model, 'swe-2-max');
+  assert.equal(lead.modeId, undefined, 'unset fields are never invented');
+  assert.equal(lead.featureValues, undefined);
+  assert.equal(supervisor.family, undefined, 'family is a picker control, never a persisted field');
+});
+
+test('profiles on an existing binding apply explicit edits: set, clear, repoint', async t => {
+  const home = makeHome(t);
+  const binaries = makeBinaries(t);
+  const daemon = await makeDaemon(t, home);
+  const deps = makeDeps({ execOpts: { binaries } });
+  const manager = createManager(deps);
+  const act = await manager.activate(
+    activateInput(home, deps.payload, randomUUID(), {
+      profiles: { supervisor: { model: 'swe-2-high', modeId: 'bypass' } },
+    }),
+    daemon,
+  );
+  await waitTerminal(manager, home, act.operation.operationId, daemon);
+  const edit = await manager.activate(
+    activateInput(home, deps.payload, randomUUID(), {
+      profiles: {
+        supervisor: { model: null, family: 'devin' },
+        lead: { model: 'swe-2-max', featureValues: { auto_accept: true } },
+      },
+    }),
+    daemon,
+  );
+  assert.equal(edit.accepted, true);
+  const done = await waitTerminal(manager, home, edit.operation.operationId, daemon);
+  assert.equal(done.operation.outcome, 'succeeded');
+  const profiles = readConfigJson(home).daemon.agentProfiles;
+  const supervisor = profiles.find(p => p.id === 'slp-supervisor');
+  const lead = profiles.find(p => p.id === 'slp-lead');
+  assert.equal(supervisor.provider, 'slp-devin-supervisor', 'family repoints the provider');
+  assert.equal(supervisor.model, undefined, 'null clears the field');
+  assert.equal(supervisor.modeId, 'bypass', 'absent fields preserve the live value');
+  assert.equal(lead.provider, 'slp-codex-lead', 'no family key preserves the live provider');
+  assert.equal(lead.model, 'swe-2-max');
+  assert.deepEqual(lead.featureValues, { auto_accept: true });
+});
+
+test('profiles on an existing binding reject an unavailable family', async t => {
+  const home = makeHome(t);
+  const binaries = makeBinaries(t, ['codex', 'pi', 'devin']); // claude unresolved
+  const daemon = await makeDaemon(t, home);
+  const deps = makeDeps({ execOpts: { binaries } });
+  const manager = createManager(deps);
+  const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
+  await waitTerminal(manager, home, act.operation.operationId, daemon);
+  const bad = await manager.activate(
+    activateInput(home, deps.payload, randomUUID(), {
+      profiles: { supervisor: { family: 'claude' } },
+    }),
+    daemon,
+  );
+  assert.equal(bad.accepted, true, 'the request is journaled; the plan stage rejects');
+  const done = await waitTerminal(manager, home, bad.operation.operationId, daemon);
+  assert.equal(done.operation.outcome, 'failed');
+  const supervisor = readConfigJson(home).daemon.agentProfiles.find(p => p.id === 'slp-supervisor');
+  assert.equal(supervisor.provider, 'slp-codex-supervisor', 'a rejected edit leaves the live profile untouched');
+});
+
+test('status exposes live managed-profile values for the bound editor', async t => {
+  const home = makeHome(t);
+  const binaries = makeBinaries(t);
+  const daemon = await makeDaemon(t, home);
+  const deps = makeDeps({ execOpts: { binaries } });
+  const manager = createManager(deps);
+  const pre = await manager.status(statusInput(home), daemon);
+  assert.deepEqual(pre.managedProfiles, [], 'no binding → no managed profiles');
+  const act = await manager.activate(
+    activateInput(home, deps.payload, randomUUID(), {
+      profiles: { lead: { model: 'swe-2-max', modeId: 'bypass' } },
+    }),
+    daemon,
+  );
+  await waitTerminal(manager, home, act.operation.operationId, daemon);
+  const post = await manager.status(statusInput(home), daemon);
+  assert.equal(post.managedProfiles.length, 2);
+  const lead = post.managedProfiles.find(p => p.id === 'slp-lead');
+  const supervisor = post.managedProfiles.find(p => p.id === 'slp-supervisor');
+  assert.equal(lead.provider, 'slp-codex-lead');
+  assert.equal(lead.model, 'swe-2-max');
+  assert.equal(lead.modeId, 'bypass');
+  assert.equal(supervisor.model, null);
+  assert.equal(supervisor.featureValues, null);
 });
 
 test('status reports state and never mutates; unknown operationId → NOT_FOUND', async t => {

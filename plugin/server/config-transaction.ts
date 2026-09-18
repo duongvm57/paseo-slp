@@ -32,14 +32,17 @@ import {
   type OperationKindValue,
   type OwnedProviderValue,
   type PlanValue,
+  type ProfilePrefsValue,
   type ProfileValue,
   type ProjectionValue,
 } from "../shared/contracts.ts";
 import {
   FAMILIES,
+  FAMILY_DISPLAY,
   OWNED_PROFILE_IDS,
   OWNED_PROVIDER_IDS,
   PROVIDER_EXTENDS,
+  ROLE_DISPLAY,
   allProfilesHash,
   canonicalEqual,
   canonicalSha256,
@@ -474,7 +477,7 @@ export function desiredProviderEntries(
       const id = ownedProviderId(family, role);
       entries[id] = {
         extends: PROVIDER_EXTENDS[family] as OwnedProviderValue["extends"],
-        label: `SLP ${family} ${role}`,
+        label: `SLP ${FAMILY_DISPLAY[family]} ${ROLE_DISPLAY[role]}`,
         command: [launcherPathFor(launchSet, id)],
         env: desiredProviderEnv(family, {
           runtimePath,
@@ -489,22 +492,62 @@ export function desiredProviderEntries(
   return entries;
 }
 
-/** The two owned saved profiles for a fresh binding (§6, src conventions). */
-export function desiredProfiles(family: FamilyName): ProfileValue[] {
+/** The two owned saved profiles for a fresh binding (§6, src conventions).
+ *  Human-supplied preferences are merged verbatim — the plugin invents no
+ *  model, mode, or feature defaults of its own. `family` picks the managed
+ *  provider for that role; `null` and absent fields are simply not written. */
+export function desiredProfiles(
+  family: FamilyName,
+  prefs?: { supervisor?: ProfilePrefsValue; lead?: ProfilePrefsValue },
+): ProfileValue[] {
+  const notes = (role: string) =>
+    `Managed by the paseo-slp plugin — remove via the SLP surface, not by deleting this profile. SLP ${role}; installed role instructions load automatically. Use Paseo delegation and finish notifications.`;
+  const fields = (role: "supervisor" | "lead") => {
+    const { family: _family, ...rest } = prefs?.[role] ?? {};
+    return Object.fromEntries(
+      Object.entries(rest).filter(([, value]) => value !== null && value !== undefined),
+    );
+  };
   return [
     {
       id: "slp-supervisor",
       name: "SLP Supervisor",
-      provider: ownedProviderId(family, "supervisor"),
-      notes: "SLP supervisor; installed role instructions load automatically. Use Paseo delegation and finish notifications.",
+      provider: ownedProviderId(prefs?.supervisor?.family ?? family, "supervisor"),
+      notes: notes("supervisor"),
+      ...fields("supervisor"),
     },
     {
       id: "slp-lead",
       name: "SLP Lead",
-      provider: ownedProviderId(family, "lead"),
-      notes: "SLP lead; installed role instructions load automatically. Use Paseo delegation and finish notifications.",
+      provider: ownedProviderId(prefs?.lead?.family ?? family, "lead"),
+      notes: notes("lead"),
+      ...fields("lead"),
     },
   ];
+}
+
+/** Apply explicit profile preferences onto a live owned profile under a
+ *  binding: absent fields preserve the live value, `null` clears the field,
+ *  and `family` repoints the provider at that family's managed provider for
+ *  the profile's role. The caller must have already validated the live entry
+ *  and the family's availability. */
+export function applyProfilePrefs(
+  live: ProfileValue,
+  prefs: ProfilePrefsValue | undefined,
+  role: "supervisor" | "lead",
+): ProfileValue {
+  if (!prefs) return live;
+  const next: Record<string, unknown> = { ...live };
+  if (prefs.family !== undefined) {
+    next.provider = ownedProviderId(prefs.family, role);
+  }
+  for (const key of ["model", "modeId", "thinkingOptionId", "featureValues"] as const) {
+    const value = prefs[key];
+    if (value === undefined) continue;
+    if (value === null) delete next[key];
+    else next[key] = value;
+  }
+  return next as ProfileValue;
 }
 
 const PROFILE_ROLE: Record<string, string> = {
@@ -816,7 +859,7 @@ function legacyProfileConflicts(rawJson: unknown): void {
 export interface ActivationPlanArgs {
   raw: RawConfigView;
   effectiveConfig: unknown;
-  input: Pick<ActivateRequest, "adoptIdentical" | "initialProfileFamily">;
+  input: Pick<ActivateRequest, "adoptIdentical" | "initialProfileFamily" | "profiles">;
   previousBinding: BindingValue | null;
   resolution: ExecutableResolution;
   launchSet: LaunchSet;
@@ -971,6 +1014,29 @@ export function planActivation(args: ActivationPlanArgs): PlanResult {
       );
     }
     desiredProfiles_ = validateOwnedProfilesForRebind(raw.json, resolution);
+    if (input.profiles) {
+      // Explicit profile edit on an existing binding: apply each role's prefs
+      // over the validated live entry. A requested provider family must be
+      // available — the plan never points a profile at an unusable provider.
+      const available = availableFamilies(resolution);
+      for (const role of ["supervisor", "lead"] as const) {
+        const family = input.profiles[role]?.family;
+        if (family !== undefined && !available.includes(family)) {
+          throw new OperationConflict(
+            "INVALID_REQUEST",
+            `profile ${role}: family ${family} is unavailable; pick an available family`,
+            { path: `daemon.agentProfiles.slp-${role}` },
+          );
+        }
+      }
+      desiredProfiles_ = desiredProfiles_.map(entry =>
+        applyProfilePrefs(
+          entry,
+          input.profiles?.[PROFILE_ROLE[entry.id] as "supervisor" | "lead"],
+          PROFILE_ROLE[entry.id] as "supervisor" | "lead",
+        ),
+      );
+    }
     baseline = previousBinding.baseline;
   } else {
     // Rule 1 — present SLP entries adoptable only with adoptIdentical and
@@ -999,7 +1065,7 @@ export function planActivation(args: ActivationPlanArgs): PlanResult {
       }
     }
     const family = selectProfileFamily(resolution, effective, input.initialProfileFamily);
-    desiredProfiles_ = desiredProfiles(family);
+    desiredProfiles_ = desiredProfiles(family, input.profiles);
     for (const wanted of desiredProfiles_) {
       const existing = rawProfiles.value.filter(
         entry => isRecord(entry) && entry.id === wanted.id,

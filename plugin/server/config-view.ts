@@ -35,6 +35,17 @@ export const PROVIDER_EXTENDS: Record<FamilyName, string> = {
   devin: "acp",
   claude: "claude",
 };
+export const FAMILY_DISPLAY: Record<FamilyName, string> = {
+  codex: "Codex",
+  pi: "Pi",
+  devin: "Devin",
+  claude: "Claude Code",
+};
+export const ROLE_DISPLAY: Record<RoleName, string> = {
+  supervisor: "Supervisor",
+  lead: "Lead",
+  peer: "Peer",
+};
 
 export function providerExtendsForId(id: string): string | null {
   const match = /^slp-(codex|pi|devin|claude)-(supervisor|lead|peer)$/.exec(id);

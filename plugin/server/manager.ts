@@ -41,6 +41,7 @@ import { createJournal, emptyReceipt, findOperation, pendingOperation } from "./
 import {
   FAMILIES,
   OWNED_PROVIDER_IDS,
+  OWNED_PROFILE_IDS,
   canonicalSha256,
   effectiveView,
   extractProjection,
@@ -773,6 +774,10 @@ export function createManager(deps: ManagerDeps): Manager {
           ),
         ]);
       }
+      // `profiles` is accepted on an existing binding too: planActivation then
+      // treats each role's prefs as an explicit edit applied over the live
+      // entries (absent = preserve, null = clear, family = repoint provider)
+      // under the same serialized operation and receipt as any other verify.
       const intent: IntentValue = {
         operationId: request.operationId,
         requestSha256: requestSha,
@@ -2428,6 +2433,7 @@ export function createManager(deps: ManagerDeps): Manager {
         state: "INACTIVE",
         embeddedCandidateSha256: deps.payload.candidate.sha256,
         binding: null,
+        managedProfiles: [],
         families: FAMILIES.map(family => ({
           family,
           availability: "unresolved" as const,
@@ -2460,6 +2466,7 @@ export function createManager(deps: ManagerDeps): Manager {
         state: "INACTIVE",
         embeddedCandidateSha256: deps.payload.candidate.sha256,
         binding: null,
+        managedProfiles: [],
         families: unresolvedFamilies,
         operation: null,
         conflicts: [toConflict(error)],
@@ -2478,6 +2485,7 @@ export function createManager(deps: ManagerDeps): Manager {
         state: "RECOVERY_REQUIRED",
         embeddedCandidateSha256: deps.payload.candidate.sha256,
         binding: null,
+        managedProfiles: [],
         families: unresolvedFamilies,
         operation: null,
         conflicts: [toConflict(error)],
@@ -2512,6 +2520,7 @@ export function createManager(deps: ManagerDeps): Manager {
         state: ownedPresent ? "RECOVERY_REQUIRED" : "INACTIVE",
         embeddedCandidateSha256: deps.payload.candidate.sha256,
         binding: null,
+        managedProfiles: [],
         families: unresolvedFamilies,
         operation: null,
         conflicts: boundConflicts(conflicts),
@@ -2574,11 +2583,36 @@ export function createManager(deps: ManagerDeps): Manager {
     }
 
     const binding = receipt.binding;
+    // Live values of the two managed profiles, for the surface's bound-state
+    // editor — read-only, same local config read the no-receipt branch does.
+    // A read failure reports as a conflict rather than hiding the profiles.
+    let managedProfiles: StatusResult["managedProfiles"] = [];
+    if (binding) {
+      try {
+        const raw = readRawConfig(ctx.configPath);
+        managedProfiles = profilesArray(raw.json).value
+          .filter(
+            (entry): entry is Record<string, unknown> =>
+              isRecord(entry) && typeof entry.id === "string" && OWNED_PROFILE_IDS.includes(entry.id),
+          )
+          .map(entry => ({
+            id: entry.id as string,
+            provider: typeof entry.provider === "string" ? entry.provider : null,
+            model: typeof entry.model === "string" ? entry.model : null,
+            modeId: typeof entry.modeId === "string" ? entry.modeId : null,
+            thinkingOptionId: typeof entry.thinkingOptionId === "string" ? entry.thinkingOptionId : null,
+            featureValues: isRecord(entry.featureValues) ? entry.featureValues : null,
+          }));
+      } catch (error) {
+        conflicts.push(toConflict(error));
+      }
+    }
     return bounded({
       schemaVersion: 1,
       target: { hostId: request.target.hostId, daemonHome: ctx.canonicalHome },
       state,
       embeddedCandidateSha256: deps.payload.candidate.sha256,
+      managedProfiles,
       binding: binding
         ? {
             bindingSha256: binding.bindingSha256,

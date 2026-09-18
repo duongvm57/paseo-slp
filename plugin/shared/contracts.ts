@@ -71,6 +71,19 @@ const Start = z.object({
   operationId: Id,
   authority: Authority,
 }).strict();
+/** Human-supplied preferences merged into an owned profile. Optional
+ *  everywhere — the plugin never invents model, mode, or feature defaults.
+ *  On first activation an absent field is simply not written; on an existing
+ *  binding `activate` treats the object as an explicit edit — absent fields
+ *  preserve the live value, `null` clears it, and `family` repoints the
+ *  profile at that family's managed provider for the profile's role. */
+export const ProfilePrefs = z.object({
+  family: Family.optional(),
+  model: z.string().min(1).nullable().optional(),
+  modeId: z.string().min(1).nullable().optional(),
+  thinkingOptionId: z.string().min(1).nullable().optional(),
+  featureValues: z.record(z.string(), z.unknown()).nullable().optional(),
+}).strict();
 export const ActivateInput = Start.extend({
   candidateSha256: Sha,
   adoptIdentical: z.boolean().default(false),
@@ -80,6 +93,10 @@ export const ActivateInput = Start.extend({
     devin: AbsolutePath.optional(), claude: AbsolutePath.optional(),
   }).strict().default({}),
   initialProfileFamily: Family.optional(),
+  profiles: z.object({
+    supervisor: ProfilePrefs.optional(),
+    lead: ProfilePrefs.optional(),
+  }).strict().optional(),
 }).strict();
 export const ReconcileInput = Start.extend({
   action: z.enum(["inspect", "complete", "restore-before"]),
@@ -108,12 +125,24 @@ export const FamilyView = z.object({
   binaryPath: AbsolutePath.nullable(),
   observedVersion: z.string().nullable(),
 }).strict();
+/** Live tunable fields of one managed profile, read from daemon config —
+ *  lets the surface prefill the bound-state profile editor with the same
+ *  values the host's profile editor would show. Empty when no binding. */
+export const ManagedProfileView = z.object({
+  id: z.string(),
+  provider: z.string().nullable(),
+  model: z.string().nullable(),
+  modeId: z.string().nullable(),
+  thinkingOptionId: z.string().nullable(),
+  featureValues: z.record(z.string(), z.unknown()).nullable(),
+}).strict();
 export const StatusOutput = z.object({
   schemaVersion: z.literal(1),
   target: Target,
   state: State,
   embeddedCandidateSha256: Sha,
   binding: BindingView.nullable(),
+  managedProfiles: z.array(ManagedProfileView).max(2),
   families: z.array(FamilyView).length(4),
   operation: OperationView.nullable(),
   conflicts: z.array(Conflict).max(64),
@@ -132,11 +161,67 @@ export const LocalTargetOutput = z.object({
   daemonHome: AbsolutePath,
   source: z.enum(["env", "default"]),
 }).strict();
+/** Read-only catalog query: the model/mode list a managed slp-<family>-*
+ *  provider inherits from its base provider (`extends`), resolved live via
+ *  PaseoApi.providers — available before any binding exists, which is exactly
+ *  when the initial-profile picker needs it. */
+export const CatalogInput = z.object({
+  schemaVersion: z.literal(1),
+  family: Family,
+  // Feature listing runs on a draft agent config — cwd is required by the
+  // host API; model/modeId refine which features a provider reports.
+  cwd: AbsolutePath.optional(),
+  model: z.string().min(1).optional(),
+  modeId: z.string().min(1).optional(),
+}).strict();
+export const CatalogOption = z.object({
+  id: z.string().min(1),
+  label: z.string(),
+}).strict();
+/** Provider feature definition — the same descriptor the host's profile
+ *  editor renders as a toggle or select. `value` is the provider default;
+ *  profile-level overrides live in `featureValues`. */
+export const CatalogFeature = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("toggle"),
+    id: z.string().min(1),
+    label: z.string(),
+    description: z.string().optional(),
+    tooltip: z.string().optional(),
+    icon: z.string().optional(),
+    value: z.boolean(),
+  }).strict(),
+  z.object({
+    type: z.literal("select"),
+    id: z.string().min(1),
+    label: z.string(),
+    description: z.string().optional(),
+    tooltip: z.string().optional(),
+    icon: z.string().optional(),
+    value: z.string().nullable(),
+    options: z.array(z.object({
+      id: z.string().min(1),
+      label: z.string(),
+      description: z.string().optional(),
+      isDefault: z.boolean().optional(),
+      metadata: z.record(z.string(), z.unknown()).optional(),
+    }).strict()),
+  }).strict(),
+]);
+export const CatalogOutput = z.object({
+  schemaVersion: z.literal(1),
+  models: z.array(CatalogOption),
+  modes: z.array(CatalogOption),
+  features: z.array(CatalogFeature),
+  /** Non-fatal: a provider that cannot answer reports here instead of rejecting. */
+  error: z.string().nullable(),
+}).strict();
 export const activate = defineRpc({ name: "activate", input: ActivateInput, output: StartOutput });
 export const reconcile = defineRpc({ name: "reconcile", input: ReconcileInput, output: StartOutput });
 export const deactivate = defineRpc({ name: "deactivate", input: DeactivateInput, output: StartOutput });
 export const status = defineRpc({ name: "status", input: StatusInput, output: StatusOutput });
 export const localTarget = defineRpc({ name: "local-target", input: LocalTargetInput, output: LocalTargetOutput });
+export const catalog = defineRpc({ name: "catalog", input: CatalogInput, output: CatalogOutput });
 
 // ---------------------------------------------------------------------------
 // §7 receipt / operation-intent journal schemas (server-internal; the client
@@ -275,6 +360,10 @@ export type OperationViewValue = z.infer<typeof OperationView>;
 export type TargetValue = z.infer<typeof Target>;
 export type AuthorityValue = z.infer<typeof Authority>;
 export type ActivateRequest = z.infer<typeof ActivateInput>;
+export type ProfilePrefsValue = z.infer<typeof ProfilePrefs>;
+export type CatalogOptionValue = z.infer<typeof CatalogOption>;
+export type CatalogRequest = z.infer<typeof CatalogInput>;
+export type CatalogResult = z.infer<typeof CatalogOutput>;
 export type ReconcileRequest = z.infer<typeof ReconcileInput>;
 export type DeactivateRequest = z.infer<typeof DeactivateInput>;
 export type StatusRequest = z.infer<typeof StatusInput>;

@@ -206,10 +206,10 @@ export const liveAcceptanceLabel = (value: StatusResult["liveAcceptance"]): stri
 export function stateHint(state: StateValue): string {
   switch (state) {
     case "RECOVERY_REQUIRED":
-      return "interrupted or divergent state — run Reconcile (inspect) before any mutation";
+      return "Interrupted or divergent state — run Reconcile (Inspect) before any mutation";
     case "ACTIVATING":
     case "DEACTIVATING":
-      return "operation in progress";
+      return "Operation in progress";
     default:
       return "";
   }

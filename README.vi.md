@@ -72,7 +72,7 @@ Kích hoạt sẽ:
 - Ghi receipt vào `slp-runtime/state/receipt.json` — journal của mọi
   operation, dùng cho drift detection và recovery.
 
-Nút **Load status** trên màn hình là read-only — dùng nó để xem trạng thái
+Nút **Inspect** trên surface là read-only — dùng nó để xem trạng thái
 (`INACTIVE`/`ACTIVE`/`RECOVERY_REQUIRED`), binding hiện tại, availability
 của từng family và conflicts trước khi đổi gì.
 

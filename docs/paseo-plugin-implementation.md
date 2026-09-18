@@ -122,7 +122,7 @@ The underlying invoke wire request contains `type: "plugin.rpc.invoke.request"`,
 
 **DECISION: expose exactly four versioned-schema RPCs named `activate`, `reconcile`, `deactivate`, and `status`.** Rationale: bounded start responses plus polling survive the non-canceling 30-second invoke timeout. Sources: `S/plugins/runtime.js:15,342–362`; `S/plugins/plugin-process.js:375–392`; [audit](paseo-plugin-feasibility.md):739–744.
 
-The following Zod definitions are normative. The package exports all four contracts from `plugin/shared/contracts.ts`. They introduce SLP schemas; they do not claim to be pre-existing Paseo methods. All path fields are daemon-local. `AbsolutePath` accepts POSIX paths or Windows drive/UNC forms at the wire boundary; server validation then uses the daemon's platform and `realpath`, rejects NUL, and rejects a nonexistent home. Windows activation is separately gated in §6. `initialProfileFamily` applies only to a new binding; supplying it to change existing profile preferences is `INVALID_REQUEST` (edit the profile through the existing host workflow, then reconcile).
+The following Zod definitions are normative. The package exports all four contracts from `plugin/shared/contracts.ts`. They introduce SLP schemas; they do not claim to be pre-existing Paseo methods. All path fields are daemon-local. `AbsolutePath` accepts POSIX paths or Windows drive/UNC forms at the wire boundary; server validation then uses the daemon's platform and `realpath`, rejects NUL, and rejects a nonexistent home. Windows activation is separately gated in §6. `initialProfileFamily` applies only to a new binding; supplying it to change existing profile preferences is `INVALID_REQUEST` (edit profiles through `profiles` on `activate`, or the host profile workflow followed by reconcile).
 
 ```ts
 import { z } from "zod";
@@ -194,6 +194,17 @@ export const ActivateInput = Start.extend({
     devin: AbsolutePath.optional(), claude: AbsolutePath.optional(),
   }).strict().default({}),
   initialProfileFamily: Family.optional(),
+  // Human-supplied preferences merged into the owned profiles. The plugin
+  // invents no model/mode/feature defaults. On first activation absent
+  // fields are simply not written. On an existing binding `profiles` is an
+  // explicit edit applied over the validated live entries — absent fields
+  // preserve the live value, `null` clears it, and `family` repoints the
+  // profile at that family's managed provider for the role — under the same
+  // serialized operation and receipt as any other verify.
+  profiles: z.object({
+    supervisor: ProfilePrefs.optional(),
+    lead: ProfilePrefs.optional(),
+  }).strict().optional(),
 }).strict();
 export const ReconcileInput = Start.extend({
   action: z.enum(["inspect", "complete", "restore-before"]),
@@ -222,12 +233,30 @@ export const FamilyView = z.object({
   binaryPath: AbsolutePath.nullable(),
   observedVersion: z.string().nullable(),
 }).strict();
+// Per-role editable fields. Absent = preserve (bound) or not written (fresh);
+// null = clear; family repoints the profile's managed provider.
+export const ProfilePrefs = z.object({
+  family: Family.optional(),
+  model: z.string().min(1).nullable().optional(),
+  modeId: z.string().min(1).nullable().optional(),
+  thinkingOptionId: z.string().min(1).nullable().optional(),
+  featureValues: z.record(z.string(), z.unknown()).nullable().optional(),
+}).strict();
+// Live tunable fields of one managed profile, read from daemon config — lets
+// the surface prefill the bound-state profile editor.
+export const ManagedProfileView = z.object({
+  id: z.string(), provider: z.string().nullable(),
+  model: z.string().nullable(), modeId: z.string().nullable(),
+  thinkingOptionId: z.string().nullable(),
+  featureValues: z.record(z.string(), z.unknown()).nullable(),
+}).strict();
 export const StatusOutput = z.object({
   schemaVersion: z.literal(1),
   target: Target,
   state: State,
   embeddedCandidateSha256: Sha,
   binding: BindingView.nullable(),
+  managedProfiles: z.array(ManagedProfileView).max(2),
   families: z.array(FamilyView).length(4),
   operation: OperationView.nullable(),
   conflicts: z.array(Conflict).max(64),
@@ -239,6 +268,17 @@ export const activate = defineRpc({ name: "activate", input: ActivateInput, outp
 export const reconcile = defineRpc({ name: "reconcile", input: ReconcileInput, output: StartOutput });
 export const deactivate = defineRpc({ name: "deactivate", input: DeactivateInput, output: StartOutput });
 export const status = defineRpc({ name: "status", input: StatusInput, output: StatusOutput });
+export const localTarget = defineRpc({ name: "local-target", input: LocalTargetInput, output: LocalTargetOutput });
+// Read-only advisory catalog: models/modes/feature definitions of the
+// family's provider entry — queried via PaseoApi.providers before any
+// binding exists, which is exactly when the profile pickers need them. The
+// transport family in `extends` (e.g. `acp`) is not a queryable provider
+// id. Feature listing runs on a draft config: the host requires
+// provider/model format, so `listFeatures` is only queried when `model` is
+// supplied (`cwd` required; `modeId` refines the set) — without a model the
+// catalog returns an empty feature list. Descriptors are the same
+// toggle/select definitions the host profile editor renders.
+export const catalog = defineRpc({ name: "catalog", input: CatalogInput, output: CatalogOutput });
 ```
 
 **DECISION: enforce one mutation worker per plugin process; reject competing starts with `BUSY`.** Rationale: the host concurrently dispatches handlers and provides no transaction serialization. Source: `S/plugins/plugin-process.js:375–392`; [audit](paseo-plugin-feasibility.md):723,739–744.
@@ -520,7 +560,7 @@ Build expected provider entries exactly as:
 ```ts
 {
   extends: family === "devin" ? "acp" : family,
-  label: `SLP ${family} ${role}`,
+  label: `SLP ${familyDisplay} ${roleDisplay}`,  // e.g. "SLP Claude Code Lead"
   command: [absoluteStableRoleLauncher],
   env: frozenEnvironmentForThisFamily,
   enabled: familyBinaryIsAvailable,

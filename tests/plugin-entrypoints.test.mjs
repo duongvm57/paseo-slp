@@ -145,7 +145,7 @@ test('contribute() registers the five RPCs and returns a callable cleanup', asyn
   const cleanup = contribute(server);
   assert.deepEqual(
     registrations.map(r => r.name).sort(),
-    ['activate', 'deactivate', 'local-target', 'reconcile', 'status'],
+    ['activate', 'catalog', 'deactivate', 'local-target', 'reconcile', 'status'],
   );
   for (const { handler } of registrations) {
     assert.equal(typeof handler, 'function');

@@ -20,8 +20,8 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { activate, deactivate, reconcile, status, localTarget } from "../shared/contracts.ts";
-import type { FamilyName, StartResult, StatusResult, TargetValue } from "../shared/contracts.ts";
+import { activate, catalog, deactivate, reconcile, status, localTarget } from "../shared/contracts.ts";
+import type { CatalogOptionValue, CatalogResult, FamilyName, StartResult, StatusResult, TargetValue } from "../shared/contracts.ts";
 import {
   DISABLE_REMOVE_NOTICE,
   EXCLUSIVE_WINDOW_NOTICE,
@@ -51,6 +51,7 @@ import {
 import type { ReconcileAction, TargetView } from "./manager-state.ts";
 
 const FAMILIES: readonly FamilyName[] = ["codex", "pi", "devin", "claude"];
+const PROFILE_FAMILY_ORDER: readonly FamilyName[] = ["claude", "codex", "pi", "devin"];
 const FAMILY_LABEL: Record<FamilyName, string> = { codex: "Codex", pi: "Pi", devin: "Devin", claude: "Claude Code" };
 const AUTHORITY = { exclusiveAdministrativeWindow: true, verifiedHostHomeMapping: true } as const;
 
@@ -183,7 +184,7 @@ function Field({ colors, label, hint, value, onChangeText, placeholder, disabled
 }) {
   return (
     <View style={styles.field}>
-      <Text style={[styles.fieldLabel, { color: colors.foreground }]}>{label}</Text>
+      <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>{label}</Text>
       <TextInput
         value={value}
         onChangeText={onChangeText}
@@ -198,6 +199,81 @@ function Field({ colors, label, hint, value, onChangeText, placeholder, disabled
           disabled && { opacity: 0.5 },
         ]}
       />
+      {hint ? <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>{hint}</Text> : null}
+    </View>
+  );
+}
+
+/** Searchable single-select for large catalogs (model lists reach hundreds).
+ *  Shows the selection as a clearable row; expands into a filtered list. */
+function OptionPicker({ colors, label, hint, options, value, onChange, disabled, placeholder }: {
+  colors: Colors;
+  label: string;
+  hint?: string;
+  options: readonly CatalogOptionValue[];
+  value: string;
+  onChange(next: string): void;
+  disabled?: boolean;
+  placeholder?: string;
+}) {
+  const [query, setQuery] = useState("");
+  const selected = options.find(option => option.id === value);
+  const filtered = query.trim() === ""
+    ? options
+    : options.filter(option => `${option.id} ${option.label}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const shown = filtered.slice(0, 60);
+  // A stored value the catalog doesn't list still displays — never let the
+  // picker look empty while a real value is applied.
+  const effective = selected ?? (value !== "" ? { id: value, label: value } : undefined);
+  if (effective) {
+    return (
+      <View style={styles.field}>
+        <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>{label}</Text>
+        <View style={[styles.pickerSelected, { borderColor: colors.accent, backgroundColor: colors.surface0 }]}>
+          <Text style={[styles.pickerSelectedLabel, { color: colors.foreground }]} numberOfLines={1}>
+            {effective.label !== effective.id ? `${effective.label} · ${effective.id}` : effective.id}
+          </Text>
+          <Pressable onPress={() => onChange("")} disabled={disabled} style={({ pressed }) => [pressed && { opacity: 0.6 }]}>
+            <Text style={[styles.pickerClear, { color: colors.accent }]}>Change</Text>
+          </Pressable>
+        </View>
+        {hint ? <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>{hint}</Text> : null}
+      </View>
+    );
+  }
+  return (
+    <View style={styles.field}>
+      <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>{label}</Text>
+      <TextInput
+        value={query}
+        onChangeText={setQuery}
+        placeholder={placeholder ?? "Filter…"}
+        placeholderTextColor={colors.foregroundMuted}
+        editable={!disabled}
+        autoCapitalize="none"
+        autoCorrect={false}
+        style={[styles.input, { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.surface0 }, disabled && { opacity: 0.5 }]}
+      />
+      <ScrollView style={[styles.pickerList, { borderColor: colors.border, backgroundColor: colors.surface0 }]} nestedScrollEnabled>
+        {shown.map(option => (
+          <Pressable
+            key={option.id}
+            onPress={() => onChange(option.id)}
+            disabled={disabled}
+            style={({ pressed }) => [styles.pickerRow, pressed && { backgroundColor: colors.surface2 }]}
+          >
+            <Text style={[styles.pickerRowLabel, { color: colors.foreground }]} numberOfLines={1}>
+              {option.label !== option.id ? `${option.label} · ${option.id}` : option.id}
+            </Text>
+          </Pressable>
+        ))}
+        {filtered.length === 0 ? (
+          <Text style={[styles.mutedSmall, { color: colors.foregroundMuted, padding: 10 }]}>No matches.</Text>
+        ) : null}
+      </ScrollView>
+      <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+        {filtered.length} option{filtered.length === 1 ? "" : "s"}{filtered.length > shown.length ? ` — showing first ${shown.length}` : ""}
+      </Text>
       {hint ? <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>{hint}</Text> : null}
     </View>
   );
@@ -273,6 +349,8 @@ const styles = StyleSheet.create({
   chipLabel: { fontSize: 13, fontWeight: "500" },
   field: { gap: 5 },
   fieldLabel: { fontSize: 13, fontWeight: "500" },
+  roleBox: { borderWidth: 1, borderRadius: 10, padding: 12, gap: 10 },
+  roleTitle: { fontSize: 14, fontWeight: "600" },
   input: { borderWidth: 1, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 10, fontSize: 14 },
   collapseHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
   collapseChevron: { fontSize: 14, width: 14 },
@@ -285,11 +363,32 @@ const styles = StyleSheet.create({
   pillLabel: { fontSize: 12, fontWeight: "700", letterSpacing: 0.4 },
   conflictBox: { borderWidth: 1, borderRadius: 8, padding: 10, gap: 6 },
   divider: { borderTopWidth: 1, marginVertical: 2 },
+  pickerSelected: { borderWidth: 1, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 10, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
+  pickerSelectedLabel: { fontSize: 14, flexShrink: 1 },
+  pickerClear: { fontSize: 13, fontWeight: "600" },
+  pickerList: { borderWidth: 1, borderRadius: 8, maxHeight: 220 },
+  pickerRow: { paddingVertical: 8, paddingHorizontal: 10 },
+  pickerRowLabel: { fontSize: 13 },
 });
 
 // ---------------------------------------------------------------------------
 // Surface
 // ---------------------------------------------------------------------------
+
+/** Status rows that are audit/debug metadata — rendered inside the collapsed
+ *  "Details" section so the card stays scannable. Everything else (state,
+ *  canonical home, candidates, binding) stays visible: spec §4 requires the
+ *  home and candidate to be shown before any mutation. */
+const STATUS_DETAIL_LABELS = new Set([
+  "Runtime",
+  "Node",
+  "Launch set",
+  "Payload",
+  "Baseline",
+  "Retained runtimes",
+  "Last verified",
+  "Live acceptance",
+]);
 
 export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   const colors = theme.colors;
@@ -299,6 +398,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   const callReconcile = useRpc(reconcile);
   const callDeactivate = useRpc(deactivate);
   const callLocalTarget = useRpc(localTarget);
+  const callCatalog = useRpc(catalog);
 
   const [detectedHome, setDetectedHome] = useState<string | null>(null);
   const [homeOverride, setHomeOverride] = useState("");
@@ -308,10 +408,19 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   const [nodePath, setNodePath] = useState("");
   const [binaries, setBinaries] = useState<Record<FamilyName, string>>({ codex: "", pi: "", devin: "", claude: "" });
   const [profileFamily, setProfileFamily] = useState<"auto" | FamilyName>("auto");
+  const [catalogs, setCatalogs] = useState<Partial<Record<FamilyName, CatalogResult>>>({});
+  const [catalogLoadingFor, setCatalogLoadingFor] = useState<FamilyName | null>(null);
+  // Feature definitions depend on the selected model (the host requires a
+  // provider/model draft) — cached per family|model|modeId key.
+  const [featureSets, setFeatureSets] = useState<Record<string, CatalogResult["features"]>>({});
+  const [featuresLoadingFor, setFeaturesLoadingFor] = useState<string | null>(null);
+  const [prefs, setPrefs] = useState<Record<string, string>>({});
+  const [prefsDirty, setPrefsDirty] = useState(false);
   const [reconcileAction, setReconcileAction] = useState<ReconcileAction>("inspect");
   const [interruptedId, setInterruptedId] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showMaintenance, setShowMaintenance] = useState(false);
+  const [statusDetailsOpen, setStatusDetailsOpen] = useState(false);
   const [store] = useState(createTargetViews);
   const [view, setView] = useState<TargetView>(emptyTargetView);
 
@@ -372,6 +481,126 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- key captures target
   }, [key, view.status, view.busy]);
 
+  const pref = (field: string) => prefs[field] ?? "";
+  const setPref = (field: string) => (text: string) => {
+    setPrefsDirty(true);
+    setPrefs(current => ({ ...current, [field]: text }));
+  };
+  const statusView = view.status;
+
+  // Bound state: prefill the profile editor from the live values status
+  // reported — the same values the host's profile editor shows. Once the
+  // Human edits, the form stops tracking live config until an apply.
+  useEffect(() => {
+    if (!statusView?.binding || prefsDirty) return;
+    const next: Record<string, string> = {};
+    for (const profile of statusView.managedProfiles ?? []) {
+      const role = profile.id === "slp-supervisor" ? "supervisor"
+        : profile.id === "slp-lead" ? "lead" : null;
+      if (!role) continue;
+      const family = /^slp-(codex|pi|devin|claude)-/.exec(profile.provider ?? "")?.[1] ?? "";
+      next[`${role}.family`] = family;
+      next[`${role}.model`] = profile.model ?? "";
+      next[`${role}.modeId`] = profile.modeId ?? "";
+      next[`${role}.features`] = profile.featureValues ? JSON.stringify(profile.featureValues) : "";
+      for (const [featureId, value] of Object.entries(profile.featureValues ?? {})) {
+        next[`${role}.feature.${featureId}`] = typeof value === "boolean" ? String(value) : String(value ?? "");
+      }
+    }
+    if (Object.keys(next).length === 0) return;
+    setPrefs(current => {
+      const stripped = Object.fromEntries(
+        Object.entries(current).filter(([field]) => !/^(supervisor|lead)\./.test(field)),
+      );
+      const merged = { ...stripped, ...next };
+      const changed = Object.keys(merged).length !== Object.keys(current).length
+        || Object.keys(merged).some(field => current[field] !== merged[field]);
+      return changed ? merged : current;
+    });
+  }, [statusView, prefsDirty]);
+
+  // Fetch the model/mode catalog for every family the form needs — the
+  // initial-family pick before binding, or each profile's provider family
+  // once bound. Cached per family; a failure caches an error result so the
+  // picker degrades to free text instead of retrying forever.
+  const bound = statusView?.binding != null;
+  const neededFamilies: FamilyName[] = !bound
+    ? (profileFamily === "auto" ? [] : [profileFamily])
+    : (["supervisor", "lead"] as const)
+        .map(role => pref(`${role}.family`))
+        .filter((family): family is FamilyName => (FAMILIES as string[]).includes(family));
+  const neededKey = neededFamilies.join(",");
+  useEffect(() => {
+    const missing = neededKey.split(",").filter(f => f !== "" && catalogs[f as FamilyName] === undefined);
+    if (missing.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      for (const family of missing as FamilyName[]) {
+        setCatalogLoadingFor(family);
+        try {
+          const result = await callCatalog({
+            schemaVersion: 1, family,
+            ...(target ? { cwd: target.daemonHome } : {}),
+          });
+          if (!cancelled) setCatalogs(current => ({ ...current, [family]: result }));
+        } catch {
+          if (!cancelled) {
+            setCatalogs(current => ({
+              ...current,
+              [family]: { schemaVersion: 1, models: [], modes: [], error: "Catalog query failed" },
+            }));
+          }
+        }
+      }
+      if (!cancelled) setCatalogLoadingFor(null);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the needed family set
+  }, [neededKey]);
+
+  // Feature definitions need a model — fetch per role's family|model|modeId.
+  const featureKeyFor = (role: "supervisor" | "lead"): string | null => {
+    const family = bound ? pref(`${role}.family`) : profileFamily;
+    const model = pref(`${role}.model`).trim();
+    if (!model || !(FAMILIES as string[]).includes(family)) return null;
+    return `${family}|${model}|${pref(`${role}.modeId`).trim()}`;
+  };
+  const neededFeatureKeys = (["supervisor", "lead"] as const)
+    .map(role => featureKeyFor(role))
+    .filter((key): key is string => key !== null);
+  const neededFeaturesKey = neededFeatureKeys.join(",");
+  useEffect(() => {
+    const missing = neededFeaturesKey.split(",").filter(k => k !== "" && featureSets[k] === undefined);
+    if (missing.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      for (const key of missing) {
+        const [family, model, modeId] = key.split("|") as [FamilyName, string, string];
+        setFeaturesLoadingFor(key);
+        try {
+          const result = await callCatalog({
+            schemaVersion: 1, family, model,
+            ...(modeId ? { modeId } : {}),
+            ...(target ? { cwd: target.daemonHome } : {}),
+          });
+          if (!cancelled) setFeatureSets(current => ({ ...current, [key]: result.features }));
+        } catch {
+          if (!cancelled) setFeatureSets(current => ({ ...current, [key]: [] }));
+        }
+      }
+      if (!cancelled) setFeaturesLoadingFor(null);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the needed feature set
+  }, [neededFeaturesKey]);
+  const featureDefsFor = (role: "supervisor" | "lead") => {
+    const key = featureKeyFor(role);
+    return {
+      defs: key ? (featureSets[key] ?? []) : [],
+      loading: key !== null && featuresLoadingFor === key && featureSets[key] === undefined,
+    };
+  };
+
   // Poll the tracked operation until it reaches a terminal outcome. The first
   // delay is the server's pollAfterMs; later polls run every STATUS_POLL_MS.
   const pending = view.pending;
@@ -386,6 +615,9 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
       if (next == null) { schedule(STATUS_POLL_MS); return; }
       if (operationPending(next.operation)) { schedule(pollDelayAfterStatus(next)); return; }
       update({ pending: null }, target);
+      // Any terminal operation settles the truth — let the profile form
+      // re-sync with the live values the next status reports.
+      setPrefsDirty(false);
     };
     schedule(pending.nextPollMs);
     return () => { cancelled = true; if (timer !== undefined) clearTimeout(timer); };
@@ -439,18 +671,82 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   }, [key, view.busy, update, callStatus, refresh]);
 
   const canMutate = target != null && exclusiveWindow && mappingConfirmed && !view.busy;
-  const statusView = view.status;
   // Conflicts from the last start response, the tracked operation's own
   // status(opId) results, and the status itself — merged and deduped; an
   // accepted or succeeded operation's conflicts stay visible.
   const conflictList = visibleConflicts(view);
 
-  const runActivate = () => {
-    if (!target || !statusView) return;
-    const selectedBinaries = Object.fromEntries(
-      FAMILIES.map(family => [family, binaries[family].trim()] as const).filter(([, path]) => path !== ""),
-    );
-    const input: Parameters<typeof callActivate>[0] = {
+  // Human-supplied profile preferences — parsed into the wire shape; a
+  // malformed feature-values JSON blocks the call before dispatch, never
+  // mid-operation. First activation sends only set fields; a bound apply
+  // sends the full desired state per role — empty fields become `null`,
+  // which clears the live value on the server.
+  const buildProfiles = (bound: boolean): { profiles?: Record<string, unknown>; error?: string } => {
+    const out: Record<string, unknown> = {};
+    for (const role of ["supervisor", "lead"] as const) {
+      const label = role === "supervisor" ? "SLP Supervisor" : "SLP Lead";
+      const entry: Record<string, unknown> = {};
+      const model = pref(`${role}.model`).trim();
+      const modeId = pref(`${role}.modeId`).trim();
+      const family = bound ? pref(`${role}.family`) : profileFamily;
+      const featuresRaw = pref(`${role}.features`).trim();
+      let featuresJson: Record<string, unknown> = {};
+      if (featuresRaw) {
+        try {
+          const parsed: unknown = JSON.parse(featuresRaw);
+          if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+            return { error: `${label}: feature values must be a JSON object` };
+          }
+          featuresJson = parsed as Record<string, unknown>;
+        } catch {
+          return { error: `${label}: feature values are not valid JSON` };
+        }
+      }
+      // Feature controls win over raw JSON for keys the provider declares;
+      // keys the catalog doesn't know are preserved from the JSON base.
+      // Bound apply writes the full control state (what you see is written);
+      // first activation writes only touched controls — never bare defaults.
+      const defs = featureDefsFor(role).defs;
+      let features: Record<string, unknown> | undefined;
+      if (defs.length > 0) {
+        features = { ...featuresJson };
+        for (const def of defs) {
+          const raw = pref(`${role}.feature.${def.id}`);
+          if (def.type === "toggle") {
+            if (bound || raw !== "") features[def.id] = raw === "" ? def.value : raw === "true";
+          } else if (raw !== "") {
+            features[def.id] = raw;
+          }
+        }
+        if (!bound && Object.keys(features).length === 0) features = undefined;
+      } else if (featuresRaw) {
+        features = featuresJson;
+      }
+      if (bound) {
+        if (!(FAMILIES as string[]).includes(family)) {
+          return { error: `${label}: pick a provider family` };
+        }
+        entry.family = family;
+        entry.model = model === "" ? null : model;
+        entry.modeId = modeId === "" ? null : modeId;
+        entry.featureValues = features === undefined ? null : features;
+        out[role] = entry;
+      } else {
+        if (model) entry.model = model;
+        if (modeId) entry.modeId = modeId;
+        if (features !== undefined) entry.featureValues = features;
+        if (Object.keys(entry).length > 0) out[role] = entry;
+      }
+    }
+    return Object.keys(out).length > 0 ? { profiles: out } : {};
+  };
+
+  const activateInput = (includeProfiles: boolean): Parameters<typeof callActivate>[0] | { error: string } => {
+    if (!target || !statusView) return { error: "No target" };
+    const bound = statusView.binding != null;
+    const profilesInput = includeProfiles ? buildProfiles(bound) : {};
+    if (profilesInput.error) return { error: profilesInput.error };
+    return {
       schemaVersion: 1,
       target,
       operationId: newOperationId(),
@@ -458,9 +754,26 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
       candidateSha256: statusView.embeddedCandidateSha256,
       adoptIdentical,
       ...(nodePath.trim() ? { nodePath: nodePath.trim() } : {}),
-      binaries: selectedBinaries,
-      ...(!statusView.binding && profileFamily !== "auto" ? { initialProfileFamily: profileFamily } : {}),
+      binaries: Object.fromEntries(
+        FAMILIES.map(family => [family, binaries[family].trim()] as const).filter(([, path]) => path !== ""),
+      ),
+      ...(!bound && profileFamily !== "auto" ? { initialProfileFamily: profileFamily } : {}),
+      ...(profilesInput.profiles ? { profiles: profilesInput.profiles } : {}),
     };
+  };
+
+  const runActivate = () => {
+    const input = activateInput(!statusView?.binding);
+    if ("error" in input) { update({ lastError: input.error }, target!); return; }
+    void runOperation(() => callActivate(input), input.operationId);
+  };
+
+  // Apply the managed-profile edits through the same serialized activation
+  // operation — the plan writes only the profile fields; providers, runtime,
+  // and receipt still verify end-to-end.
+  const runApplyProfiles = () => {
+    const input = activateInput(true);
+    if ("error" in input) { update({ lastError: input.error }, target!); return; }
     void runOperation(() => callActivate(input), input.operationId);
   };
 
@@ -494,6 +807,159 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     void runOperation(() => callDeactivate(input), input.operationId);
   };
 
+  // One role's editable profile fields, shared by the fresh-activation and
+  // bound editors. Bound mode also shows the per-role provider family —
+  // repointing it switches the profile to that family's managed provider.
+  const renderRoleFields = (
+    role: "supervisor" | "lead",
+    catalog: CatalogResult | undefined,
+    family: FamilyName,
+    showFamily = false,
+  ) => {
+    const familyState = statusView?.families.find(entry => entry.family === family);
+    const roleFamily = pref(`${role}.family`) as FamilyName;
+    const liveProfile = statusView?.managedProfiles.find(
+      entry => entry.id === `slp-${role}`,
+    );
+    return (
+      <View key={role} style={[styles.roleBox, { borderColor: colors.border }]}>
+        <View style={styles.field}>
+          <Text style={[styles.roleTitle, { color: colors.foreground }]}>
+            {role === "supervisor" ? "SLP Supervisor" : "SLP Lead"}
+          </Text>
+          {liveProfile ? (
+            <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+              {liveProfile.id} → {liveProfile.provider}
+            </Text>
+          ) : null}
+        </View>
+        {showFamily ? (
+          <View style={styles.field}>
+            <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Provider family</Text>
+            <ChipSelect
+              colors={colors}
+              value={roleFamily}
+              options={PROFILE_FAMILY_ORDER.map(entry => ({
+                label: FAMILY_LABEL[entry],
+                value: entry,
+              }))}
+              onChange={setPref(`${role}.family`)}
+              disabled={!canMutate}
+            />
+          </View>
+        ) : null}
+        {catalogLoadingFor === (showFamily ? roleFamily : family) ? (
+          <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+            Loading {FAMILY_LABEL[showFamily ? roleFamily : family] ?? ""} catalog…
+          </Text>
+        ) : null}
+        {catalog?.error ? (
+          <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
+            Catalog unavailable: {catalog.error} — enter values manually.
+          </Text>
+        ) : null}
+        {catalog && catalog.models.length > 0 ? (
+          <OptionPicker
+            colors={colors}
+            label="Model"
+            options={catalog.models}
+            value={pref(`${role}.model`)}
+            onChange={setPref(`${role}.model`)}
+            disabled={!canMutate}
+            placeholder="Filter models…"
+          />
+        ) : (
+          <Field
+            colors={colors}
+            label="Model"
+            value={pref(`${role}.model`)}
+            onChangeText={setPref(`${role}.model`)}
+            placeholder="Model ID — e.g. swe-2-max"
+            disabled={!canMutate}
+          />
+        )}
+        {catalog && catalog.modes.length > 0 ? (
+          <View style={styles.field}>
+            <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Mode</Text>
+            <ChipSelect
+              colors={colors}
+              value={pref(`${role}.modeId`)}
+              options={[
+                { label: "Provider default", value: "" },
+                ...catalog.modes.map(mode => ({ label: mode.label, value: mode.id })),
+                // A stored mode the catalog doesn't list stays visible.
+                ...(pref(`${role}.modeId`) !== "" && !catalog.modes.some(mode => mode.id === pref(`${role}.modeId`))
+                  ? [{ label: pref(`${role}.modeId`), value: pref(`${role}.modeId`) }]
+                  : []),
+              ]}
+              onChange={setPref(`${role}.modeId`)}
+              disabled={!canMutate}
+            />
+          </View>
+        ) : (
+          <Field
+            colors={colors}
+            label="Mode"
+            value={pref(`${role}.modeId`)}
+            onChangeText={setPref(`${role}.modeId`)}
+            placeholder="Mode ID — e.g. bypass"
+            disabled={!canMutate}
+          />
+        )}
+        {featureDefsFor(role).loading ? (
+          <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Loading features…</Text>
+        ) : null}
+        {featureDefsFor(role).defs.length > 0 ? (
+          featureDefsFor(role).defs.map(def => (
+            def.type === "toggle" ? (
+              <CheckRow
+                key={def.id}
+                colors={colors}
+                checked={pref(`${role}.feature.${def.id}`) === "" ? def.value : pref(`${role}.feature.${def.id}`) === "true"}
+                onToggle={next => setPref(`${role}.feature.${def.id}`)(String(next))}
+                title={def.label}
+                hint={def.description}
+                disabled={!canMutate}
+              />
+            ) : (
+              <View key={def.id} style={styles.field}>
+                <Text style={[styles.fieldLabel, { color: colors.foreground }]}>{def.label}</Text>
+                <ChipSelect
+                  colors={colors}
+                  value={pref(`${role}.feature.${def.id}`)}
+                  options={[
+                    { label: "Provider default", value: "" },
+                    ...def.options.map(option => ({ label: option.label, value: option.id })),
+                  ]}
+                  onChange={setPref(`${role}.feature.${def.id}`)}
+                  disabled={!canMutate}
+                />
+                {def.description ? (
+                  <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>{def.description}</Text>
+                ) : null}
+              </View>
+            )
+          ))
+        ) : (
+          <Field
+            colors={colors}
+            label="Feature values (JSON)"
+            hint='Provider feature flags — e.g. {"auto_accept": true}'
+            value={pref(`${role}.features`)}
+            onChangeText={setPref(`${role}.features`)}
+            placeholder="{}"
+            disabled={!canMutate}
+          />
+        )}
+        {showFamily && familyState?.availability === "unavailable" ? (
+          <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
+            {FAMILY_LABEL[roleFamily] ?? roleFamily} is unavailable on this daemon — the apply is rejected until it resolves.
+          </Text>
+        ) : null}
+      </View>
+    );
+  };
+
   return (
     <ScrollView contentContainerStyle={{ padding: compact ? 12 : 24, gap: compact ? 12 : 16 }}>
       <View style={styles.headerRow}>
@@ -508,19 +974,19 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
 
       <Card
         colors={colors}
-        title="1 · Target"
-        subtitle="Detected from this daemon's environment — open Advanced to manage a different home."
+        title="Daemon home"
+        subtitle="Detected from this daemon's environment — use Advanced to manage a different home."
       >
         {home ? (
           <KV colors={colors} label="Daemon home" value={home} />
         ) : (
           <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-            No daemon home detected — set one under Advanced.
+            Daemon home not detected — configure one under Advanced.
           </Text>
         )}
         <Button
           colors={colors}
-          label={statusView ? "Refresh status" : "Check status"}
+          label={statusView ? "Refresh" : "Inspect"}
           onPress={() => { if (target) void refresh(target); }}
           disabled={!target || view.busy}
         />
@@ -532,9 +998,11 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
           title="Status"
           subtitle={stateHint(statusView.state) || undefined}
         >
-          {statusRows(statusView, { compact }).map(row => (
-            <KV key={row.label} colors={colors} label={row.label} value={row.value} />
-          ))}
+          {statusRows(statusView, { compact })
+            .filter(row => !STATUS_DETAIL_LABELS.has(row.label))
+            .map(row => (
+              <KV key={row.label} colors={colors} label={row.label} value={row.value} />
+            ))}
           <View style={{ gap: 6 }}>
             <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Provider families</Text>
             <View style={styles.chipRow}>
@@ -553,11 +1021,31 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
               ))}
             </View>
           </View>
-          {statusView.operation
-            ? operationRows(statusView.operation).map(row => (
+          {statusView.operation ? (
+            <KV
+              colors={colors}
+              label="Last operation"
+              value={`${statusView.operation.kind} · ${statusView.operation.outcome}`}
+            />
+          ) : null}
+          <Collapse
+            colors={colors}
+            title="Details"
+            subtitle="Runtime paths, hashes, and operation metadata"
+            open={statusDetailsOpen}
+            onToggle={() => setStatusDetailsOpen(open => !open)}
+          >
+            {statusRows(statusView, { compact })
+              .filter(row => STATUS_DETAIL_LABELS.has(row.label))
+              .map(row => (
                 <KV key={row.label} colors={colors} label={row.label} value={row.value} />
-              ))
-            : null}
+              ))}
+            {statusView.operation
+              ? operationRows(statusView.operation).map(row => (
+                  <KV key={row.label} colors={colors} label={row.label} value={row.value} />
+                ))
+              : null}
+          </Collapse>
           {view.pending ? <KV colors={colors} label="Polling" value={`operation ${view.pending.operationId}`} /> : null}
           {view.busy ? <KV colors={colors} label="Busy" value="start call in flight" /> : null}
           {view.notice ? <KV colors={colors} label="Note" value={view.notice} /> : null}
@@ -581,41 +1069,63 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
 
       <Card
         colors={colors}
-        title={statusView ? `2 · ${activationLabel(statusView)}` : "2 · Activate"}
-        subtitle={statusView ? undefined : "Load status first — the candidate and conflicts must be visible before any change."}
+        title="Activation"
+        subtitle={statusView ? undefined : "Inspect the daemon first — the candidate and conflicts must be visible before any change."}
       >
         <CheckRow
           colors={colors}
           checked={exclusiveWindow}
           onToggle={setExclusiveWindow}
-          title="Exclusive administrative edit window"
-          hint="No other daemon config edits while an operation runs"
+          title="Exclusive configuration window"
+          hint="No other writers may edit daemon configuration while an operation runs"
         />
         <CheckRow
           colors={colors}
           checked={mappingConfirmed}
           onToggle={setMappingConfirmed}
           disabled={!target}
-          title="Verified host/home mapping"
-          hint={target ? `${target.daemonHome} belongs to ${host.label}` : "Enter the daemon home first"}
+          title="Daemon home confirmed"
+          hint={target ? `${target.daemonHome} is the home of this daemon` : "Detect or configure the daemon home first"}
         />
         <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
           {EXCLUSIVE_WINDOW_NOTICE}
         </Text>
         {!statusView?.binding ? (
           <View style={styles.field}>
-            <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Initial profile family</Text>
+            <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Preferred provider family</Text>
             <ChipSelect
               colors={colors}
               value={profileFamily}
               options={[
                 { label: "Automatic", value: "auto" as const },
-                ...FAMILIES.map(family => ({ label: FAMILY_LABEL[family], value: family })),
+                ...PROFILE_FAMILY_ORDER.map(family => ({ label: FAMILY_LABEL[family], value: family })),
               ]}
               onChange={setProfileFamily}
               disabled={!canMutate}
             />
+            <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+              Applied to the profiles created on first activation.
+            </Text>
           </View>
+        ) : null}
+        {!statusView?.binding && profileFamily !== "auto" ? (
+          <View style={styles.field}>
+            <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Initial profiles</Text>
+            <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+              Optional — unset fields are assigned afterward in Settings → Agents → Agent profiles.
+            </Text>
+            {(["supervisor", "lead"] as const).map(role =>
+              renderRoleFields(role, catalogs[profileFamily], profileFamily),
+            )}
+          </View>
+        ) : null}
+        {!statusView?.binding ? (
+          <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+            Activation creates the SLP Supervisor and SLP Lead agent profiles, bound to
+            the selected family (Automatic picks the first enabled, available family).
+            Model, mode, and feature values are assigned afterward in
+            Settings → Agents → Agent profiles.
+          </Text>
         ) : null}
         <Button
           colors={colors}
@@ -626,17 +1136,44 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
         />
       </Card>
 
+      {statusView?.binding ? (
+        <Card
+          colors={colors}
+          title="Agent profiles"
+          subtitle="The two managed profiles — applied through the same exclusive-window operation as any other change."
+        >
+          {(["supervisor", "lead"] as const).map(role =>
+            renderRoleFields(role, catalogs[pref(`${role}.family`) as FamilyName], pref(`${role}.family`) as FamilyName, true),
+          )}
+          {view.lastError ? (
+            <Text style={[styles.mutedSmall, { color: colors.statusDanger }]}>{view.lastError}</Text>
+          ) : null}
+          {!canMutate ? (
+            <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+              Requires both acknowledgments in Activation.
+            </Text>
+          ) : null}
+          <Button
+            colors={colors}
+            kind="primary"
+            label="Apply profile changes"
+            onPress={runApplyProfiles}
+            disabled={!canMutate}
+          />
+        </Card>
+      ) : null}
+
       <Collapse
         colors={colors}
         title="Advanced"
-        subtitle="Binary overrides and crash-recovery adoption"
+        subtitle="Executable overrides and recovery options"
         open={showAdvanced}
         onToggle={setShowAdvanced}
       >
         <Field
           colors={colors}
-          label="Daemon home override"
-          hint="Detected automatically — edit only to manage a different daemon home"
+          label="Daemon home"
+          hint="Detected automatically — change only to manage a different daemon home"
           value={homeOverride}
           onChangeText={setHomeOverride}
           placeholder={detectedHome ?? "/absolute/path/to/paseo-home"}
@@ -654,8 +1191,8 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
         />
         <Field
           colors={colors}
-          label="Node path (optional)"
-          hint="Verified absolute ordinary-Node path; an invalid value fails instead of falling back"
+          label="Node.js path (optional)"
+          hint="Absolute path to a standard Node.js binary; an invalid value fails activation instead of falling back"
           value={nodePath}
           onChangeText={setNodePath}
           placeholder="/usr/bin/node"
@@ -665,7 +1202,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
           <Field
             key={family}
             colors={colors}
-            label={`${FAMILY_LABEL[family]} binary (optional)`}
+            label={`${FAMILY_LABEL[family]} executable (optional)`}
             value={binaries[family]}
             onChangeText={text => setBinaries(previous => ({ ...previous, [family]: text }))}
             placeholder={`/absolute/path/to/${family}`}
@@ -677,7 +1214,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
       <Collapse
         colors={colors}
         title="Maintenance"
-        subtitle="Reconcile drift or interrupted operations, or detach SLP from this daemon"
+        subtitle="Drift inspection, interrupted operations, and deactivation"
         open={showMaintenance}
         onToggle={setShowMaintenance}
       >
@@ -687,22 +1224,22 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
             colors={colors}
             value={reconcileAction}
             options={[
-              { label: "inspect", value: "inspect" as const },
-              { label: "complete", value: "complete" as const },
-              { label: "restore-before", value: "restore-before" as const },
+              { label: "Inspect", value: "inspect" as const },
+              { label: "Complete", value: "complete" as const },
+              { label: "Restore before", value: "restore-before" as const },
             ]}
             onChange={setReconcileAction}
             disabled={!canMutate}
           />
           <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-            inspect is read-only; complete/restore-before finish an interrupted operation
+            Inspect is read-only; Complete and Restore before finish an interrupted operation
           </Text>
         </View>
         {reconcileAction !== "inspect" ? (
           <Field
             colors={colors}
             label="Interrupted operation ID"
-            hint="Required for complete/restore-before"
+            hint="Required for Complete and Restore before"
             value={interruptedId}
             onChangeText={setInterruptedId}
             placeholder="uuid"
@@ -711,7 +1248,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
         ) : null}
         <Button
           colors={colors}
-          label="Run reconcile"
+          label="Reconcile"
           onPress={runReconcile}
           disabled={!canMutate || !statusView}
         />

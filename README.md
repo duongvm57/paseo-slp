@@ -75,7 +75,7 @@ Activation:
 - Records a receipt in `slp-runtime/state/receipt.json` — the journal of
   every operation, used for drift detection and recovery.
 
-The screen's **Load status** button is read-only — use it to inspect state
+The surface's **Inspect** button is read-only — use it to inspect state
 (`INACTIVE`/`ACTIVE`/`RECOVERY_REQUIRED`), the current binding, family
 availability and conflicts before changing anything.
 
