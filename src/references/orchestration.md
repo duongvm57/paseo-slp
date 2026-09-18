@@ -38,8 +38,10 @@ Use the smallest topology that supplies the required independent judgment:
 Engineer, Architect, Reviewer and Scout use the same Peer role. Assign each a
 self-contained question and disposition-specific output (defined in Peer policy).
 Read-only reports stay in the session unless a separate report write scope is
-granted. A protocol can make review gates stricter; inability to supply a required
-gate is BLOCKED, not permission to skip it.
+granted. When a review gate is required, structure it per
+references/review-gates.md: parallel seats on split axes — a single reviewer is
+a degenerate gate, not the default. A protocol can make review gates stricter;
+inability to supply a required gate is BLOCKED, not permission to skip it.
 
 ## Session continuity
 

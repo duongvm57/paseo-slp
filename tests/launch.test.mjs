@@ -86,12 +86,12 @@ test('orientation carries mechanical locators only', t => {
   assert.deepEqual(byPath[join(installed, 'docs/contract.md')], { path: join(installed, 'docs/contract.md'), missing: true });
   for (const rel of ['src/common.md', 'src/roles/lead.md', 'src/delegation.md',
     'src/references/anti-patterns.md', 'src/references/governance.md', 'src/references/monitoring.md',
-    'src/references/orchestration.md', 'src/references/provider-routing.md']) {
+    'src/references/orchestration.md', 'src/references/provider-routing.md', 'src/references/review-gates.md']) {
     const entry = byPath[join(installed, rel)];
     const bytes = readFileSync(join(installed, rel));
     assert.deepEqual(entry, { path: join(installed, rel), bytes: bytes.length, sha256: hash(bytes) });
   }
-  assert.equal(lead.orientation.policyBytes.length, 9);
+  assert.equal(lead.orientation.policyBytes.length, 10);
   // Carrier: locators and the missing marker must survive into initialPrompt.
   assert.ok(lead.create.initialPrompt.includes(`- ${join(installed, 'src/common.md')} — `));
   assert.ok(lead.create.initialPrompt.includes(`${join(installed, 'src/common.md')} — ${readFileSync(join(installed, 'src/common.md')).length} bytes, sha256 ${hash(readFileSync(join(installed, 'src/common.md')))}`));
@@ -103,7 +103,7 @@ test('orientation carries mechanical locators only', t => {
   const peerPaths = peer.orientation.policyBytes.map(entry => entry.path);
   assert.ok(peerPaths.includes(join(installed, 'src/roles/peer.md')));
   assert.ok(!peerPaths.includes(join(installed, 'src/delegation.md')));
-  assert.equal(peer.orientation.policyBytes.length, 8);
+  assert.equal(peer.orientation.policyBytes.length, 9);
 });
 
 test('handoff plans carry modeId, spawnKit and orientation alongside the packet', t => {
