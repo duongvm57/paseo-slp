@@ -65,6 +65,8 @@ export function SettingsScreen({ host, layout }: PluginSurfaceProps) {
   const [profileFamily, setProfileFamily] = useState<"auto" | FamilyName>("auto");
   const [reconcileAction, setReconcileAction] = useState<ReconcileAction>("inspect");
   const [interruptedId, setInterruptedId] = useState("");
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showMaintenance, setShowMaintenance] = useState(false);
   const [store] = useState(createTargetViews);
   const [view, setView] = useState<TargetView>(emptyTargetView);
 
@@ -228,7 +230,10 @@ export function SettingsScreen({ host, layout }: PluginSurfaceProps) {
         title="SLP runtime manager"
         info={`Selected host: ${host.label} (${host.id}). The host API exposes no daemon-home mapping — the administrator supplies and confirms it.`}
       >
-        <SettingsSection title="Target daemon home">
+        <SettingsSection
+          title="1 · Target"
+          info="Enter the daemon home, then Load status to inspect before changing anything."
+        >
           <SettingsInput
             label="Daemon home"
             hint="Absolute path on the selected host, e.g. /home/user/.paseo"
@@ -243,25 +248,6 @@ export function SettingsScreen({ host, layout }: PluginSurfaceProps) {
             actionLabel="Load status"
             onPress={() => { if (target) void refresh(target); }}
             disabled={!target || view.busy}
-          />
-        </SettingsSection>
-
-        <SettingsSection title="Before mutating" info={EXCLUSIVE_WINDOW_NOTICE}>
-          <SettingsRow label="Semantic restoration" hint={RESTORATION_NOTICE} />
-          <SettingsRow label="Retained runtimes" hint={RETAINED_RUNTIME_NOTICE} />
-          <SettingsRow label="Disable/remove ≠ deactivate" hint={DISABLE_REMOVE_NOTICE} />
-          <SettingsSwitch
-            label="Exclusive administrative edit window"
-            hint="No other daemon config edits while an operation runs"
-            value={exclusiveWindow}
-            onValueChange={setExclusiveWindow}
-          />
-          <SettingsSwitch
-            label="Verified host/home mapping"
-            hint={target ? `${target.daemonHome} belongs to ${host.label}` : "Enter the daemon home first"}
-            value={mappingConfirmed}
-            onValueChange={setMappingConfirmed}
-            disabled={!target}
           />
         </SettingsSection>
 
@@ -304,20 +290,32 @@ export function SettingsScreen({ host, layout }: PluginSurfaceProps) {
           </SettingsSection>
         ) : null}
 
-        <SettingsSection title="Actions" info="Explicit operations only — nothing runs on mount or reload.">
+        <SettingsSection title="2 · Authority" info={EXCLUSIVE_WINDOW_NOTICE}>
+          <SettingsRow label="Semantic restoration" hint={RESTORATION_NOTICE} />
+          <SettingsRow label="Retained runtimes" hint={RETAINED_RUNTIME_NOTICE} />
+          <SettingsRow label="Disable/remove ≠ deactivate" hint={DISABLE_REMOVE_NOTICE} />
+          <SettingsSwitch
+            label="Exclusive administrative edit window"
+            hint="No other daemon config edits while an operation runs"
+            value={exclusiveWindow}
+            onValueChange={setExclusiveWindow}
+          />
+          <SettingsSwitch
+            label="Verified host/home mapping"
+            hint={target ? `${target.daemonHome} belongs to ${host.label}` : "Enter the daemon home first"}
+            value={mappingConfirmed}
+            onValueChange={setMappingConfirmed}
+            disabled={!target}
+          />
+        </SettingsSection>
+
+        <SettingsSection title="3 · Activate" info="Explicit operations only — nothing runs on mount or reload.">
           <SettingsAction
             label={statusView ? activationLabel(statusView) : "Activate"}
             hint="Materializes the embedded candidate, verifies it, and patches the daemon config in one serialized operation."
             actionLabel={statusView ? activationLabel(statusView) : "Activate"}
             onPress={runActivate}
             disabled={!canMutate || !statusView}
-          />
-          <SettingsSwitch
-            label="Adopt identical entries"
-            hint="Adopt byte-identical existing SLP entries — recovery after a crash between patch and receipt"
-            value={adoptIdentical}
-            onValueChange={setAdoptIdentical}
-            disabled={!canMutate}
           />
           {!statusView?.binding ? (
             <SettingsSelect
@@ -332,60 +330,89 @@ export function SettingsScreen({ host, layout }: PluginSurfaceProps) {
               disabled={!canMutate}
             />
           ) : null}
-          <SettingsInput
-            label="Node path (optional)"
-            hint="Verified absolute ordinary-Node path; an invalid value fails instead of falling back"
-            placeholder="/usr/bin/node"
-            initialValue={nodePath}
-            onChangeText={setNodePath}
-            disabled={!canMutate}
-          />
-          {FAMILIES.map(family => (
-            <SettingsInput
-              key={family}
-              label={`${family} binary (optional)`}
-              placeholder={`/absolute/path/to/${family}`}
-              initialValue={binaries[family]}
-              onChangeText={text => setBinaries(previous => ({ ...previous, [family]: text }))}
-              disabled={!canMutate}
-            />
-          ))}
-          <SettingsSelect
-            label="Reconcile action"
-            hint="inspect is read-only; complete/restore-before finish an interrupted operation"
-            value={reconcileAction}
-            options={[
-              { label: "inspect", value: "inspect" },
-              { label: "complete", value: "complete" },
-              { label: "restore-before", value: "restore-before" },
-            ]}
-            onValueChange={value => setReconcileAction(value as ReconcileAction)}
-            disabled={!canMutate}
-          />
-          {reconcileAction !== "inspect" ? (
-            <SettingsInput
-              label="Interrupted operation ID"
-              hint="Required for complete/restore-before"
-              placeholder="uuid"
-              initialValue={interruptedId}
-              onChangeText={setInterruptedId}
-              disabled={!canMutate}
-            />
-          ) : null}
-          <SettingsAction
-            label="Reconcile"
-            actionLabel="Run reconcile"
-            onPress={runReconcile}
-            disabled={!canMutate || !statusView}
-          />
-          <SettingsAction
-            label="Deactivate"
-            hint="Detaches owned config entries and restores the recorded injection value; runtime files are retained."
-            actionLabel="Deactivate"
-            onPress={runDeactivate}
-            disabled={!canMutate || !statusView?.binding}
-          />
         </SettingsSection>
+
+        <SettingsSwitch
+          label="Advanced options"
+          hint="Binary overrides and crash-recovery adoption — leave off unless a probe failed or you are recovering an interrupted install"
+          value={showAdvanced}
+          onValueChange={setShowAdvanced}
+        />
+        {showAdvanced ? (
+          <SettingsSection title="Advanced">
+            <SettingsSwitch
+              label="Adopt identical entries"
+              hint="Adopt byte-identical existing SLP entries — recovery after a crash between patch and receipt"
+              value={adoptIdentical}
+              onValueChange={setAdoptIdentical}
+              disabled={!canMutate}
+            />
+            <SettingsInput
+              label="Node path (optional)"
+              hint="Verified absolute ordinary-Node path; an invalid value fails instead of falling back"
+              placeholder="/usr/bin/node"
+              initialValue={nodePath}
+              onChangeText={setNodePath}
+              disabled={!canMutate}
+            />
+            {FAMILIES.map(family => (
+              <SettingsInput
+                key={family}
+                label={`${family} binary (optional)`}
+                placeholder={`/absolute/path/to/${family}`}
+                initialValue={binaries[family]}
+                onChangeText={text => setBinaries(previous => ({ ...previous, [family]: text }))}
+                disabled={!canMutate}
+              />
+            ))}
+          </SettingsSection>
+        ) : null}
+
+        <SettingsSwitch
+          label="Maintenance"
+          hint="Reconcile drift/interrupted operations, or detach SLP from this daemon"
+          value={showMaintenance}
+          onValueChange={setShowMaintenance}
+        />
+        {showMaintenance ? (
+          <SettingsSection title="Maintenance">
+            <SettingsSelect
+              label="Reconcile action"
+              hint="inspect is read-only; complete/restore-before finish an interrupted operation"
+              value={reconcileAction}
+              options={[
+                { label: "inspect", value: "inspect" },
+                { label: "complete", value: "complete" },
+                { label: "restore-before", value: "restore-before" },
+              ]}
+              onValueChange={value => setReconcileAction(value as ReconcileAction)}
+              disabled={!canMutate}
+            />
+            {reconcileAction !== "inspect" ? (
+              <SettingsInput
+                label="Interrupted operation ID"
+                hint="Required for complete/restore-before"
+                placeholder="uuid"
+                initialValue={interruptedId}
+                onChangeText={setInterruptedId}
+                disabled={!canMutate}
+              />
+            ) : null}
+            <SettingsAction
+              label="Reconcile"
+              actionLabel="Run reconcile"
+              onPress={runReconcile}
+              disabled={!canMutate || !statusView}
+            />
+            <SettingsAction
+              label="Deactivate"
+              hint="Detaches owned config entries and restores the recorded injection value; runtime files are retained."
+              actionLabel="Deactivate"
+              onPress={runDeactivate}
+              disabled={!canMutate || !statusView?.binding}
+            />
+          </SettingsSection>
+        ) : null}
       </SettingsGroup>
     </ScrollView>
   );
