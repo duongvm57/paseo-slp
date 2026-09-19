@@ -334,3 +334,38 @@ test('handoff packet flattens nested-repo submodule gaps into parent-root paths'
   assert.deepEqual(plan.handoff.candidate.nestedIncomplete, ['inner/sub']);
   assert.match(plan.create.initialPrompt, /Snapshot evidence gap: inner\/sub is unproven submodule scope/);
 });
+
+test('handoff packet keeps the full ancestor prefix for depth-3 submodule gaps', t => {
+  const { dir, installed } = fixture(t);
+  const git = (cwd, args) => execFileSync('git', ['-C', cwd, ...args]);
+  const commit = (cwd, message = 'c') => git(cwd, ['-c', 'user.email=t@slp', '-c', 'user.name=t', 'commit', '--quiet', '-m', message]);
+  const upstream = join(dir, 'upstream');
+  mkdirSync(upstream);
+  git(upstream, ['init', '--quiet']);
+  writeFileSync(join(upstream, 'u.txt'), 'u');
+  git(upstream, ['add', 'u.txt']);
+  commit(upstream);
+  const initRepo = path => {
+    mkdirSync(path, { recursive: true });
+    git(path, ['init', '--quiet']);
+    writeFileSync(join(path, 'f.txt'), 'f');
+    git(path, ['add', 'f.txt']);
+    commit(path);
+  };
+  const repo = join(dir, 'repo');
+  initRepo(repo);
+  // `inner` is an untracked nested repo containing another untracked repo
+  // `deep`, whose submodule `sub` is dirty — three levels below the top root.
+  const inner = join(repo, 'inner');
+  initRepo(inner);
+  const deep = join(inner, 'deep');
+  initRepo(deep);
+  git(deep, ['-c', 'protocol.file.allow=always', 'submodule', 'add', '--quiet', upstream, 'sub']);
+  commit(deep);
+  writeFileSync(join(deep, 'sub/u.txt'), 'unproven edit');
+  const handoff = { previousAgentId: 'old-lead', reason: 'quota', authority: 'Human requests replacement',
+    state: 'paused on snapshot', previousOwner: { settled: true, evidence: 'cancel receipt' }, resources: [] };
+  const plan = handoffPlan(installed, { ...request, repository: repo, role: 'lead', binding: piBinding, handoff });
+  assert.deepEqual(plan.handoff.candidate.nestedIncomplete, ['inner/deep/sub']);
+  assert.match(plan.create.initialPrompt, /Snapshot evidence gap: inner\/deep\/sub is unproven submodule scope/);
+});

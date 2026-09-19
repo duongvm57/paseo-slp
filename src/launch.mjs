@@ -64,9 +64,9 @@ function handoffPacket(request) {
   if (!Array.isArray(handoff.resources)) throw new Error('Handoff requires a resources list (including remaining Peer IDs and wake owners)');
   const candidate = snapshot(request.repository);
   const nestedIncomplete = [];
-  const collect = subs => subs?.forEach(sub => {
-    sub.incomplete?.forEach(path => nestedIncomplete.push(`${sub.path}/${path}`));
-    collect(sub.nested);
+  const collect = (subs, prefix = '') => subs?.forEach(sub => {
+    sub.incomplete?.forEach(path => nestedIncomplete.push(`${prefix}${sub.path}/${path}`));
+    collect(sub.nested, `${prefix}${sub.path}/`);
   });
   collect(candidate.nested);
   return { ...handoff, candidate: { head: candidate.head, sha256: candidate.sha256,
@@ -81,7 +81,7 @@ const handoffNotice = (role, packet) => `\nProvider handoff evidence:\n${JSON.st
   'Reconcile existing Peer/workspace/resource ownership with the Human or assigned Supervisor. ' +
   'Parentage has not changed; do not claim control of old descendants or create duplicate writers. ' +
   (unprovenScope(packet).length
-    ? `Snapshot evidence gap: ${unprovenScope(packet).join(', ')} is unproven submodule scope — do not claim full-candidate coverage for it. `
+    ? `Snapshot evidence gap: ${unprovenScope(packet).join(', ')} ${unprovenScope(packet).length > 1 ? 'are' : 'is'} unproven submodule scope — do not claim full-candidate coverage for it. `
     : '') +
   'Acknowledge the transferred assignment. ' +
   (orchestrates(role) ? 'Use references/provider-routing.md for the handoff procedure.\n' : 'Return bounded findings to Lead; do not manage agents.\n');
