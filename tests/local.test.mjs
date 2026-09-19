@@ -146,6 +146,10 @@ test('prepare --emit create prints the create record verbatim and --check gates 
   const clash = spawnSync(process.execPath, [cli, 'prepare', request, '--check', '--emit', 'create'], { env, encoding: 'utf8' });
   assert.equal(clash.status, 1);
   assert.match(clash.stderr, /separate modes/);
+  // Flag-first ordering works too: prepare --check <file> parses the same.
+  const flagFirst = spawnSync(process.execPath, [cli, 'prepare', '--check', request], { env, encoding: 'utf8' });
+  assert.equal(flagFirst.status, 1);
+  assert.deepEqual(JSON.parse(flagFirst.stdout).checks.map(c => c.name), report.checks.map(c => c.name));
 });
 
 test('prepare --schema prints the request contract without a request file, receipt or daemon', () => {

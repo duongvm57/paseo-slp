@@ -446,7 +446,10 @@ Ba mode hỗ trợ viết request — đều không có side effect:
   không tương thích, catalog hash stale — phân biệt "profile đầy đủ" với
   "provider đã live-verify". Exit 1 khi có stage fail; không tạo gì.
 - `prepare <request.json> --emit create` in đúng member `create` — record
-  create_agent arguments nguyên vẹn — cho caller truyền thẳng.
+  create_agent arguments nguyên vẹn — cho caller truyền thẳng. Lưu ý host gap:
+  Paseo hiện không có consumer đọc plan-file trực tiếp, nên paste/parse output
+  này vào `create_agent` vẫn là mitigation thủ công cần đối chiếu chéo — chưa
+  loại bỏ rủi ro record bị sửa trước khi tới host.
 
 Một request đầy đủ gồm: `taskLabel` (mặc định tên repo), role (và
 `disposition` cho Peer), `repository` path và `workspaceId` thật,

@@ -188,6 +188,8 @@ test('launchCheck names every failing stage and separates profile completeness f
   assert.equal(missing.ok, false);
   assert.match(byName(missing).binding.error, /Missing Paseo profile slp-lead/);
   assert.equal(byName(missing).provider.ok, false);
+  // Stages that cannot run are marked skipped, not silently absent.
+  assert.equal(byName(missing).settings.skipped, true);
   // Profile complete but provider only configured: the provider check, not the
   // binding check alone, is what fails on live-evidence grounds.
   const configured = launchCheck(installed, { ...request, repository: dir, role: 'lead', profiles,

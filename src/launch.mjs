@@ -149,6 +149,17 @@ function targetInjectsCarrier(role, binding, providers) {
   } catch { return false; }
 }
 
+// The request-shape rules — one validator shared by plan() and launchCheck so
+// the preflight can never drift from what the planner enforces.
+function requestShape(request, role, disposition) {
+  if (!roles.includes(role)) throw new Error('Unknown role');
+  if (disposition != null && (role !== 'peer' || typeof disposition !== 'string' || !dispositionPattern.test(disposition))) throw new Error('Invalid Peer disposition');
+  for (const key of ['workspaceId', 'repository', 'assignment']) {
+    if (typeof request[key] !== 'string' || !request[key].trim()) throw new Error(`Missing ${key}`);
+  }
+  if (!isAbsolute(request.repository)) throw new Error('Absolute repository required');
+}
+
 function agentTitle(role, disposition, request, packet) {
   const label = request.taskLabel ?? (basename(request.repository) || 'Task');
   if (typeof label !== 'string' || !label.trim() || label.trim().length > 100 || /[\x00-\x1f\x7f]/.test(label)) {
@@ -163,13 +174,8 @@ function agentTitle(role, disposition, request, packet) {
 function plan(root, request, packet) {
   verifyInstall(root);
   const role = request.role ?? 'supervisor';
-  if (!roles.includes(role)) throw new Error('Unknown role');
   const disposition = request.disposition ?? request.route?.disposition;
-  if (disposition != null && (role !== 'peer' || typeof disposition !== 'string' || !dispositionPattern.test(disposition))) throw new Error('Invalid Peer disposition');
-  for (const key of ['workspaceId', 'repository', 'assignment']) {
-    if (typeof request[key] !== 'string' || !request[key].trim()) throw new Error(`Missing ${key}`);
-  }
-  if (!isAbsolute(request.repository)) throw new Error('Absolute repository required');
+  requestShape(request, role, disposition);
   request = mergeInventory(request);
   const file = assignmentFile(request.assignmentFile);
   const { binding, routing } = resolveBinding(role, request, disposition);
@@ -256,14 +262,7 @@ export function launchCheck(root, request, { handoff = false } = {}) {
   step('assignmentFile', () => { assignmentFile(merged.assignmentFile); });
   const role = request.role ?? 'supervisor';
   const disposition = request.disposition ?? request.route?.disposition;
-  step('request', () => {
-    if (!roles.includes(role)) throw new Error('Unknown role');
-    if (disposition != null && (role !== 'peer' || typeof disposition !== 'string' || !dispositionPattern.test(disposition))) throw new Error('Invalid Peer disposition');
-    for (const key of ['workspaceId', 'repository', 'assignment']) {
-      if (typeof request[key] !== 'string' || !request[key].trim()) throw new Error(`Missing ${key}`);
-    }
-    if (!isAbsolute(request.repository)) throw new Error('Absolute repository required');
-  });
+  step('request', () => requestShape(request, role, disposition));
   const resolved = step('binding', () => {
     const result = resolveBinding(role, merged, disposition);
     roleProvider(role, result.binding.provider); // plan()'s own post-resolution check
@@ -292,6 +291,7 @@ export function launchCheck(root, request, { handoff = false } = {}) {
     });
   }
   if (binding) step('settings', () => bindingCheck(binding));
+  else checks.push({ name: 'settings', ok: true, skipped: true, detail: 'skipped — no resolved binding to check' });
   const warnings = binding && binding.modeId == null ? ['no modeId in binding — spawn inherits caller default'] : [];
   if (handoff) step('handoff', () => { handoffPacket(request); });
   step('plan', () => { (handoff ? handoffPlan : launchPlan)(root, request); });
@@ -334,7 +334,7 @@ export function requestSchema(handoff = false) {
     notes: [
       'The planner emits a plan only — it never creates agents or mutates host state.',
       'prepare --check <request.json> reports each stage failure; prepare <request.json> --emit create prints only the create_agent argument record.',
-      'Peer never accepts profiles or an explicit binding — the project pool option is the only source.',
+      'Peer launches only through the project pool option: an explicit binding is refused, and profiles may accompany the request for discovery but never select the runtime.',
     ],
     examples: {
       supervisor: {

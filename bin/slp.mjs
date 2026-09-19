@@ -35,6 +35,10 @@ try {
         if (!isAbsolute(args[i + 1])) throw new Error(`Absolute path required for ${key}`);
         options[key] = args[++i];
       } else options[key] = resolveHome(); // bare flag: managed mode resolves SLP_DAEMON_HOME/PASEO_HOME or fails, never ~/.paseo
+    } else if (!key.startsWith('-')) {
+      // Positional target may come after flags (e.g. prepare --check req.json).
+      if (target !== undefined) throw new Error(`Unexpected argument ${key}`);
+      target = key;
     } else throw new Error(`Unknown flag ${key}`);
   }
   const commandFlags = { install: ['--paseo-home', '--apply', '--reload'], uninstall: ['--apply', '--reload'], upgrade: ['--from', '--apply', '--reload'], init: ['--routing-from', '--apply'], materialize: ['--from', '--apply'], routes: ['--paseo-home'], inventory: ['--paseo-home'], agents: ['--paseo-home'], monitor: [], notebook: ['--paseo-home'], prepare: ['--check', '--emit', '--schema'], 'prepare-handoff': ['--check', '--emit', '--schema'] };
