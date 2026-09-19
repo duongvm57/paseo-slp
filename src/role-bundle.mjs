@@ -54,7 +54,7 @@ function communicationLanguage(env) {
     throw error;
   }
   if (!value) return '';
-  return `Communication language: ${value} — team artifacts (reports, assignments, briefs, handbacks, notebook entries) use it; direct replies to the Human mirror the Human's current language; identifiers, paths and commands stay verbatim.\n`;
+  return `Communication language: ${value} — all text you send to other seats uses it, including prompts and inline assignment fields in create_agent/send_agent_prompt requests, plus team artifacts (reports, assignments, briefs, handbacks, notebook entries); direct replies to the Human mirror the Human's current language; identifiers, paths and commands stay verbatim.\n`;
 }
 
 // The home-dependent helpers, each rendered with the explicit daemon home so

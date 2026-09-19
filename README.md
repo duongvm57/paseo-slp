@@ -207,8 +207,9 @@ Setup is one-time; per task only steps 4–5 repeat.
 
 1. Install and activate the plugin (above).
 2. Optional, once: on the SLP surface, the **Communication language** card
-   sets the language managed seats use for team artifacts — reports,
-   handbacks, briefs between agents and the notebook. Direct replies to you
+   sets the language managed seats use for everything they write to each
+   other — prompts, reports, handbacks, briefs between agents and the
+   notebook. Direct replies to you
    still mirror your current conversation language. Toggle on, enter e.g.
    `English`, Apply — the value
    lives in plugin state, is injected into each new session, and needs no
@@ -222,6 +223,15 @@ Setup is one-time; per task only steps 4–5 repeat.
    <task — e.g. fix bug A, add feature B, review change C>
    ```
 
+   e.g. a long task that also asks for a heartbeat — the safety net that
+   periodically wakes the Supervisor to check on a stalled team:
+
+   ```text
+   Migrate the billing module to the new API. Report back with verdict
+   and the checks you ran.
+   Heartbeat: sweep every 30m until handback.
+   ```
+
 5. Send, then keep chatting in that session — it is the whole interface.
    The Supervisor asks there when it needs you and reports the outcome
    there when the work settles.
@@ -232,7 +242,7 @@ Setup is one-time; per task only steps 4–5 repeat.
    Lead, and the Lead picks Peers from the repo pool. You never name the
    child seats — they are ordinary Paseo agents you can open if curious.
 
-Two prompt lines are cheap insurance, not requirements:
+A few optional prompt lines are cheap insurance, not requirements:
 
 - `Repository:` — the seat resolves the repo itself from its workspace;
   include the line when the session's workspace may not be the target, or
@@ -241,6 +251,11 @@ Two prompt lines are cheap insurance, not requirements:
   the prompt as a bounded assignment with a deliverable rather than an
   open conversation, so an idle seat reads as "waiting on the Lead", not
   "done".
+- `Heartbeat:` — e.g. `Heartbeat: sweep every 30m until handback` — asks
+  the Supervisor to arm a bounded task-local wake on its own session per
+  its monitoring reference. Naming cadence and bound up front avoids a
+  follow-up prompt once the team is running; leave it out for short work —
+  the protocol default is no heartbeat.
 
 **SLP Lead** also works when you want to hand work straight to a Lead —
 same flow, one less layer. Supervisor and Lead already carry the
@@ -391,15 +406,23 @@ through the assignment, independent of the runtime option. The Lead keeps
 integration and technical acceptance; the Supervisor keeps observation and
 relays Human decisions.
 
-Supervisor/Lead prefer events first, with heartbeats as a safety net when the
-task calls for it and authority allows; cadence and stop conditions belong to
-the protocol/assignment. The installed references cover creating/removing
-heartbeats on the right session, keeping a causal notebook, recovery and the
-20 anti-patterns from the guide. Roles read references per situation; Peers
-receive the relevant constraints through assignments. This is a policy pack
-for agents using Paseo primitives — there is no monitoring daemon or semantic
-detector in the package; `monitor` (below) is a caller-invoked, delta-only
-signal scan.
+Supervisor/Lead prefer events first; a heartbeat is the safety net for what
+events can't cover — a stalled seat never finishes, so no finish
+notification ever arrives. Mechanically it is a scheduled wake-up the
+observing seat sets on its own session (host `create_heartbeat`: a cron
+plus a prompt); each fire wakes that seat for one bounded inspection pass
+over the team's material deltas, then it returns to waiting — an alarm
+clock for the observer, not a worker or a status poller. Every task
+heartbeat is bounded: max runs and/or expiry, a recorded receipt, deletion
+at handback or stop. Cadence and stop conditions belong to the
+protocol/assignment — request one in the objective via the `Heartbeat:`
+line above for long work. The installed references cover creating/removing
+heartbeats on the right session, keeping a causal notebook, recovery and
+the 20 anti-patterns from the guide. Roles read references per situation;
+Peers receive the relevant constraints through assignments. This is a
+policy pack for agents using Paseo primitives — there is no monitoring
+daemon or semantic detector in the package; `monitor` (below) is a
+caller-invoked, delta-only signal scan.
 
 What the shim injects at session entry — and how to verify it reached a
 seat — is documented in

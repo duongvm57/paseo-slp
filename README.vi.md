@@ -200,8 +200,8 @@ Cài đặt làm một lần; mỗi task chỉ lặp bước 4–5.
 
 1. Cài và kích hoạt plugin (ở trên).
 2. Tuỳ chọn, một lần: trên màn SLP, card **Communication language** đặt
-   ngôn ngữ cho team artifacts — report, handback, brief giữa các agent và
-   notebook. Reply trực tiếp tới bạn vẫn theo ngôn ngữ hội thoại hiện tại
+   ngôn ngữ cho mọi text giữa các seat — prompt, report, handback, brief
+   và notebook. Reply trực tiếp tới bạn vẫn theo ngôn ngữ hội thoại hiện tại
    của bạn. Bật toggle, nhập ví dụ `English`, Apply — giá trị nằm trong
    state của plugin, được inject vào mỗi session mới, không cần
    re-activation. Để tắt thì mỗi model tự theo ngôn ngữ của prompt; không
@@ -214,6 +214,15 @@ Cài đặt làm một lần; mỗi task chỉ lặp bước 4–5.
    <task — ví dụ sửa bug A, thêm feature B, review change C>
    ```
 
+   ví dụ task dài kèm yêu cầu heartbeat — safety net định kỳ đánh thức
+   Supervisor kiểm tra khi team bị stall:
+
+   ```text
+   Migrate module billing sang API mới. Report về đây verdict kèm các
+   check đã chạy.
+   Heartbeat: sweep mỗi 30m tới khi có handback.
+   ```
+
 5. Gửi, rồi chat tiếp trong session đó — đó là toàn bộ giao diện.
    Supervisor hỏi ở đó khi cần bạn và report kết quả ở đó khi việc xong.
 
@@ -222,7 +231,7 @@ Cài đặt làm một lần; mỗi task chỉ lặp bước 4–5.
    hoặc tạo Lead, Lead chọn Peer từ pool của repo. Bạn không cần gọi tên
    các seat con — chúng là agent Paseo thường, mở ra xem cũng được.
 
-Hai dòng trong prompt là bảo hiểm rẻ, không phải yêu cầu:
+Vài dòng tuỳ chọn trong prompt là bảo hiểm rẻ, không phải yêu cầu:
 
 - `Repository:` — seat tự resolve repo từ workspace của nó; ghi dòng này
   khi workspace của session có thể không phải target, hoặc task đụng
@@ -231,6 +240,11 @@ Hai dòng trong prompt là bảo hiểm rẻ, không phải yêu cầu:
   này đánh dấu prompt là bounded assignment có deliverable thay vì cuộc
   chat mở, để một seat idle đọc là "đang chờ Lead" chứ không phải "xong
   rồi".
+- `Heartbeat:` — ví dụ `Heartbeat: sweep mỗi 30m tới khi có handback` —
+  yêu cầu Supervisor arm wake task-local bounded trên session của nó theo
+  monitoring reference. Ghi cadence và bound ngay từ đầu đỡ phải prompt
+  bổ sung khi team đã chạy; bỏ qua với việc ngắn — protocol default là
+  không heartbeat.
 
 **SLP Lead** cũng dùng được nếu bạn muốn giao trực tiếp cho Lead — cùng
 flow, bớt một tầng. Supervisor và Lead đã có procedure chọn profile con,
@@ -376,14 +390,22 @@ review gate hoặc nhiều lane. Role Peer nhận disposition qua assignment, đ
 với option runtime. Lead giữ integration và technical acceptance; Supervisor
 giữ quan sát và relay quyết định của Human.
 
-Supervisor/Lead dùng event trước, heartbeat làm safety net khi task cần và có
-authority; cadence và điều kiện dừng thuộc protocol/assignment. Reference
-được cài kèm hướng dẫn tạo/xóa heartbeat của đúng session, ghi causal
-notebook, recovery và 20 anti-pattern từ guide. Role chỉ dẫn đọc reference
-theo tình huống; Peer nhận các constraint liên quan qua assignment. Đây là
-policy cho agent sử dụng primitive Paseo — package không có monitoring
-daemon hay semantic detector; `monitor` (bên dưới) là scan tín hiệu
-delta-only do caller chủ động gọi.
+Supervisor/Lead dùng event trước; heartbeat là safety net cho phần event
+không cover được — seat bị stall sẽ không bao giờ finish, nên không có
+finish notification nào tới. Về cơ chế, heartbeat là wake-up định kỳ mà
+seat quan sát tự đặt trên session của nó (primitive `create_heartbeat` của
+host: một cron + một prompt); mỗi lần fire, seat đó thức dậy làm một pass
+kiểm tra bounded trên material delta của team rồi quay lại chờ — đồng hồ
+báo thức cho observer, không phải worker hay status poller. Mọi heartbeat
+task đều bounded: maxRuns và/hoặc expiry, receipt được ghi lại, xóa khi có
+handback hoặc stop. Cadence và điều kiện dừng thuộc protocol/assignment —
+với việc dài, yêu cầu ngay trong objective bằng dòng `Heartbeat:` ở trên.
+Reference được cài kèm hướng dẫn tạo/xóa heartbeat của đúng session, ghi
+causal notebook, recovery và 20 anti-pattern từ guide. Role chỉ dẫn đọc
+reference theo tình huống; Peer nhận các constraint liên quan qua
+assignment. Đây là policy cho agent sử dụng primitive Paseo — package không
+có monitoring daemon hay semantic detector; `monitor` (bên dưới) là scan
+tín hiệu delta-only do caller chủ động gọi.
 
 ## Peer runtime pool
 

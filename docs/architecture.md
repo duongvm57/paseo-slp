@@ -390,10 +390,22 @@ Peers return results by prompting the agent ID named in their assignment
 
 Coordination is event-driven, not polled: a seat confirms a spawn
 started, then waits for the finish notification or the handback rather
-than re-reading timelines to "feel like it is managing". Heartbeats
-exist only as a low-frequency safety net when the task and authority
-allow — cadence and stop conditions belong to the protocol or the
-assignment, and there is no monitoring daemon.
+than re-reading timelines to "feel like it is managing". A heartbeat is
+the safety net for the one case events cannot cover — a silent stall
+produces no finish — and it is an ordinary host primitive, not package
+machinery: the observing session calls `create_heartbeat` with a cron
+and a prompt on itself, each fire wakes that same session for one
+bounded inspection pass over material deltas, and the owner deletes it
+at settlement (required bound: max runs and/or expiry, recorded
+receipt). This is what discharges the policy's observation rule — an
+observer may not end a turn with delegated work outstanding and no wake
+path: the finish notification is the primary path, the bounded
+self-wake the recorded fallback, and when the host cannot wake a
+session (`create_heartbeat` requires an agent-scoped session) the gap
+is reported — or the dependent work marked BLOCKED — rather than filled
+with invented machinery. The monitoring reference owns the rules once
+the choice is made; cadence and stop conditions belong to the protocol
+or the assignment, and there is no monitoring daemon.
 
 ## Ownership, state and recovery
 
