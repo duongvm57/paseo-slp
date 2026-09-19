@@ -3,6 +3,26 @@ Delegation procedure (Supervisor and Lead only):
 Read references/provider-routing.md before every delegation, quota fallback or runtime settings change.
 Peer runtime changes remain inside the project pool; quota fallback follows its quotaFallback setting.
 
+Before any delegation tool call, classify the situation — the assignment
+decides it, not the convenience of an existing session — and record a short
+formation record in an authorized location: task/team, which row applies, the
+calling actor, expected parent, target or existing child, pinned
+workspace/cwd, report recipient, planned operation and any isolation reason.
+
+| Situation | Correct action | What it never implies |
+|---|---|---|
+| New-team delegation: the assignment asks this parent to build a new team | Create each new Lead/Peer through the owning parent's agent-scoped create_agent; Lead creates its assigned Peers the same way | A standalone or differently parented seat with a fitting title or model does not become a child by receiving a prompt — never substitute send_agent_prompt for the create |
+| Continuation: same team and ownership, a correction or re-review | send_agent_prompt to the verified existing child; carry any added grant explicitly | Do not respawn a seat just because a new prompt exists; continuity never merges a standalone or other-parent seat into this team |
+| Observe-existing-work: the Human assigns observation of a Lead already running | Record the Lead ID, observation scope, an explicit report recipient and expectations; its real parent does not change | A working report route proves no parentage or sidebar hierarchy; observing grants no right to take over its implementation |
+
+A standby Lead already created under this team can receive its concrete task
+later by continuation, and a parentless direct Lead the Human assigned remains
+a valid standalone workflow — neither becomes this parent's new child without
+a matching create or authorized handoff. Continuation reuses the same suitable
+child for authorized corrections and re-review inside the ongoing assignment,
+after verifying its agent ID, owner/parent relation, scope, availability and
+independence; it never establishes or changes parentage.
+
 1. Resolve project/task identity, repository root, authority and existing ownership.
    Inspect Paseo reachability, list_workspaces and relevant list_agents, plus Git
    changes in the target checkout. Establish baseline resources to preserve. Read
@@ -48,7 +68,19 @@ Peer runtime changes remain inside the project pool; quota fallback follows its 
    agent-scoped creation gives the host the parent link, report route and
    sidebar tree the team relies on: prompting an existing standalone session
    can observe work that session already owns but cannot carry a new
-   delegation. Pass the actual workspaceId, title and notifyOnFinish=true.
+   delegation. Pass the pinned workspaceId, title and notifyOnFinish=true.
+   Without an explicit placement override, create the child in the parent's
+   workspace — a read-only review seat included. Create another workspace
+   only for a declared worktree, repository or independently isolated lane
+   requirement, and record the reason and resulting paths: "delegation should
+   be isolated" or a tidier sidebar is not such a requirement. Isolation never
+   substitutes for parentage, a shared workspace never merges write
+   authority, and a second workspace on the same checkout is not filesystem
+   isolation. The formation record catches both defects before the tool call:
+   planning a new team while the operation is send_agent_prompt to a
+   parentless or differently parented seat, or planning a second workspace
+   for the same team with no isolation reason — stop and correct the plan
+   rather than proceed or reclassify the call as observation.
    Use titles `Supervisor — <task>`, `Lead — <task>` and
    `Peer — <Disposition> — <task>`; for example Engineer and Reviewer Peers
    share the task label but have distinct dispositions. Pass taskLabel and the
@@ -82,6 +114,12 @@ Peer runtime changes remain inside the project pool; quota fallback follows its 
    per seat; the emitted prompt references the seat's brief file instead of
    inlining it.
 3. Record the returned agent/workspace IDs, assignment and ownership in your timeline.
+   Verify the returned child against host evidence — actual parent,
+   workspace/cwd and the report route its brief names — using the full agent
+   ID from the creation receipt. A title, a sent prompt or a manually assigned
+   label is not evidence of parentage; where the host does not expose the
+   parent or workspace metadata, record the visibility gap instead of
+   inferring the relationship.
    If create_agent is aborted, times out or loses its response, its outcome is
    unknown: the child may still start. Keep that scope reserved to the pending
    creation. Reconcile the request with host events and child inventory; an empty

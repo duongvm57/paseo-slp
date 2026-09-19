@@ -173,6 +173,15 @@ test('installed adapter injects every role over stdio while preserving host prom
     // the seat on thread/start and thread/resume (same instruction string).
     assert.equal(/does not license merging\s+the axes into one seat/.test(instruction), role !== 'peer');
     assert.equal(/re-read\s+the review-gate rules/.test(instruction), role === 'lead');
+    // The C8 formation pins ride the same delegation block: the decision
+    // table, formation record, placement pin and post-create verification
+    // reach Supervisor and Lead, never Peer.
+    assert.equal(/Observe-existing-work/.test(instruction), role !== 'peer');
+    assert.equal(/formation record/.test(instruction), role !== 'peer');
+    assert.equal(/not evidence of parentage/.test(instruction), role !== 'peer');
+    assert.equal(/not filesystem\s+isolation/.test(instruction), role !== 'peer');
+    assert.equal(/standalone session never makes\s+it your child/.test(instruction), role === 'supervisor');
+    assert.equal(/does not adopt it/.test(instruction), role === 'lead');
     assert.equal(execFileSync(process.execPath, [argv[0], role, '--version'], { env, encoding: 'utf8' }).trim(), 'probe-ok');
   }
 });

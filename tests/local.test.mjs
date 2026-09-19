@@ -176,24 +176,46 @@ test('decision-doctrine lines reach the standalone bundles that need them and ne
   for (const instructions of [supervisor, lead]) {
     assert.match(instructions, /does not license merging\s+the axes into one seat/, 'review-gate invariant');
     assert.match(instructions, /cannot carry a new\s+delegation/, 'agent-scoped create_agent rule');
+    // C8 formation pins ride delegation.md into both orchestrating bundles:
+    // the three-way decision table, the formation record, the placement pin
+    // and the post-create parentage verification.
+    assert.match(instructions, /New-team delegation/, 'decision table: new-team row');
+    assert.match(instructions, /Observe-existing-work/, 'decision table: observe-existing row');
+    assert.match(instructions, /formation record/, 'preflight formation record');
+    assert.match(instructions, /not evidence of parentage/, 'post-create verification');
+    assert.match(instructions, /not filesystem\s+isolation/, 'workspace placement pin');
+    assert.match(instructions, /send_agent_prompt to a\s+parentless or differently parented/, 'B21 formation-defect trigger');
+    assert.match(instructions, /second workspace\s+for the same team with no isolation reason/, 'B22 placement-defect trigger');
   }
   assert.match(lead, /re-read\s+the review-gate rules/);
   assert.match(lead, /after resume or compaction/);
   assert.ok(!/re-read\s+the review-gate rules/.test(supervisor), 'the re-read trigger is Lead-scoped');
   assert.match(supervisor, /before replying to the Human/, 'B12 protocol-read timing');
   assert.match(lead, /before your first reply/, 'B12 protocol-read timing');
+  // Role-scoped C8 cues: the observe-vs-establish distinction is Supervisor's;
+  // the conditional parent-label fallback and no-adoption rule are Lead's.
+  assert.match(supervisor, /standalone session never makes\s+it your child/, 'Supervisor new-team vs observe cue');
+  assert.ok(!/standalone session never makes\s+it your child/.test(lead), 'Supervisor cue stays role-scoped');
+  assert.match(lead, /does not adopt it/, 'Lead continuity boundary');
+  assert.match(lead, /does not repair a wrong parent/, 'Lead conditional parent-label fallback');
+  assert.ok(!/does not adopt it/.test(supervisor), 'Lead cue stays role-scoped');
   const peer = roleBundle(installed, 'peer', {}).instructions;
   assert.ok(!/does not license merging/.test(peer));
   assert.ok(!/re-read\s+the review-gate rules/.test(peer));
   assert.ok(!/cannot carry a new\s+delegation/.test(peer));
+  assert.ok(!/New-team delegation|Observe-existing-work|formation record/.test(peer), 'Peer gets no formation doctrine');
+  assert.ok(!/not evidence of parentage|not filesystem\s+isolation/.test(peer));
   for (const ref of ['orchestration.md', 'review-gates.md']) {
     assert.ok(!peer.includes(readFileSync(join(installed, 'src/references', ref), 'utf8')), `Peer must not load ${ref} bytes`);
   }
   // The shipped protocol template carries the same doctrine: read-on-landing,
-  // split-axis gate wording, idle retention and create_agent-only seats.
+  // split-axis gate wording, idle retention, create_agent-only seats and the
+  // shared-workspace placement default with the owner-map/receipt record.
   const template = readFileSync(join(installed, 'src/templates/workspace-protocol.md'), 'utf8');
   assert.match(template, /when the assignment lands/);
   assert.match(template, /split-axis seats, never one merged seat/);
   assert.match(template, /keep accepted Peers idle/);
   assert.match(template, /agent-scoped create_agent/);
+  assert.match(template, /share the assignment'?s workspace by default/, 'team-workspace default');
+  assert.match(template, /owner map and creation receipts/, 'formation receipts tactic');
 });

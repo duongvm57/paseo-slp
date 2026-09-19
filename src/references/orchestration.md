@@ -62,13 +62,18 @@ tree. Prompting a standalone session can observe work it already owns, but it
 cannot carry a new delegation: without the parent link the seat has no report
 route and sits outside the Human-inspectable tree.
 
-Before reuse, verify the Peer ID, owned scope, availability, authority and current
-runtime against the project routing policy. Resume through Paseo follow-up; reuse
-does not authorize a model switch or bypass quota fallback/ownership settlement.
+Before reuse, verify the Peer ID, owner/parent relation, owned scope,
+availability, authority, independence and current runtime against the project
+routing policy. Resume through Paseo follow-up; reuse does not authorize a
+model switch or bypass quota fallback/ownership settlement.
 Record why a new session is needed: a new independent lens or sealed seat,
 implementation involvement that invalidates review independence, a distinct scope
-needing separate ownership, or an authorized recovery. Scope changes require an
-explicit assignment; they do not automatically require discarding useful context.
+needing separate ownership, or an authorized recovery. A separate session
+supplies independent judgment; it does not by itself require a separate
+workspace — placement follows the delegation procedure's workspace pin, and
+only a declared worktree, repository or lane-isolation need splits it. Scope
+changes require an explicit assignment; they do not automatically require
+discarding useful context.
 An Engineer cannot become the independent Reviewer of its own changes. Lead owns
 the reuse/new-session choice within protocol, budget and Human constraints.
 

@@ -196,13 +196,24 @@ test('managed bundles carry the review-gate invariant and Lead trigger; Peer car
     const instructions = roleBundle(installed, role, env).instructions;
     assert.match(instructions, /does not license merging\s+the axes into one seat/, role);
     assert.match(instructions, /cannot carry a new\s+delegation/, role);
+    assert.match(instructions, /New-team delegation/, role);
+    assert.match(instructions, /Observe-existing-work/, role);
+    assert.match(instructions, /formation record/, role);
+    assert.match(instructions, /not evidence of parentage/, role);
+    assert.match(instructions, /not filesystem\s+isolation/, role);
   }
-  assert.match(roleBundle(installed, 'lead', env).instructions, /re-read\s+the review-gate rules/);
-  assert.ok(!/re-read\s+the review-gate rules/.test(roleBundle(installed, 'supervisor', env).instructions));
+  const leadBundle = roleBundle(installed, 'lead', env).instructions;
+  const supervisorBundle = roleBundle(installed, 'supervisor', env).instructions;
+  assert.match(leadBundle, /re-read\s+the review-gate rules/);
+  assert.ok(!/re-read\s+the review-gate rules/.test(supervisorBundle));
+  assert.match(supervisorBundle, /standalone session never makes\s+it your child/);
+  assert.match(leadBundle, /does not adopt it/);
   const peer = roleBundle(installed, 'peer', env).instructions;
   assert.ok(!/does not license merging/.test(peer));
   assert.ok(!/re-read\s+the review-gate rules/.test(peer));
   assert.ok(!/cannot carry a new\s+delegation/.test(peer));
+  assert.ok(!/New-team delegation|Observe-existing-work|formation record/.test(peer), 'Peer gets no formation doctrine');
+  assert.ok(!/not evidence of parentage|not filesystem\s+isolation/.test(peer));
   assert.ok(!peer.includes(readFileSync(join(installed, 'src/references/orchestration.md'), 'utf8')));
 });
 

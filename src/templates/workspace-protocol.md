@@ -108,6 +108,11 @@ Every seat joining the team is created through agent-scoped create_agent so the
 host records the parent link, report route and sidebar tree; prompting a
 standalone session can observe work it already owns but cannot carry a new
 delegation.
+One team's seats share the assignment's workspace by default — read-only review
+seats included; a separate workspace needs a declared worktree, repository or
+lane-isolation reason recorded with its resulting paths. Keep the
+team→parent→workspace→worktree owner map and creation receipts in the owner's
+timeline or an authorized notes path so the Human can trace every lane.
 
 ## Monitoring and heartbeat
 

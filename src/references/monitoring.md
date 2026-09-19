@@ -16,6 +16,12 @@ host tools available in this session; surface missing capabilities before choosi
 a fallback. Finish notifications, timeline visibility, heartbeat creation/deletion
 and cross-session reporting are separate capabilities.
 
+Whenever formation or continuation changes — a seat created, a reuse decision,
+an observe-existing assignment — check the actual parent, workspace and report
+route against the formation record. Where the host does not expose that
+metadata, record the visibility gap rather than inferring the relation; reports
+keep going to the recorded owner, never to a convenient address.
+
 Use create_agent/send_agent_prompt with notifyOnFinish=true for completion, error
 and permission wakes. While work is active, material signals include major design
 decisions, ambiguity, reopen/dependency requests, changed assumptions, repeated

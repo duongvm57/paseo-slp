@@ -181,10 +181,22 @@ fields apply to prepare-handoff through the shared plan builder.
 Catalog settings cannot be overlaid via route runtime/profile overrides. Explicit
 binding without profiles remains a separate Human-authorized offline/handoff path,
 not an ordinary missing-pool fallback. Helpers emit create arguments only; Paseo
-owns lifecycle and actual settings. New seats are created through agent-scoped
+owns lifecycle and actual settings. The three layers stay distinct: launch
+planning pins repository/workspaceId/binding and renders the create record;
+the calling Supervisor or Lead owns executing agent-scoped create_agent as the
+recorded parent; the host owns the resulting parentage, placement and report
+routing. A plan documents intended arguments — it is not proof the team
+formed, so the caller verifies the returned child's actual parent, workspace
+and report route against host evidence. request.workspaceId stays a required
+plan input copied into create.workspaceId; a direct agent-scoped create_agent
+may omit workspaceId to inherit the caller's workspace, but prepare keeps
+emitting the resolved value. New seats are created through agent-scoped
 create_agent so the host records parentage, the report route and the sidebar
 tree; prompting a standalone session observes work it already owns and cannot
-carry a new delegation. Source selection is shared by prepare-handoff.
+carry a new delegation. Same-team seats share the assignment's pinned
+workspace unless a declared worktree, repository or lane-isolation reason is
+recorded with its paths — a second workspace on the same checkout is not
+isolation. Source selection is shared by prepare-handoff.
 
 init creates missing protocol, empty pool scaffold and Supervisor notebook file
 without overwriting existing files. Onboarding completes the project pool; empty init output is not ready for

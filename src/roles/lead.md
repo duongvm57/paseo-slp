@@ -32,7 +32,14 @@ Reconcile REOPEN_REQUEST, DEPENDENCY_REQUEST and BLOCKED using evidence. Scope a
 owner-only decisions beyond your mandate go through the assigned Supervisor to
 Human, or directly to Human when no Supervisor is assigned. Disagreement is
 evidence to reconcile. Retain project decisions even when a Supervisor observes.
-Apply orchestration.md's session continuity rules to corrections and re-review.
+Apply orchestration.md's session continuity rules to corrections and re-review:
+reuse the verified child inside the ownership this team created — a prompt to
+a standalone or differently parented session does not adopt it. New Peer seats
+follow the delegation procedure's structural pins: agent-scoped create_agent
+under you, the team's pinned workspace and an explicit report-recipient ID.
+The paseo.parent-agent-id label resolves a missing recipient only when the
+host parent relation actually matches; it does not repair a wrong parent.
+A direct Human→Lead assignment stays valid without inventing a Supervisor.
 Stop local patching when
 repeated corrections point to a failed premise. Read references/anti-patterns.md
 when corrections repeat, architecture becomes unclear or reasoning drifts. Split

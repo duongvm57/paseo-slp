@@ -52,10 +52,10 @@ Targets refer to the linked materials above and their named sections.
 | G02 · §2 | C/T | Smallest useful topology; SLP ceremony not required for every tiny task. | Restricted: fixed chain/Engineer | Policy covered: Lead; Orchestration → Frame and select; Protocol → Task classes. |
 | G03 · §2.1, §5.1 | I/C | Save Human attention; Human owns boundaries; concise decision/risk digest. | Partial | Policy covered: Supervisor; Governance → Establish supervision; direct Human–Lead path retained. |
 | G04 · §2.2 | C | Foundation work needs enough domain framing to locate unknowns and owner decisions. | Missing | Policy covered: Orchestration → Frame and select; Protocol → Task classes. Human learning itself is contextual. |
-| G05 · §3.0 | I/C | Preflight control plane, provider availability, workspace/agent inventory and user-owned changes. | Partial | Policy covered: Delegation step 1; actual reachability remains per-launch evidence. |
+| G05 · §3.0 | I/C | Preflight control plane, provider availability, workspace/agent inventory and user-owned changes. | Partial | Policy covered: Delegation step 1 plus the formation record (situation row, calling actor, expected parent, pinned workspace, recipient, operation, isolation reason) before the first delegation call; actual reachability remains per-launch evidence. |
 | G06 · §3.0 | I/C | Durable notebook/protocol location and stable candidate identity. | Partial | Conditional: Governance → Causal notebook establishes authorized location/retrieval; Orchestration → Proof; Protocol identifies repo fields. |
 | G07 · §3.1 | I | Paseo owns lifecycle/workspace/parentage/follow-up/timeline; no Peer orchestration. | Covered as policy | Policy covered: Common, Peer, Delegation. Native-subagent disabling/tool filtering is not implemented; see H06. |
-| G08 · §3.2 | I/C | Independent sessions, neutral briefs and sealed boundaries when needed. | Partial | Policy covered: Delegation — new seats only via agent-scoped create_agent (parent link, report route, sidebar tree); Orchestration → Independent design and council; Peer read-only/sealed handback. |
+| G08 · §3.2 | I/C | Independent sessions, neutral briefs and sealed boundaries when needed. | Partial | Policy covered: Delegation — new seats only via agent-scoped create_agent (parent link, report route, sidebar tree), same-team seats sharing the assignment's pinned workspace absent a declared isolation reason; Orchestration → Independent design and council; Peer read-only/sealed handback. |
 | G09 · §3.3 | I/C | One writer per moving scope, real isolation, explicit transfer and frozen review. | Restricted to one writer total | Policy covered: Common; Orchestration → Ownership, isolation and integration. Host worktree creation is conditional. |
 | G10 · §3.4, §6.3 | I/T | Discover providers/models; route by risk/budget; no stale model ID prescriptions. | Partial | Policy and implementation covered: `.paseo-slp/workspace-protocol.md` specifies repo criteria/budget; adjacent `slp-routing.json` describes options/quota for that repo. Lead selects each runtime bundle independently of disposition, with fresh hash/eligibility checks in prepare and live discovery in Delegation. No host/global fallback; two managed profiles and a project Peer pool. |
 | G11 · §3.5 | I | Exact artifact, identity, real checks, independent review when required, correct acceptance owner. | Partial: no independent lane | Policy covered: Lead; Delegation → required-gate invariant; Orchestration → Proof and acceptance; Review gates; Peer review disposition. |
@@ -77,7 +77,7 @@ Targets refer to the linked materials above and their named sections.
 | G27 · §5.4 multi-lens | C/H | Independent designs, distinct mandates, sealed reports where needed, bounded challenge then Lead decision. | Unsupported | Policy covered: Orchestration → Independent design and council. Counts/round limits are Protocol defaults. |
 | G28 · §5.4 design reopen | I/C | Implementation-discovered precision/cadence/API/ownership changes may require design or owner decision. | Partial | Policy covered: Peer contract guard; Orchestration → Reopen with explicit behavioral consequences. |
 | G29 · §6.1–6.2 | I | Generic Paseo primitives; SLP in independently installed roles/protocol, three role identities. | Covered | Preserved: installer/transport own package wiring; no Paseo core changes, detector or custom runner added. |
-| G30 · §6.4 | I | Creation brief includes project/task/root/workspace/role/disposition/objective/scope/exclusions/authority/proof/handback. | Partial | Policy covered: Delegation step 2 adds identifiers, disposition, recipient and candidate/visibility conditions. |
+| G30 · §6.4 | I | Creation brief includes project/task/root/workspace/role/disposition/objective/scope/exclusions/authority/proof/handback. | Partial | Policy covered: Delegation step 2 adds identifiers, disposition, an explicit report-recipient agent ID and candidate/visibility conditions; step 3 verifies the returned child's actual parent, workspace and report route against host evidence. |
 | G31 · §6.5 | I/C | Finish signals prompt evidence retrieval; sparse monitoring rather than repeated status polls. | Partial | Policy covered: Delegation step 4 and Monitoring — watch-list scan on each material event plus low-frequency sweep beside event waits; curated/full report distinction stays explicit. |
 | G32 · §7.1–7.2 | I | Lead reads protocol; Supervisor reads for protocol mandate; Peer receives relevant constraints only. | Covered | Preserved and explicit in roles/Protocol/Delegation; Supervisor and Lead read it when the assignment lands, before tactic-dependent decisions — not only before delegation. No protocol broadcast through AGENTS.md. |
 | G33 · §7.3–7.6 | T | Criticality, authority, task classes, isolation, routing, proof, escalation, anti-patterns, evolution, version/date. | Partial minimal template | Policy covered as template sections; per-repo values remain intentionally unresolved until assigned context supplies them. |
@@ -212,3 +212,17 @@ rework and settle in a batch when the assignment closes; Human stop still
 takes effect immediately. New seats join the team only through agent-scoped
 create_agent (parent link, report route, sidebar tree); prompting a standalone
 session observes existing work, never a new delegation.
+Formation follow-up (2026-09-19): delegation now classifies new-team,
+continuation and observe-existing before any tool call, with a short formation
+record (situation, actor, expected parent, target, pinned workspace/cwd,
+recipient, operation, isolation reason) as checklist evidence. Placement is
+pinned the same way: same-team seats share the assignment's workspace unless a
+declared worktree, repository or lane-isolation reason is recorded — a tidier
+sidebar or generic "isolation" does not justify a second workspace, and a
+second workspace on the same checkout is not filesystem isolation. Launch
+planning, caller-owned create and host-owned parentage stay distinct: prepare
+renders the intended create arguments (workspaceId remains a required plan
+input), the caller executes the agent-scoped create as the recorded parent,
+and the caller verifies the returned child's actual parent, workspace and
+report route against host evidence — a title, sent prompt or label is not
+proof of parentage.

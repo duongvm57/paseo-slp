@@ -198,6 +198,18 @@ bundle. Profile inventories cannot override the Peer pool. U2 traces profiles fo
 Supervisor/Lead and project option/hash/settings for Peer, including both families
 when mixed-peer is selected.
 
+For every seat the scenario tree forms, record the formation evidence: the
+calling parent's ID, the agent-scoped create request/response, the returned
+child ID with its host parent, workspace/cwd and the report recipient named in
+the brief. A prompt sent into a pre-existing session is not a create and
+establishes no parentage; observe-existing assignments keep the seat's real
+parent and record their own explicit report recipient. Same-team seats share
+the assignment's pinned workspace unless a declared worktree, repository or
+lane-isolation reason is recorded with its resulting paths — a second
+workspace on the same checkout does not count as isolation. Continuation
+reuses the verified existing child; respawning a seat per correction round is
+a formation defect to record, not a routine choice.
+
 Onboarding scenarios deliberately start with their declared absent/existing-file
 baseline and test fresh-session skill discovery. Let those setup actors produce
 the files; coordinator initialization must not pre-satisfy their assertions.
