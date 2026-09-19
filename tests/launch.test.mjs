@@ -91,9 +91,10 @@ test('spawnKit carries role-scoped approximate MCP tool signatures', t => {
   }
   const peer = launchPlan(installed, { ...request, repository: dir, role: 'peer', providers, route: catalogFixture(dir) });
   assert.deepEqual(peer.spawnKit.tools.map(tool => tool.split('(')[0]), ['send_agent_prompt', 'get_agent_status']);
-  assert.ok(peer.create.initialPrompt.includes('- send_agent_prompt(agentId: string'));
-  assert.ok(!peer.create.initialPrompt.includes('create_agent('));
-  assert.equal(spawnKit('peer').tools.length, 2);
+  // The Peer route resolves a verified slp-*-peer wrapper, which injects the
+  // carrier at session entry — the prompt omits it, the plan fields stay.
+  assert.ok(!peer.create.initialPrompt.includes('Policy locators —'));
+  assert.equal(peer.spawnKit.tools.length, 2);
   assert.throws(() => spawnKit('human'), /Unknown role/);
 });
 
@@ -108,6 +109,33 @@ test('the carrier appears exactly once in a stock-provider prompt', t => {
   assert.ok(plan.create.initialPrompt.includes(readFileSync(join(installed, 'src/roles/lead.md'), 'utf8')));
 });
 
+test('the prompt carrier is dropped only when the target wrapper provably injects it', t => {
+  const { dir, installed } = fixture(t);
+  const leadProviders = [{ id: 'slp-codex-lead', enabled: true, status: 'available' }];
+  const wrapped = { ...piBinding, provider: 'slp-codex-lead' };
+  // Canonical wrapper observed live → the session-entry injection carries it.
+  const live = launchPlan(installed, { ...request, repository: dir, role: 'lead', binding: wrapped, providers: leadProviders });
+  assert.ok(!live.create.initialPrompt.includes('Policy locators —'));
+  assert.ok(!live.create.initialPrompt.includes('Spawn kit —'));
+  assert.equal(live.spawnKit.tools.length, 12);
+  assert.ok(live.orientation.policyBytes.length > 0);
+  // The same wrapper without a live inventory observation keeps the fallback.
+  const blind = launchPlan(installed, { ...request, repository: dir, role: 'lead', binding: wrapped });
+  assert.equal(blind.create.initialPrompt.split('Policy locators —').length - 1, 1);
+  // Configured-provenance inventory is not live evidence — carrier stays.
+  const configured = launchPlan(installed, { ...request, repository: dir, role: 'lead', binding: wrapped,
+    providers: [{ id: 'slp-codex-lead', enabled: true, provenance: 'configured' }] });
+  assert.equal(configured.create.initialPrompt.split('Policy locators —').length - 1, 1);
+  // An unavailable observation is equally unproven.
+  const down = launchPlan(installed, { ...request, repository: dir, role: 'lead', binding: wrapped,
+    providers: [{ id: 'slp-codex-lead', enabled: true, status: 'unavailable' }] });
+  assert.equal(down.create.initialPrompt.split('Policy locators —').length - 1, 1);
+  // A mismatched extends cannot be this package's wrapper.
+  const alien = launchPlan(installed, { ...request, repository: dir, role: 'lead', binding: wrapped,
+    providers: [{ id: 'slp-codex-lead', enabled: true, extends: 'pi' }] });
+  assert.equal(alien.create.initialPrompt.split('Policy locators —').length - 1, 1);
+});
+
 test('orientation carries mechanical locators only', t => {
   const { dir, installed } = fixture(t);
   const lead = launchPlan(installed, { ...request, repository: dir, role: 'lead', binding: piBinding });
@@ -119,8 +147,9 @@ test('orientation carries mechanical locators only', t => {
   for (const entry of lead.orientation.policyBytes) {
     assert.ok(entry.path.startsWith(`${installed}/`), 'policyBytes paths are absolute under installedRoot');
   }
-  // docs/contract.md is declared policy but not part of the installed candidate.
-  assert.deepEqual(byPath[join(installed, 'docs/contract.md')], { path: join(installed, 'docs/contract.md'), missing: true });
+  // docs/contract.md is a source-checkout document outside the install unit;
+  // the locator set derives from the install receipt and never declares it.
+  assert.equal(byPath[join(installed, 'docs/contract.md')], undefined);
   for (const rel of ['src/common.md', 'src/roles/lead.md', 'src/delegation.md',
     'src/references/anti-patterns.md', 'src/references/governance.md', 'src/references/monitoring.md',
     'src/references/orchestration.md', 'src/references/provider-routing.md', 'src/references/review-gates.md']) {
@@ -128,11 +157,12 @@ test('orientation carries mechanical locators only', t => {
     const bytes = readFileSync(join(installed, rel));
     assert.deepEqual(entry, { path: join(installed, rel), bytes: bytes.length, sha256: hash(bytes) });
   }
-  assert.equal(lead.orientation.policyBytes.length, 10);
-  // Carrier: locators and the missing marker must survive into initialPrompt.
+  assert.equal(lead.orientation.policyBytes.length, 9);
+  // Carrier: locators must survive into initialPrompt on the fallback path
+  // (stock piBinding is not an injecting wrapper, so the carrier stays).
   assert.ok(lead.create.initialPrompt.includes(`- ${join(installed, 'src/common.md')} — `));
   assert.ok(lead.create.initialPrompt.includes(`${join(installed, 'src/common.md')} — ${readFileSync(join(installed, 'src/common.md')).length} bytes, sha256 ${hash(readFileSync(join(installed, 'src/common.md')))}`));
-  assert.match(lead.create.initialPrompt, new RegExp(`${join(installed, 'docs/contract.md').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} — declared but not shipped`));
+  assert.ok(!lead.create.initialPrompt.includes('docs/contract.md'));
   // A Peer bundle omits delegation.md and passes the routed catalog hash through.
   const route = catalogFixture(dir);
   const peer = launchPlan(installed, { ...request, repository: dir, role: 'peer', providers, route });
@@ -140,7 +170,7 @@ test('orientation carries mechanical locators only', t => {
   const peerPaths = peer.orientation.policyBytes.map(entry => entry.path);
   assert.ok(peerPaths.includes(join(installed, 'src/roles/peer.md')));
   assert.ok(!peerPaths.includes(join(installed, 'src/delegation.md')));
-  assert.equal(peer.orientation.policyBytes.length, 9);
+  assert.equal(peer.orientation.policyBytes.length, 8);
 });
 
 test('handoff plans carry modeId, spawnKit and orientation alongside the packet', t => {

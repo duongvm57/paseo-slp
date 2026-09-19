@@ -1,7 +1,7 @@
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync, lstatSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { roles, orchestrates } from './profiles.mjs';
-import { files, hash } from './package.mjs';
+import { files, hash, readJson } from './package.mjs';
 import { spawnKit } from './spawn-kit.mjs';
 
 // A Role bundle is the exact policy bytes a role receives at session entry.
@@ -75,26 +75,38 @@ function managedHelpers(cli, home) {
     `  init/materialize/snapshot/prepare/prepare-handoff/verify are repo-scoped: they take explicit paths and never touch a daemon home.\n`;
 }
 
-// The declared locator set a role's carrier ships: fixed policy surface plus
-// every references file, each stat'ed under root — present files report byte
-// size + sha256, absent ones a missing marker. Entries sort by absolute path
-// so the list carries no bundle/load-order hint. launch.mjs orientation()
-// renders the same list into the plan's manifest; a root without
-// src/references (a broken or foreign runtime root) yields only missing
-// markers instead of throwing — the seat still gets its instructions.
+// The declared locator set a role's carrier ships: the role's required bundle
+// parts plus every src/references file. On an installed root the set derives
+// from the install receipt's candidate.files — a receipt-declared reference
+// deleted from disk still reports missing instead of vanishing from the list.
+// A source checkout has no receipt and falls back to a live scan. Nothing
+// outside the install unit (for example docs/contract.md, a source-checkout
+// document) is ever declared here. Entries sort by absolute path so the list
+// carries no bundle/load-order hint. launch.mjs orientation() renders the same
+// list into the plan's manifest; tolerance is limited to ENOENT/ENOTDIR on the
+// optional paths — permission errors, corrupt receipts and symlinked policy
+// paths are integrity failures, never absence.
 export function policyLocators(root, role) {
-  let references = [];
-  try { references = files(root, 'src/references'); }
-  catch (error) { if (error.code !== 'ENOENT') throw error; }
-  const declared = ['docs/contract.md', 'src/common.md', `src/roles/${role}.md`,
-    ...(orchestrates(role) ? ['src/delegation.md'] : []),
-    ...references];
-  return declared.map(path => {
+  const required = bundleParts(role).map(part => `src/${part}`);
+  let receipt = null;
+  try { receipt = readJson(join(root, 'installed.json')); }
+  catch (error) { if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error; }
+  let references;
+  if (receipt !== null) {
+    if (!Array.isArray(receipt.candidate?.files)) throw new Error(`installed.json at ${root} lacks a candidate file list`);
+    references = receipt.candidate.files.map(entry => entry.path).filter(path => path.startsWith('src/references/'));
+  } else {
+    references = [];
+    try { references = files(root, 'src/references'); }
+    catch (error) { if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error; }
+  }
+  return [...required, ...references].map(path => {
     const absolute = join(root, path);
     let stat;
-    try { stat = statSync(absolute); }
-    catch (error) { if (error.code !== 'ENOENT') throw error; }
-    if (!stat?.isFile()) return { path: absolute, missing: true };
+    try { stat = lstatSync(absolute); }
+    catch (error) { if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error; }
+    if (!stat || (!stat.isFile() && !stat.isSymbolicLink())) return { path: absolute, missing: true };
+    if (stat.isSymbolicLink()) throw new Error(`Policy locator path is a symlink: ${absolute}`);
     const bytes = readFileSync(absolute);
     return { path: absolute, bytes: bytes.length, sha256: hash(bytes) };
   }).sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
@@ -110,7 +122,7 @@ export function policyLocators(root, role) {
 // the prepare path, load-time wording for session entry.
 export function carrierBlock(kit, locators, caption) {
   const lines = locators.map(entry => entry.missing
-    ? `- ${entry.path} — declared but not shipped in this install`
+    ? `- ${entry.path} — declared but missing on disk`
     : `- ${entry.path} — ${entry.bytes} bytes, sha256 ${entry.sha256}`);
   return `\nSpawn kit — role-scoped Paseo MCP signatures (${kit.note}):\n`
     + kit.tools.map(tool => `- ${tool}`).join('\n')

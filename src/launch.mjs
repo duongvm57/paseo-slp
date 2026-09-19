@@ -1,9 +1,9 @@
 import { join, isAbsolute, basename } from 'node:path';
 import { statSync, accessSync, constants } from 'node:fs';
-import { savedProfileBinding, roleProvider, roles } from './profiles.mjs';
+import { savedProfileBinding, roleProvider, providerId, roles } from './profiles.mjs';
 import { verifyInstall, snapshot, readJson } from './package.mjs';
 import { catalogBinding } from './routing.mjs';
-import { bindingCheck, dispositionPattern } from './binding.mjs';
+import { bindingCheck, dispositionPattern, verifyProvider } from './binding.mjs';
 import { roleInstructions, orchestrates, policyLocators, carrierBlock } from './role-bundle.mjs';
 import { spawnKit } from './spawn-kit.mjs';
 
@@ -113,8 +113,8 @@ function assignmentFile(path) {
 // pre-solve interpretation: entries sort by path so the list carries no
 // bundle/load-order hint, and there are no load-bearing markers or digested
 // content (note #33: seat-side re-derivation is the check that catches upstream
-// premise errors). A declared file absent from the installed package is still
-// listed, marked missing, so the seat learns it is not shipped.
+// premise errors). A receipt-declared file absent from disk is still listed,
+// marked missing, so a broken install stays visible to the seat.
 function orientation(root, role, routing) {
   return {
     installedRoot: root,
@@ -131,6 +131,23 @@ function orientation(root, role, routing) {
 // with no file contents inlined. This caption is pinned by contract: the
 // values are plan-time, measured where prepare ran.
 const planLocatorCaption = 'absolute paths; size/sha256 are plan-time values for verifying the file found is the one prepare checked';
+
+// The prompt-side carrier is dropped only when the target is this package's
+// canonical role wrapper for the requested role AND the request's provider
+// inventory observed it live — the wrapper injects the same carrier at
+// session entry, so shipping both duplicates the block in one session. A
+// bare slp-* prefix or caller env proves nothing about the receiving
+// provider; a legacy or unverified target keeps the fallback carrier. When
+// in doubt the block stays: a duplicate is recoverable, a missing carrier
+// is not.
+function targetInjectsCarrier(role, binding, providers) {
+  try {
+    const family = roleProvider(role, binding.provider);
+    if (binding.provider !== providerId(role, family)) return false;
+    verifyProvider(providers, binding.provider, () => family);
+    return true;
+  } catch { return false; }
+}
 
 function agentTitle(role, disposition, request, packet) {
   const label = request.taskLabel ?? (basename(request.repository) || 'Task');
@@ -176,7 +193,9 @@ function plan(root, request, packet) {
       notifyOnFinish: true,
       provider: `${binding.provider}/${binding.model}`,
       workspaceId: request.workspaceId,
-      initialPrompt: prompt(root, role, assignment, binding) + carrierBlock(kit, manifest.policyBytes, planLocatorCaption) + (packet ? handoffNotice(role, packet) : ''),
+      initialPrompt: prompt(root, role, assignment, binding)
+        + (targetInjectsCarrier(role, binding, request.providers) ? '' : carrierBlock(kit, manifest.policyBytes, planLocatorCaption))
+        + (packet ? handoffNotice(role, packet) : ''),
       settings: {
         ...(binding.modeId ? { modeId: binding.modeId } : {}),
         ...(binding.thinkingOptionId ? { thinkingOptionId: binding.thinkingOptionId } : {}),
