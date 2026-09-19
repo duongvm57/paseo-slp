@@ -208,12 +208,22 @@ test('managed bundles carry the review-gate invariant and Lead trigger; Peer car
   assert.ok(!/re-read\s+the review-gate rules/.test(supervisorBundle));
   assert.match(supervisorBundle, /standalone session never makes\s+it your child/);
   assert.match(leadBundle, /does not adopt it/);
+  // The same formation pins must reach the managed path: continuation row and
+  // both defect triggers.
+  for (const bundle of [leadBundle, supervisorBundle]) {
+    assert.match(bundle, /Continuation: same team and ownership/, 'decision table: continuation row');
+    assert.match(bundle, /send_agent_prompt to a\s+parentless or differently parented/, 'B21 formation-defect trigger');
+    assert.match(bundle, /second workspace\s+for the same team with no isolation reason/, 'B22 placement-defect trigger');
+  }
   const peer = roleBundle(installed, 'peer', env).instructions;
   assert.ok(!/does not license merging/.test(peer));
   assert.ok(!/re-read\s+the review-gate rules/.test(peer));
   assert.ok(!/cannot carry a new\s+delegation/.test(peer));
   assert.ok(!/New-team delegation|Observe-existing-work|formation record/.test(peer), 'Peer gets no formation doctrine');
   assert.ok(!/not evidence of parentage|not filesystem\s+isolation/.test(peer));
+  // The inbound-route self-check is a Peer-visible self-check (common.md), not
+  // formation doctrine.
+  assert.match(peer, /paseo\.parent-agent-id label must match/);
   assert.ok(!peer.includes(readFileSync(join(installed, 'src/references/orchestration.md'), 'utf8')));
 });
 

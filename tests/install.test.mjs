@@ -177,9 +177,15 @@ test('installed adapter injects every role over stdio while preserving host prom
     // table, formation record, placement pin and post-create verification
     // reach Supervisor and Lead, never Peer.
     assert.equal(/Observe-existing-work/.test(instruction), role !== 'peer');
+    assert.equal(/Continuation: same team and ownership/.test(instruction), role !== 'peer');
     assert.equal(/formation record/.test(instruction), role !== 'peer');
     assert.equal(/not evidence of parentage/.test(instruction), role !== 'peer');
     assert.equal(/not filesystem\s+isolation/.test(instruction), role !== 'peer');
+    assert.equal(/send_agent_prompt to a\s+parentless or differently parented/.test(instruction), role !== 'peer');
+    assert.equal(/second workspace\s+for the same team with no isolation reason/.test(instruction), role !== 'peer');
+    // The inbound-route self-check rides common.md — a self-check, not formation
+    // doctrine — so it reaches every role including Peer.
+    assert.match(instruction, /paseo\.parent-agent-id label must match/);
     assert.equal(/standalone session never makes\s+it your child/.test(instruction), role === 'supervisor');
     assert.equal(/does not adopt it/.test(instruction), role === 'lead');
     assert.equal(execFileSync(process.execPath, [argv[0], role, '--version'], { env, encoding: 'utf8' }).trim(), 'probe-ok');

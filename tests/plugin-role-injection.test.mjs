@@ -171,14 +171,20 @@ test('agent.create: injected bundle carries the review-gate invariant and Lead t
       assert.ok(!/re-read\s+the review-gate rules/.test(prompt), id);
       assert.ok(!/cannot carry a new\s+delegation/.test(prompt), id);
       assert.ok(!/New-team delegation|Observe-existing-work|formation record/.test(prompt), `${id} gets no formation doctrine`);
+      // The inbound-route self-check is a Peer-visible self-check (common.md),
+      // not formation doctrine.
+      assert.match(prompt, /paseo\.parent-agent-id label must match/, id);
       continue;
     }
     assert.match(prompt, /does not license merging\s+the axes into one seat/, id);
     assert.equal(/re-read\s+the review-gate rules/.test(prompt), role === 'lead', id);
     // The C8 formation pins reach both orchestrating roles through the hook too.
     assert.match(prompt, /Observe-existing-work/, id);
+    assert.match(prompt, /Continuation: same team and ownership/, id);
     assert.match(prompt, /not evidence of parentage/, id);
     assert.match(prompt, /not filesystem\s+isolation/, id);
+    assert.match(prompt, /send_agent_prompt to a\s+parentless or differently parented/, id);
+    assert.match(prompt, /second workspace\s+for the same team with no isolation reason/, id);
     assert.equal(/standalone session never makes\s+it your child/.test(prompt), role === 'supervisor', id);
     assert.equal(/does not adopt it/.test(prompt), role === 'lead', id);
   }

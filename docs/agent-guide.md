@@ -83,13 +83,14 @@ or one default for the whole repo with exceptions only where risk or
 evidence type differs, adapts any of them, or describes their own. They
 are starting shapes, not a limit on which dispositions may appear:
 
-- `Engineer → Reviewer` — one agent writes it and proves it works; a
-  second, fresh agent tries to break the finished result. The default for
-  bounded work.
-- `Engineer → Reviewer + QC` — write, then two checkers in parallel: the
-  Reviewer checks the work against the spec and the rules, while QC
-  designs cases from the requirement and runs them on the same finished
-  version. For risky or hard-to-reverse work.
+- `Engineer → Reviewer` — one agent writes it and proves it works;
+  `Reviewer` is shorthand for a split-axis gate: a Spec seat checks the
+  work against the spec and a Standards seat checks it against the rules,
+  in parallel. The default for bounded work.
+- `Engineer → Reviewer + QC` — write, then three checkers in parallel: the
+  Spec and Standards seats above, plus QC, which designs cases from the
+  requirement and runs them on the same finished version. For risky or
+  hard-to-reverse work.
 - `Analyst → Architect → Engineer → Reviewer + QC` — Analyst pins down
   what "done" means, Architect designs before code, then as the flow
   above; Tech Writer can update docs in its own scope. For vague-spec or

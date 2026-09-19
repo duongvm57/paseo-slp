@@ -37,7 +37,7 @@ agent compliance or E2E success.
 | [Protocol template](../../src/templates/workspace-protocol.md) | Explicit init creates repository .paseo-slp/workspace-protocol.md | Supervisor and Lead read the repository file when the assignment lands — before tactic-dependent replies or decisions, not only before delegation; Supervisor also reads it for an assigned protocol audit. Peer receives only relevant constraints. |
 
 [Package identity/install](../../src/package.mjs) recursively includes `src/`, so all
-five references are in the install unit without adding them to every prompt.
+six references are in the install unit without adding them to every prompt.
 Common resolves `references/` relative to the installed policy directory supplied by
 the loader. The full guide and this matrix remain source documentation under docs/.
 No deployed instance is updated merely by editing this checkout.
@@ -208,8 +208,9 @@ orchestration.md/review-gates.md at reviewer selection, re-review and
 acceptance — a compaction-era "Engineer → Reviewer" summary does not license
 one merged seat, and seats that cannot be supplied make the gate BLOCKED.
 Artifact acceptance is not assignment close: accepted Peers stay idle against
-rework and settle in a batch when the assignment closes; Human stop still
-takes effect immediately. New seats join the team only through agent-scoped
+rework and settle in a batch when the assignment that formed the team
+closes; Human stop still takes effect immediately. New seats join the team
+only through agent-scoped
 create_agent (parent link, report route, sidebar tree); prompting a standalone
 session observes existing work, never a new delegation.
 Formation follow-up (2026-09-19): delegation now classifies new-team,

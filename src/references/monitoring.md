@@ -28,9 +28,11 @@ decisions, ambiguity, reopen/dependency requests, changed assumptions, repeated
 failures, stalled progress and stable candidates/findings. When a Supervisor is
 assigned, Lead sends decision, evidence reference and needed attention to that
 Supervisor's agent ID as a bounded report; a Peer reports to Lead the same way.
-Resolve a recipient's ID from the assignment or from the child's
-paseo.parent-agent-id label. Keep reports material: a verdict, handback, blocker or
-changed assumption always warrants one, and an informational report needs no
+Resolve a recipient's ID from the assignment; a child's
+paseo.parent-agent-id label is a fallback only when the host parent relation
+actually matches — a label alone never repairs a wrong parent. Keep reports
+material: a verdict, handback, blocker or changed assumption always warrants
+one, and an informational report needs no
 acknowledgment prompt in reply.
 
 If the host has no semantic event bridge, record that gap. Finish callbacks alone
@@ -127,7 +129,7 @@ At task completion, cancellation, handoff or expiry review, reconcile the owner 
 with the resource receipts: task descendants, pending permissions, terminals,
 workspace scripts, schedules/heartbeats and processes. Artifact acceptance alone
 is not that boundary: an accepted Peer stays idle against rework until the
-assignment closes, then settles in one pass — idle retention neither runs
+assignment that formed the team closes, then settles in one pass — idle retention neither runs
 hidden work nor delays a required cleanup. Human stop halts further
 work and follow-ups; cancel owned task agents as authorized by common policy, and
 stop the observer's own task-local wakes. Do not start a new cleanup agent after stop.

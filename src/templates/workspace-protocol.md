@@ -136,8 +136,9 @@ Use a deterministic snapshot or exact commit with relevant working changes accou
 for; record external proof separately. Review and verdict bind to the same candidate.
 Acceptance is not assignment close: keep accepted Peers idle after the accept
 sweep so rework keeps its context, and consider a batch archive when the
-assignment closes and rework has settled. A Human stop still takes effect
-immediately; idle retention never runs hidden work or delays required cleanup.
+assignment that formed the team closes and rework has settled. A Human stop
+still takes effect immediately; idle retention never runs hidden work or
+delays required cleanup.
 
 ## Reopen, dependency, and blocked handling
 

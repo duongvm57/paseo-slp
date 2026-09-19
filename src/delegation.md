@@ -12,16 +12,17 @@ workspace/cwd, report recipient, planned operation and any isolation reason.
 | Situation | Correct action | What it never implies |
 |---|---|---|
 | New-team delegation: the assignment asks this parent to build a new team | Create each new Lead/Peer through the owning parent's agent-scoped create_agent; Lead creates its assigned Peers the same way | A standalone or differently parented seat with a fitting title or model does not become a child by receiving a prompt — never substitute send_agent_prompt for the create |
-| Continuation: same team and ownership, a correction or re-review | send_agent_prompt to the verified existing child; carry any added grant explicitly | Do not respawn a seat just because a new prompt exists; continuity never merges a standalone or other-parent seat into this team |
+| Continuation: same team and ownership — a correction, re-review or a new bounded task for a child this team already created and verified | send_agent_prompt to the verified existing child, continuing its session to preserve context; carry any added grant explicitly | A new task does not by itself require a fresh seat or reopen verified parentage; continuity never merges a standalone or other-parent seat into this team |
 | Observe-existing-work: the Human assigns observation of a Lead already running | Record the Lead ID, observation scope, an explicit report recipient and expectations; its real parent does not change | A working report route proves no parentage or sidebar hierarchy; observing grants no right to take over its implementation |
 
 A standby Lead already created under this team can receive its concrete task
 later by continuation, and a parentless direct Lead the Human assigned remains
 a valid standalone workflow — neither becomes this parent's new child without
 a matching create or authorized handoff. Continuation reuses the same suitable
-child for authorized corrections and re-review inside the ongoing assignment,
-after verifying its agent ID, owner/parent relation, scope, availability and
-independence; it never establishes or changes parentage.
+child for authorized corrections, re-review and new bounded tasks inside the
+ongoing assignment, after verifying its agent ID, owner/parent relation,
+scope, availability and independence; it never establishes or changes
+parentage.
 
 1. Resolve project/task identity, repository root, authority and existing ownership.
    Inspect Paseo reachability, list_workspaces and relevant list_agents, plus Git
@@ -114,12 +115,17 @@ independence; it never establishes or changes parentage.
    per seat; the emitted prompt references the seat's brief file instead of
    inlining it.
 3. Record the returned agent/workspace IDs, assignment and ownership in your timeline.
-   Verify the returned child against host evidence — actual parent,
-   workspace/cwd and the report route its brief names — using the full agent
-   ID from the creation receipt. A title, a sent prompt or a manually assigned
-   label is not evidence of parentage; where the host does not expose the
-   parent or workspace metadata, record the visibility gap instead of
-   inferring the relationship.
+   Verify the returned child against host evidence — actual parent and
+   workspace/cwd are host-queryable; check them using the full agent ID from
+   the creation receipt. The report route is a property of the brief, not
+   host-queryable state: confirm it by the child's first report reaching the
+   named recipient. A title, a sent prompt or a manually assigned label is
+   not evidence of parentage; where the host exposes neither route evidence
+   nor parent/workspace metadata, record the visibility gap instead of
+   inferring the relationship. If verification finds a wrong relation — a
+   missing or mismatched parent or an unexpected workspace — preserve the
+   evidence and take the correction to the owning parent or Human; do not
+   delete, archive or respawn the seat yourself.
    If create_agent is aborted, times out or loses its response, its outcome is
    unknown: the child may still start. Keep that scope reserved to the pending
    creation. Reconcile the request with host events and child inventory; an empty

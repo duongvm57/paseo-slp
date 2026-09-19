@@ -180,9 +180,11 @@ test('decision-doctrine lines reach the standalone bundles that need them and ne
     // the three-way decision table, the formation record, the placement pin
     // and the post-create parentage verification.
     assert.match(instructions, /New-team delegation/, 'decision table: new-team row');
+    assert.match(instructions, /Continuation: same team and ownership/, 'decision table: continuation row');
     assert.match(instructions, /Observe-existing-work/, 'decision table: observe-existing row');
     assert.match(instructions, /formation record/, 'preflight formation record');
     assert.match(instructions, /not evidence of parentage/, 'post-create verification');
+    assert.match(instructions, /paseo\.parent-agent-id label must match/, 'inbound-route self-check rides common.md');
     assert.match(instructions, /not filesystem\s+isolation/, 'workspace placement pin');
     assert.match(instructions, /send_agent_prompt to a\s+parentless or differently parented/, 'B21 formation-defect trigger');
     assert.match(instructions, /second workspace\s+for the same team with no isolation reason/, 'B22 placement-defect trigger');
@@ -205,6 +207,9 @@ test('decision-doctrine lines reach the standalone bundles that need them and ne
   assert.ok(!/cannot carry a new\s+delegation/.test(peer));
   assert.ok(!/New-team delegation|Observe-existing-work|formation record/.test(peer), 'Peer gets no formation doctrine');
   assert.ok(!/not evidence of parentage|not filesystem\s+isolation/.test(peer));
+  // The inbound-route self-check is a Peer-visible self-check on the seat's own
+  // assignment envelope (common.md), not formation doctrine — it must reach Peer.
+  assert.match(peer, /paseo\.parent-agent-id label must match/, 'inbound-route self-check is Peer-visible');
   for (const ref of ['orchestration.md', 'review-gates.md']) {
     assert.ok(!peer.includes(readFileSync(join(installed, 'src/references', ref), 'utf8')), `Peer must not load ${ref} bytes`);
   }
@@ -215,6 +220,7 @@ test('decision-doctrine lines reach the standalone bundles that need them and ne
   assert.match(template, /when the assignment lands/);
   assert.match(template, /split-axis seats, never one merged seat/);
   assert.match(template, /keep accepted Peers idle/);
+  assert.match(template, /assignment that formed the team/, 'idle-retention referent is the team assignment');
   assert.match(template, /agent-scoped create_agent/);
   assert.match(template, /share the assignment'?s workspace by default/, 'team-workspace default');
   assert.match(template, /owner map and creation receipts/, 'formation receipts tactic');

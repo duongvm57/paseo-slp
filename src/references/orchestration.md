@@ -152,5 +152,6 @@ decides subjective or owner-only trade-offs. Complete with candidate, actual che
 review evidence, ACCEPT/CHANGES_REQUESTED/BLOCKED, residual risks and resource settlement
 from references/monitoring.md. Artifact acceptance and resource settlement are
 distinct, and acceptance is not assignment close: accepted seats keep their
-context for rework and re-review until the assignment itself closes, when
+context for rework and re-review until the assignment that formed the team
+closes, when
 settlement runs per references/monitoring.md and the repository protocol.
