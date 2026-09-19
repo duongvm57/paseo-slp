@@ -54,7 +54,7 @@ function communicationLanguage(env) {
     throw error;
   }
   if (!value) return '';
-  return `Communication language: ${value} — reports, assignments, handbacks and replies to the Human use it; identifiers, paths and commands stay verbatim.\n`;
+  return `Communication language: ${value} — team artifacts (reports, assignments, briefs, handbacks, notebook entries) use it; direct replies to the Human mirror the Human's current language; identifiers, paths and commands stay verbatim.\n`;
 }
 
 // The home-dependent helpers, each rendered with the explicit daemon home so

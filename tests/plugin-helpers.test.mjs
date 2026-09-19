@@ -139,7 +139,8 @@ test('managed bundle injects the communication language only when the state file
   writeFileSync(join(home, 'slp-runtime/state/communication-language'), 'Vietnamese\n');
   const set = roleBundle(installed, 'supervisor', env);
   assert.equal(set.instructions.match(/Communication language: /g).length, 1);
-  assert.ok(set.instructions.includes('Communication language: Vietnamese — reports, assignments, handbacks and replies to the Human use it'));
+  assert.ok(set.instructions.includes('Communication language: Vietnamese — team artifacts (reports, assignments, briefs, handbacks, notebook entries) use it'));
+  assert.ok(set.instructions.includes("direct replies to the Human mirror the Human's current language"), 'direct replies mirror the conversation, not the pinned artifact language');
   // Whitespace-only file behaves as unset.
   writeFileSync(join(home, 'slp-runtime/state/communication-language'), '  \n');
   const blank = roleBundle(installed, 'supervisor', env);

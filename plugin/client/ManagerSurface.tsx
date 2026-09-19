@@ -1351,7 +1351,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
               }
             }}
             title="Inject communication language"
-            hint="Managed seats are told to use it for reports, handbacks and replies to you."
+            hint="Managed seats use it for reports, handbacks and other team artifacts; direct replies to you mirror your current language."
           />
           {languageOn ? (
             <>
