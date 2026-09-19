@@ -15,6 +15,7 @@ import {
   STATUS_POLL_MS,
   activationKind,
   activationLabel,
+  applyFamilyChange,
   applyPatch,
   buildRoleChoice,
   conflictLine,
@@ -484,6 +485,93 @@ test('thinkingOptionsFor resolves the picked model or falls back to free text', 
   assert.equal(thinkingOptionsFor(catalogResult([{ id: 'm1', label: 'M1' }]), 'other'), null);
 });
 
+test('applyFamilyChange resets dependents against the new family catalog', () => {
+  // Mirrors the live probe: devin has modes but no thinking options, codex
+  // has modes + thinking options, pi declares zero modes.
+  const catalogResult = (over = {}) => ({
+    schemaVersion: 1, models: [], modes: [], features: [], error: null, ...over,
+  });
+  const devinCatalog = catalogResult({
+    models: [{ id: 'swe-2-max', label: 'SWE Max' }, { id: 'swe-2-medium', label: 'SWE Medium' }],
+    modes: [{ id: 'bypass', label: 'Bypass' }, { id: 'plan', label: 'Plan' }],
+  });
+  const codexCatalog = catalogResult({
+    models: [{
+      id: 'gpt-5.6',
+      label: 'GPT',
+      thinkingOptions: [{ id: 'low', label: 'low' }, { id: 'medium', label: 'medium' }],
+      defaultThinkingOptionId: 'medium',
+    }],
+    modes: [{ id: 'auto', label: 'Auto' }, { id: 'full-access', label: 'Full access' }],
+  });
+  const piCatalog = catalogResult({
+    models: [{ id: 'pi-model', label: 'Pi' }],
+    modes: [],
+  });
+  const form = (over = {}) => ({
+    family: 'devin',
+    model: 'swe-2-max',
+    modeId: 'bypass',
+    thinkingOptionId: '',
+    features: '{"auto_accept":true}',
+    feature: { auto_accept: 'true' },
+    ...over,
+  });
+
+  // Foreign picks clear: swe-2-max is not a codex model and bypass is not a
+  // codex mode; feature values always clear (per-provider ids — auto_accept
+  // must not bleed into a codex profile, raw-JSON keys included).
+  const switched = applyFamilyChange(form(), 'codex', codexCatalog);
+  assert.deepEqual(switched, {
+    family: 'codex', model: '', modeId: '', thinkingOptionId: '', features: '', feature: {},
+  });
+
+  // A model the new catalog lists keeps, and its declared thinking option
+  // keeps with it — the defect case: an unlisted thinking id must NOT
+  // survive to drop the row into free text.
+  const kept = applyFamilyChange(
+    form({ model: 'gpt-5.6', modeId: 'auto', thinkingOptionId: 'medium' }),
+    'codex',
+    codexCatalog,
+  );
+  assert.equal(kept.model, 'gpt-5.6');
+  assert.equal(kept.modeId, 'auto');
+  assert.equal(kept.thinkingOptionId, 'medium');
+  assert.equal(kept.features, '');
+  assert.deepEqual(kept.feature, {});
+  const staleThinking = applyFamilyChange(
+    form({ model: 'gpt-5.6', thinkingOptionId: 'ultra' }),
+    'codex',
+    codexCatalog,
+  );
+  assert.equal(staleThinking.model, 'gpt-5.6');
+  assert.equal(staleThinking.thinkingOptionId, '');
+
+  // pi edge: pi declares zero modes — switching to it always clears modeId.
+  const toPi = applyFamilyChange(form({ model: 'pi-model' }), 'pi', piCatalog);
+  assert.equal(toPi.model, 'pi-model');
+  assert.equal(toPi.modeId, '');
+
+  // Catalog not loaded (undefined) or errored (empty lists) → nothing keeps.
+  const notLoaded = applyFamilyChange(form({ model: 'pi-model' }), 'pi', undefined);
+  assert.equal(notLoaded.model, '');
+  const errored = applyFamilyChange(
+    form(),
+    'codex',
+    catalogResult({ error: 'Catalog query failed' }),
+  );
+  assert.equal(errored.model, '');
+  assert.equal(errored.modeId, '');
+
+  // Same-family re-pick keeps what the catalog declares — features still
+  // clear (the rule is unconditional).
+  const same = applyFamilyChange(form(), 'devin', devinCatalog);
+  assert.equal(same.model, 'swe-2-max');
+  assert.equal(same.modeId, 'bypass');
+  assert.equal(same.features, '');
+  assert.deepEqual(same.feature, {});
+});
+
 test('familyFromProviderId parses managed provider ids for form prefill', () => {
   assert.equal(familyFromProviderId('slp-pi-supervisor'), 'pi');
   assert.equal(familyFromProviderId('slp-claude-peer'), 'claude');
@@ -649,6 +737,14 @@ test('the routing UI is one card with one save and one divergence warning', () =
   );
   assert.ok(bundle.includes('This model declares no thinking options'), 'empty-options hint bundled');
   assert.equal(occurrences(source, '"Thinking option"'), 1, 'thinking option field present');
+
+  // The family picker goes through a dedicated handler — not the generic
+  // single-field write — so dependent picks re-validate against the new
+  // family's catalog (applyFamilyChange) instead of keeping stale foreign
+  // values. "family" is out of setRoutingField's union entirely.
+  assert.equal(occurrences(source, 'setRoutingField(role, "family")'), 0, 'family write must reset dependents');
+  assert.equal(occurrences(source, 'onChange={setRoutingFamily(role)}'), 1, 'family picker uses the dedicated handler');
+  assert.equal(occurrences(source, 'applyFamilyChange('), 1, 'one family-change application site');
 
   // The Activation card no longer exposes the pre-binding configurators;
   // the routing card is the sole role→provider configurator in the UI

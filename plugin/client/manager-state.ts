@@ -462,6 +462,35 @@ export const routingChoiceDiffers = (
   stored: RoleChoiceValue | null | undefined,
 ): boolean => "error" in build || !roleChoiceEquals(build.choice, stored);
 
+/** Explicit family switch on the Role profiles card — not a single-field
+ *  write. Dependent picks re-validate against the NEW family's catalog under
+ *  keep-if-present rules: a value the new catalog does not list clears to ""
+ *  (picker placeholder / provider default — no family marks a model
+ *  `isDefault`, so there is nothing to auto-pick). Resolution order: the
+ *  model keeps or clears first (same trim semantics as thinkingOptionsFor's
+ *  catalog key), then the thinking option resolves against the KEPT model —
+ *  a kept option must still be declared by that model. `features`/`feature`
+ *  always clear: feature ids are per-provider, and undeclared raw-JSON keys
+ *  would persist silently into the new family's routing. An unloaded
+ *  (undefined) or errored catalog lists nothing, so everything dependent
+ *  clears. Stored prefill is unaffected — this runs only on an explicit user
+ *  pick; the pickers' "(stored)" escape hatches still cover stored values the
+ *  catalog doesn't list. */
+export function applyFamilyChange(
+  form: RoutingRoleForm,
+  family: FamilyName,
+  catalog: CatalogResult | undefined,
+): RoutingRoleForm {
+  const model = catalog?.models.some(entry => entry.id === form.model.trim()) ? form.model : "";
+  const modeId = catalog?.modes.some(mode => mode.id === form.modeId.trim()) ? form.modeId : "";
+  const thinking = thinkingOptionsFor(catalog, model);
+  const thinkingOptionId =
+    thinking != null && thinking.options.some(option => option.id === form.thinkingOptionId.trim())
+      ? form.thinkingOptionId
+      : "";
+  return { family, model, modeId, thinkingOptionId, features: "", feature: {} };
+}
+
 // The view patch a start response produces. Conflicts are surfaced whenever
 // they are present — accepted or not (an accepted reconcile inspect can still
 // report drift) — and kept in reportedConflicts so a clean follow-up status

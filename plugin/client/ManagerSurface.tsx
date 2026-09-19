@@ -30,6 +30,7 @@ import {
   RETAINED_RUNTIME_NOTICE,
   STATUS_POLL_MS,
   activationLabel,
+  applyFamilyChange,
   applyPatch,
   buildRoleChoice,
   conflictLines,
@@ -641,13 +642,29 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
 
   const setRoutingField = (
     role: "supervisor" | "lead",
-    field: "family" | "model" | "modeId" | "thinkingOptionId" | "features",
+    field: "model" | "modeId" | "thinkingOptionId" | "features",
   ) => (value: string) => {
     setRoutingDirty(true);
     setRoutingSaved(false);
     setRoutingForm(current => ({
       ...current,
       [role]: { ...current[role], [field]: value },
+    }));
+  };
+
+  // An explicit family switch is not a single-field write: dependents
+  // re-validate against the NEW family's catalog — applyFamilyChange keeps
+  // only the model/mode/thinking values the new catalog lists and always
+  // clears the per-provider feature values. Same dirty/saved discipline as
+  // the field setters.
+  const setRoutingFamily = (
+    role: "supervisor" | "lead",
+  ) => (family: FamilyName) => {
+    setRoutingDirty(true);
+    setRoutingSaved(false);
+    setRoutingForm(current => ({
+      ...current,
+      [role]: applyFamilyChange(current[role], family, catalogs[family]),
     }));
   };
 
@@ -1116,7 +1133,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                       label: FAMILY_LABEL[entry],
                       value: entry,
                     }))}
-                    onChange={setRoutingField(role, "family")}
+                    onChange={setRoutingFamily(role)}
                     disabled={disabled}
                   />
                 </View>

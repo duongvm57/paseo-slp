@@ -447,6 +447,30 @@ After this refactor the remaining steps are exactly three:
   (e.g. `1`) prefills as its string form `"1"`, so the built choice
   differs and Save enables though nothing was edited — honest, since the
   save would write the string form; accepted.
+- **Family switch resets dependents** — defect fix (2026-09-19, Run 9;
+  complaint: "switching Provider family leaves stale
+  model/mode/thinking/feature values that don't belong to the new family's
+  catalog — the thinking row then falls into the free-text fallback because
+  `thinkingOptionsFor(codexCatalog, "swe-2-medium")` returns null"). The
+  family `ChipSelect` no longer routes through the generic single-field
+  `setRoutingField`; a dedicated family-change handler applies
+  `applyFamilyChange(form, family, catalog)`, which re-validates dependents
+  against the NEW family's catalog under keep-if-present rules: `model`
+  keeps only if `catalogs[family].models` lists it, `modeId` only if
+  `catalogs[family].modes` lists it (pi declares zero modes, so switching to
+  pi always clears it; devin `bypass` is not a codex/claude mode), and
+  `thinkingOptionId` only if the KEPT model still declares it via
+  `thinkingOptionsFor` — the model resolves first, thinking second.
+  `features`/`feature` always clear: feature ids are per-provider and
+  undeclared raw-JSON keys persist silently into routing (`auto_accept`
+  must not bleed into a codex profile). No auto-pick on clear — no family
+  marks a model `isDefault`, so the fields land on the picker
+  placeholder/provider default. An unloaded or errored catalog lists
+  nothing, so everything dependent clears. The reset fires only on an
+  explicit user family change — stored prefill and the pickers' "(stored)"
+  escape hatches are untouched — and afterwards the built choice differs
+  from stored, so the diff-gate enables Save, which is the correct gate
+  outcome.
 - **impeccable principles applied** — visibility of system status (the
   disabled Save + hint state the prerequisite and the saved line
   confirms the bound save), context switch (binding state lives beside
