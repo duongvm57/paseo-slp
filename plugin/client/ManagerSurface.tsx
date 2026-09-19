@@ -655,8 +655,11 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   // An explicit family switch is not a single-field write: dependents
   // re-validate against the NEW family's catalog — applyFamilyChange keeps
   // only the model/mode/thinking values the new catalog lists and always
-  // clears the per-provider feature values. Same dirty/saved discipline as
-  // the field setters.
+  // clears the per-provider feature values. Two edges are deliberate (B20):
+  // re-pressing the active chip still clears features, and a family whose
+  // catalog is not loaded yet clears dependents with no re-prefill on
+  // arrival — re-prefill would race with edits made during the load.
+  // Same dirty/saved discipline as the field setters.
   const setRoutingFamily = (
     role: "supervisor" | "lead",
   ) => (family: FamilyName) => {

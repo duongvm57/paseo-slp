@@ -473,7 +473,10 @@ export const routingChoiceDiffers = (
  *  always clear: feature ids are per-provider, and undeclared raw-JSON keys
  *  would persist silently into the new family's routing. An unloaded
  *  (undefined) or errored catalog lists nothing, so everything dependent
- *  clears. Stored prefill is unaffected — this runs only on an explicit user
+ *  clears — deliberate (B20): re-pressing the active chip clears features,
+ *  and a not-yet-loaded catalog clears without re-prefill on arrival,
+ *  because a deferred re-prefill would race with edits made during the
+ *  load. Stored prefill is unaffected — this runs only on an explicit user
  *  pick; the pickers' "(stored)" escape hatches still cover stored values the
  *  catalog doesn't list. */
 export function applyFamilyChange(

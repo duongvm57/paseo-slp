@@ -466,11 +466,17 @@ After this refactor the remaining steps are exactly three:
   must not bleed into a codex profile). No auto-pick on clear — no family
   marks a model `isDefault`, so the fields land on the picker
   placeholder/provider default. An unloaded or errored catalog lists
-  nothing, so everything dependent clears. The reset fires only on an
-  explicit user family change — stored prefill and the pickers' "(stored)"
-  escape hatches are untouched — and afterwards the built choice differs
-  from stored, so the diff-gate enables Save, which is the correct gate
-  outcome.
+  nothing, so everything dependent clears. Two edges of this are
+  deliberate (B20, Human decision): re-pressing the already-active family
+  chip still runs the reset — the kept model/mode/thinking survive, but
+  `features`/`feature` clear; and switching to a family whose catalog has
+  not finished loading clears dependents with no re-prefill when the
+  catalog arrives — a deferred re-prefill would race with edits the user
+  makes during the load, so clear-and-stay is the safer contract. The
+  reset fires only on an explicit user family change — stored prefill and
+  the pickers' "(stored)" escape hatches are untouched — and afterwards
+  the built choice differs from stored, so the diff-gate enables Save,
+  which is the correct gate outcome.
 - **impeccable principles applied** — visibility of system status (the
   disabled Save + hint state the prerequisite and the saved line
   confirms the bound save), context switch (binding state lives beside
