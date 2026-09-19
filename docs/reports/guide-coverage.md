@@ -42,6 +42,22 @@ Common resolves `references/` relative to the installed policy directory supplie
 the loader. The full guide and this matrix remain source documentation under docs/.
 No deployed instance is updated merely by editing this checkout.
 
+The carrier block (spawn-kit signatures plus policy-byte locators) reaches a
+seat through two channels: the session-entry bundle (the roleBundle column
+above) for profile/provider launches, and `create.initialPrompt` for the
+prepare path — the only field create_agent transmits, so plan-level
+`spawnKit`/`orientation` fields are never forwarded by the host on their own.
+prepare omits the prompt-side copy only for the canonical `slp-<family>-<role>`
+wrapper observed in live provider inventory; unverified targets keep it, and a
+seat may then receive the carrier twice — once at session entry, once in the
+prompt. Captions mark the measurement point: load-time for session entry,
+plan-time for prepare. Kit signatures are approximate and verified against live
+`mcp_list_tools`; locators carry path/bytes/sha256 as integrity evidence, not
+policy content. The locator set derives from the install receipt plus the
+role's required policy files, so a receipt-declared file that vanished still
+appears as `missing`; source-only documents like `docs/contract.md` are never
+declared.
+
 ## Requirements by guide section
 
 Targets refer to the linked materials above and their named sections.
