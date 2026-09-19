@@ -300,3 +300,37 @@ test('handoff packet surfaces unproven submodule scope as an evidence gap, not a
   assert.deepEqual(plan.handoff.candidate.incomplete, ['sub']);
   assert.match(plan.create.initialPrompt, /Snapshot evidence gap: sub is unproven submodule scope/);
 });
+
+test('handoff packet flattens nested-repo submodule gaps into parent-root paths', t => {
+  const { dir, installed } = fixture(t);
+  const git = (cwd, args) => execFileSync('git', ['-C', cwd, ...args]);
+  const commit = (cwd, message = 'c') => git(cwd, ['-c', 'user.email=t@slp', '-c', 'user.name=t', 'commit', '--quiet', '-m', message]);
+  const upstream = join(dir, 'upstream');
+  mkdirSync(upstream);
+  git(upstream, ['init', '--quiet']);
+  writeFileSync(join(upstream, 'u.txt'), 'u');
+  git(upstream, ['add', 'u.txt']);
+  commit(upstream);
+  const repo = join(dir, 'repo');
+  mkdirSync(repo);
+  git(repo, ['init', '--quiet']);
+  writeFileSync(join(repo, 'owned.txt'), 'o');
+  git(repo, ['add', 'owned.txt']);
+  commit(repo);
+  // `inner` is an untracked nested repo whose own submodule is dirty.
+  const inner = join(repo, 'inner');
+  mkdirSync(inner);
+  git(inner, ['init', '--quiet']);
+  writeFileSync(join(inner, 'i.txt'), 'i');
+  git(inner, ['add', 'i.txt']);
+  commit(inner);
+  git(inner, ['-c', 'protocol.file.allow=always', 'submodule', 'add', '--quiet', upstream, 'sub']);
+  commit(inner);
+  writeFileSync(join(inner, 'sub/u.txt'), 'unproven edit');
+  const handoff = { previousAgentId: 'old-lead', reason: 'quota', authority: 'Human requests replacement',
+    state: 'paused on snapshot', previousOwner: { settled: true, evidence: 'cancel receipt' }, resources: [] };
+  const plan = handoffPlan(installed, { ...request, repository: repo, role: 'lead', binding: piBinding, handoff });
+  assert.equal(plan.handoff.candidate.incomplete, undefined, 'top-level tree itself is clean');
+  assert.deepEqual(plan.handoff.candidate.nestedIncomplete, ['inner/sub']);
+  assert.match(plan.create.initialPrompt, /Snapshot evidence gap: inner\/sub is unproven submodule scope/);
+});
