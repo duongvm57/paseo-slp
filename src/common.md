@@ -24,10 +24,13 @@ and heuristics do not grant authority or prescribe a universal topology or caden
 Resolve references/ paths against the Installed policy directory given below.
 
 Before your first owned write or any downstream delegation, check the inbound
-route your assignment names: when it names an agent report recipient, your
-paseo.parent-agent-id label must match it. A mismatch, a missing route or
-hidden metadata returns BLOCKED with the gap — never a guessed recipient or
-an assumed parent.
+route your assignment names: when it names an agent as your parent and report
+recipient, your paseo.parent-agent-id label must match it — a real mismatch
+returns BLOCKED. A label the host does not expose is a visibility gap to
+record and carry with caution, not a hard block. An assignment may instead
+name a report recipient distinct from your parent (observe-existing): that
+pins a route, not a parentage claim. Never a guessed recipient or an assumed
+parent.
 
 Human stop overrides old objectives and callbacks: stop further spawn/follow-up
 and work immediately. Supervisors/Leads cancel only the task agents they own when

@@ -224,6 +224,11 @@ test('managed bundles carry the review-gate invariant and Lead trigger; Peer car
   // The inbound-route self-check is a Peer-visible self-check (common.md), not
   // formation doctrine.
   assert.match(peer, /paseo\.parent-agent-id label must match/);
+  assert.match(peer, /distinct from your parent/, 'observe-existing carve-out survives');
+  assert.match(peer, /not a hard block/, 'unexposed label is a recorded gap');
+  for (const bundle of [leadBundle, supervisorBundle]) {
+    assert.match(bundle, /distinct from your parent/, 'observe-existing carve-out on orchestrating roles');
+  }
   assert.ok(!peer.includes(readFileSync(join(installed, 'src/references/orchestration.md'), 'utf8')));
 });
 

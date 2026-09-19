@@ -185,6 +185,8 @@ test('decision-doctrine lines reach the standalone bundles that need them and ne
     assert.match(instructions, /formation record/, 'preflight formation record');
     assert.match(instructions, /not evidence of parentage/, 'post-create verification');
     assert.match(instructions, /paseo\.parent-agent-id label must match/, 'inbound-route self-check rides common.md');
+    assert.match(instructions, /distinct from your parent/, 'observe-existing carve-out: recipient need not equal parent');
+    assert.match(instructions, /not a hard block/, 'unexposed label is a recorded gap, not a block');
     assert.match(instructions, /not filesystem\s+isolation/, 'workspace placement pin');
     assert.match(instructions, /send_agent_prompt to a\s+parentless or differently parented/, 'B21 formation-defect trigger');
     assert.match(instructions, /second workspace\s+for the same team with no isolation reason/, 'B22 placement-defect trigger');
@@ -210,6 +212,8 @@ test('decision-doctrine lines reach the standalone bundles that need them and ne
   // The inbound-route self-check is a Peer-visible self-check on the seat's own
   // assignment envelope (common.md), not formation doctrine — it must reach Peer.
   assert.match(peer, /paseo\.parent-agent-id label must match/, 'inbound-route self-check is Peer-visible');
+  assert.match(peer, /distinct from your parent/, 'Peer self-check keeps the observe-existing carve-out');
+  assert.match(peer, /not a hard block/, 'Peer self-check tolerates an unexposed label');
   for (const ref of ['orchestration.md', 'review-gates.md']) {
     assert.ok(!peer.includes(readFileSync(join(installed, 'src/references', ref), 'utf8')), `Peer must not load ${ref} bytes`);
   }
