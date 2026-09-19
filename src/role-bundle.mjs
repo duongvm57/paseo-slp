@@ -5,7 +5,7 @@ import { files, hash } from './package.mjs';
 import { spawnKit } from './spawn-kit.mjs';
 
 // A Role bundle is the exact policy bytes a role receives at session entry.
-// This module owns the load-path contract that docs/guide-coverage.md documents:
+// This module owns the load-path contract that docs/reports/guide-coverage.md documents:
 // which policy files reach which role, and in what order. Both transport
 // adapters and the create_agent planner read it from here.
 

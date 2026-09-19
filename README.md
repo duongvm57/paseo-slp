@@ -13,6 +13,11 @@ Supervisor observes an existing Lead or creates one per assignment, and the
 Lead delegates to Peers through Paseo. You can keep chatting in the existing
 Supervisor session — no need to re-enter the role prompt.
 
+In addition to the prompt you type, each seat receives its role contract,
+delegation rules, spawn kit, sha256 policy locators and managed runtime
+helpers — injected at session entry and not shown in the agent tab.
+Details in [Plugin architecture](docs/architecture.md).
+
 ## Requirements
 
 - Paseo `>=0.8.0 <0.9.0` with `pluginsEnabled: true` in the daemon's
@@ -48,7 +53,7 @@ loading it. Verify with `paseo plugin ls` — the plugin should reach
 Installing registers the plugin; it does not change your agent
 configuration yet. Activation is a separate, explicit step (below). The
 pre-plugin standalone installer is documented in
-[docs/legacy-install.md](docs/legacy-install.md) — do not run it alongside
+[docs/reports/legacy-install.md](docs/reports/legacy-install.md) — do not run it alongside
 the plugin.
 
 ## Activation
@@ -300,6 +305,10 @@ receive the relevant constraints through assignments. This is a policy pack
 for agents using Paseo primitives — there is no monitoring daemon or semantic
 detector in the package; `monitor` (below) is a caller-invoked, delta-only
 signal scan.
+
+What the shim injects at session entry — and how to verify it reached a
+seat — is documented in
+[Plugin architecture](docs/architecture.md#the-hidden-channel).
 
 ## Peer runtime pool
 
@@ -569,16 +578,28 @@ Peer. Scenarios outside the scope stay NOT_RUN.
 The offline CLI path remains: `prepare <request.json>` (from a source
 checkout's `bin/slp.mjs`) emits create_agent arguments with a role envelope,
 and `install <dir> --apply` stages the package — see
-[docs/legacy-install.md](docs/legacy-install.md). This path registers no
+[docs/reports/legacy-install.md](docs/reports/legacy-install.md). This path registers no
 profile and creates no agent itself.
 
 ## Documentation
 
-- [Agent setup guide](docs/agent-guide.md)
+How it works:
+
+- [Plugin architecture](docs/architecture.md) — the role model, what the
+  plugin adds to Paseo, the hidden injection channel, the delegation loop
 - [File map and contract](docs/contract.md)
-- [Guide → policy, procedure and protocol trace](docs/guide-coverage.md)
+- [Agent setup guide](docs/agent-guide.md)
 - [Independent acceptance checklist](docs/review-checklist.md)
-- [Legacy standalone installer](docs/legacy-install.md)
+
+Implementation specification:
+
+- [Plugin implementation spec](docs/spec/paseo-plugin-implementation.md)
+- [Plugin feasibility audit](docs/spec/paseo-plugin-feasibility.md)
+
+Reports and investigations:
+
+- [Guide → policy, procedure and protocol trace](docs/reports/guide-coverage.md)
+- [Legacy standalone installer](docs/reports/legacy-install.md)
 
 Referenced host mechanisms:
 [custom providers](https://paseo.sh/docs/custom-providers.md),

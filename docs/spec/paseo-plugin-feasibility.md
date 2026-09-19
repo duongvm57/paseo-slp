@@ -32,7 +32,7 @@ Exact local host used for source verification:
 - `$CLI_ROOT` in local source citations: `/home/duongvm/.local/share/fnm/node-versions/v24.14.0/installation/lib/node_modules/@getpaseo/cli`;
 - exact SDK: `@getpaseo/plugin` `0.8.0`.
 
-At the audited baseline, `AGENTS.md` named `docs/reference/agent-orchestration-complete-operating-guide.md`, which remains absent from the repository. At HEAD `ee8c2a7` (the delta-audit commit; ancestor of this doc's commit) `AGENTS.md` references only [the candidate contract](contract.md), and the guide exists solely as an untracked local artifact at `.local-checks/reference/agent-orchestration-complete-operating-guide.md`. This audit does not invent a replacement. Existing SLP behavior is taken from the contract and the implementation it maps.
+At the audited baseline, `AGENTS.md` named `docs/reference/agent-orchestration-complete-operating-guide.md`, which remains absent from the repository. At HEAD `ee8c2a7` (the delta-audit commit; ancestor of this doc's commit) `AGENTS.md` references only [the candidate contract](../contract.md), and the guide exists solely as an untracked local artifact at `.local-checks/reference/agent-orchestration-complete-operating-guide.md`. This audit does not invent a replacement. Existing SLP behavior is taken from the contract and the implementation it maps.
 
 ## Executive verdict
 

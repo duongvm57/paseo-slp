@@ -1,5 +1,5 @@
 // Shared contracts for the paseo-slp manager plugin (Option A v1).
-// Normative sources: docs/paseo-plugin-implementation.md §3 (wire RPCs) and
+// Normative sources: docs/spec/paseo-plugin-implementation.md §3 (wire RPCs) and
 // §7 (receipt/operation-intent journal schema). The seam interfaces at the
 // bottom freeze the §12 module boundaries for the implementation lanes.
 //

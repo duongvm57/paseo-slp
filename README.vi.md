@@ -12,6 +12,11 @@ Paseo và giao mục tiêu. Role instruction tự nạp; Supervisor quan sát Le
 hiện có hoặc tạo Lead theo assignment, Lead giao Peer qua Paseo. Bạn có thể
 nhắn tiếp trong session Supervisor đã có, không cần nhập lại prompt role.
 
+Ngoài prompt bạn gõ, mỗi seat còn nhận role contract, quy tắc delegation,
+spawn kit, policy locators kèm sha256 và managed runtime helpers — phần
+này được inject lúc tạo session và không hiện trong tab agent. Chi tiết ở
+[Kiến trúc plugin](docs/architecture.md).
+
 ## Yêu cầu
 
 - Paseo `>=0.8.0 <0.9.0` với `pluginsEnabled: true` trong `config.json` của
@@ -45,7 +50,7 @@ tra bằng `paseo plugin ls` — plugin phải đạt trạng thái `running`.
 
 Cài đặt chỉ đăng ký plugin; chưa thay đổi cấu hình agent. Kích hoạt là bước
 riêng và tường minh (bên dưới). Installer standalone trước plugin được ghi
-tại [docs/legacy-install.md](docs/legacy-install.md) — không chạy song song
+tại [docs/reports/legacy-install.md](docs/reports/legacy-install.md) — không chạy song song
 với plugin.
 
 ## Kích hoạt
@@ -548,16 +553,28 @@ theo mỗi Peer. Các scenario ngoài scope giữ NOT_RUN.
 Đường CLI offline vẫn có: `prepare <request.json>` (từ `bin/slp.mjs` của
 source checkout) xuất create_agent arguments có role envelope, và
 `install <dir> --apply` chỉ stage package — xem
-[docs/legacy-install.md](docs/legacy-install.md). Đường này không đăng ký
+[docs/reports/legacy-install.md](docs/reports/legacy-install.md). Đường này không đăng ký
 profile hay tự tạo agent.
 
 ## Tài liệu
 
-- [Hướng dẫn cài đặt cho agent](docs/agent-guide.md)
+Cách hoạt động:
+
+- [Kiến trúc plugin](docs/architecture.md) — role model, plugin bổ sung gì
+  cho Paseo, kênh inject ẩn, vòng delegation
 - [File map và contract](docs/contract.md)
-- [Trace guide → policy, procedure và protocol](docs/guide-coverage.md)
+- [Hướng dẫn cài đặt cho agent](docs/agent-guide.md)
 - [Checklist nghiệm thu độc lập](docs/review-checklist.md)
-- [Installer standalone cũ](docs/legacy-install.md)
+
+Spec implement:
+
+- [Plugin implementation spec](docs/spec/paseo-plugin-implementation.md)
+- [Plugin feasibility audit](docs/spec/paseo-plugin-feasibility.md)
+
+Báo cáo và điều tra:
+
+- [Trace guide → policy, procedure và protocol](docs/reports/guide-coverage.md)
+- [Installer standalone cũ](docs/reports/legacy-install.md)
 
 Cơ chế host tham chiếu:
 [custom providers](https://paseo.sh/docs/custom-providers.md),

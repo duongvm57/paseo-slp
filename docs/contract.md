@@ -26,7 +26,7 @@ Local installation/transport checks do not constitute workflow acceptance.
 | skills/paseo-slp-onboarding/SKILL.md | Installable repo tactics and Peer pool setup, with Supervisor/Lead profile verification; project/global installation is independent from repo config initialization. |
 | src/templates/workspace-protocol.md | Repository tactics template with risk classes, routing, monitoring and proof gates; the `agent_mode` frontmatter field records the intended spawn mode for direct launches (empty falls back to the bundle's `modeId`, then asks); explicit init preserves existing files. |
 | src/binding.mjs | Every rule a Binding must satisfy: setting patterns, the route override deny-lists and the single provider-health check. Imports nothing from the package. |
-| src/role-bundle.mjs | Which policy bytes each role receives at session entry, and their order; the load-path contract traced in guide-coverage.md. |
+| src/role-bundle.mjs | Which policy bytes each role receives at session entry, and their order; the load-path contract traced in reports/guide-coverage.md. |
 | src/launch.mjs, src/profiles.mjs | Select one Binding source (saved profiles, catalog routing or an explicit binding), then compose the create_agent argument record. launchPlan and handoffPlan share one builder; nothing edits that record afterwards. Handoff adds explicit authority, old-owner evidence, resources and current work snapshot; no lifecycle mutations. request.inventoryFile fills providers/profiles the request did not inline; request.assignmentFile appends a read-first pointer to the emitted prompt without inlining file bytes. The plan also surfaces the intended `modeId` (with a warning when the binding lacks one), a `spawnKit` of role-appropriate MCP tool signatures, and an `orientation` manifest of policy-byte locators (path/bytes/sha256, `missing` for declared files not shipped) — locators only, never interpretation; the same payload is carried inside `create.initialPrompt`, the only field create_agent transmits, so the spawned seat actually receives it. |
 | src/inventory.mjs | Provider/profile inventory in the exact shapes prepare consumes: `paseo provider ls --json` only when the requested home's paseo.pid names a live process, else that home's own config.json `agents.providers` — never another daemon's providers, no directory materialization; provider `enabled` may be null for unrecognized states; profiles always from `daemon.agentProfiles`. Read-only; on multi-daemon hosts the live listing reflects whichever daemon the paseo CLI reaches. |
 | src/agents.mjs | Agent listing from daemon persistence (`<paseoHome>/agents/*/<id>.json`) with shell-quoted devin-family `devin -r` attach hints; works around `paseo inspect`/`ls` not surfacing `persistence.nativeHandle`. Read-only, best-effort host detail. |
@@ -140,7 +140,7 @@ paths are not E2E-qualified by this revision. Heartbeat uses discovered host wak
 primitives; `slp.mjs monitor` adds a caller-invoked, delta-only signal scan that
 emits candidates without verdicts — it is not a semantic detector, and no
 lifecycle runner, tool filter or schedule adapter is added. Missing capabilities remain explicit before any fallback. See
-[guide coverage](guide-coverage.md) for requirement mapping, load paths and host gaps.
+[guide coverage](reports/guide-coverage.md) for requirement mapping, load paths and host gaps.
 
 Codex, Pi, Devin and Claude share role bytes through their respective adapters. Human configures
 slp-supervisor/slp-lead with matching role providers and chosen models/settings.

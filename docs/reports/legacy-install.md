@@ -1,7 +1,7 @@
 # Legacy standalone installer
 
 > **Superseded by the Paseo plugin.** The plugin install path in
-> [README.md](../README.md#installation) is the supported model. This page
+> [README.md](../../README.md#installation) is the supported model. This page
 > documents the pre-plugin `install.sh`/`slp.mjs install` flow for
 > installations that already use it. **Do not run both** — the standalone
 > installer writes the same provider/profile IDs outside the plugin's
@@ -101,6 +101,6 @@ prompts.
 
 1. Uninstall the standalone copy first (above) — its provider/profile IDs
    collide with the plugin's owned entries.
-2. Install and activate the plugin per [README.md](../README.md#installation).
+2. Install and activate the plugin per [README.md](../../README.md#installation).
 3. Repo state under `.paseo-slp/` (protocol, catalog, notebook) is
    unaffected by either path.
