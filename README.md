@@ -443,11 +443,14 @@ option, including during handoff and recovery.
 
 The plan also surfaces the spawn's intended mode — top-level `modeId`
 mirroring `create.settings.modeId`, plus `warnings` when the binding lacks
-one — and two locator payloads carried inside `create.initialPrompt` so the
-spawned seat actually receives them: `spawnKit`, role-scoped approximate
+one — and two locator payloads carried inside `create.initialPrompt` (the
+prompt-side carrier is omitted only for a live-verified canonical role
+wrapper, which injects it at session entry) so the spawned seat actually
+receives them: `spawnKit`, role-scoped approximate
 Paseo MCP tool signatures (verify against live `mcp_list_tools`), and
 `orientation`, policy-byte locators (`path`, `bytes`, `sha256`, or
-`missing: true` for declared files the install does not ship). Locators
+`missing` for receipt-declared files absent on disk; the set derives from
+the install receipt, so source-only documents are never declared). Locators
 only — interpretation stays with the seat.
 
 `prepare-handoff <request.json>` adds the snapshot and handoff packet to the

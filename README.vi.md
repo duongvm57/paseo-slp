@@ -420,12 +420,15 @@ và recovery.
 
 Plan cũng surface mode dự kiến của spawn — `modeId` top-level phản chiếu
 `create.settings.modeId`, kèm `warnings` khi binding thiếu — và hai payload
-locator được mang bên trong `create.initialPrompt` để seat được spawn thực
+locator được mang bên trong `create.initialPrompt` (bản carrier ở prompt chỉ
+bị bỏ khi target là canonical role wrapper đã live-verify — wrapper inject
+lúc session entry) để seat được spawn thực
 sự nhận được: `spawnKit`, danh sách signature approximate của Paseo MCP tools
 theo role (verify với `mcp_list_tools` live), và `orientation`, các locator
-policy-byte (`path`, `bytes`, `sha256`, hoặc `missing: true` cho file đã
-declare nhưng bản cài không ship). Chỉ locators — việc diễn giải vẫn thuộc
-seat.
+policy-byte (`path`, `bytes`, `sha256`, hoặc `missing` cho file receipt đã
+declare nhưng absent trên disk; tập locator derive từ install receipt nên
+document chỉ có ở source không bao giờ được declare). Chỉ locators — việc
+diễn giải vẫn thuộc seat.
 
 `prepare-handoff <request.json>` thêm snapshot và handoff vào
 create_agent arguments; xem
