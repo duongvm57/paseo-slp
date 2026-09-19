@@ -66,6 +66,82 @@ claims or suitability guarantees. Existing saved Peer settings may be shown as
 a migration suggestion but are not automatically imported or a launch fallback.
 Never store credentials in the repository.
 
+## Interview task classes and dispositions
+
+The protocol's Task classes and gates table records which workflows this
+repository wants: each row is a default shape for a kind of work — which
+seats (Peer dispositions) run, in what order, with what write authority
+and evidence gate. Rows describe the task's nature (bounded, hard to
+reverse, vague spec), not file paths; Lead judges each task against its
+row and may lighten or strengthen the seats. Whoever runs onboarding
+interviews the Human before writing it, in plain language, one question
+at a time — the Human describes their workflow; you translate answers
+into classes, dispositions and gates. Ask in the Human's words: show the
+artifact a question is about (the table itself, a flow) and unpack a
+term before relying on it.
+
+1. Offer the basic flows as choices — the Human picks one per kind of
+   work, or one default for the whole repo with exceptions only where risk
+   or evidence type differs, adapts any of them, or describes their own.
+   They are starting shapes, not a limit on which dispositions may appear:
+
+   - `Engineer → Reviewer` — one agent writes it and proves it works; a
+     second, fresh agent tries to break the finished result. The default
+     for bounded work.
+   - `Engineer → Reviewer + QC` — write, then two checkers in parallel:
+     the Reviewer checks the work against the spec and the rules, while
+     QC designs cases from the requirement and runs them on the same
+     finished version. For risky or hard-to-reverse work.
+   - `Analyst → Architect → Engineer → Reviewer + QC` — Analyst pins down
+     what "done" means, Architect designs before code, then as the flow
+     above; Tech Writer can update docs in its own scope. For vague-spec
+     or load-bearing work.
+   - **Other** — the Human describes a shape of their own.
+
+2. Offer the full disposition menu, grouped by the judgment each kind
+   supplies — the assignment defines the job, so name the job a person
+   would hold. The menu is a catalog, not a ceiling: Lead may name any
+   other disposition an assignment needs, on any flow:
+
+   - **Design, before code:** Scout (codebase recon), Researcher (external
+     sources), Analyst (acceptance criteria), Architect (ownership and
+     lifecycle design), Design Lens (one sealed-council mandate), Advisor
+     (second opinion), Product Designer (interface/UX contract).
+   - **Write, own scope:** Engineer (implement and prove), Feature Owner
+     (a whole vertical slice), Shadow Implementer (a parallel alternative),
+     Migrator, Tech Writer (docs only), Integrator (merges — Lead keeps the
+     decision), Dependency Lead (a large branch under contract), Release
+     Engineer, Prototyper (throwaway code to answer a design question),
+     Debugger (root mechanism for hard bugs).
+   - **Falsify the frozen candidate:** Reviewer (Spec and Standards seats
+     in parallel), Security Auditor (threat model), QC (cases from the
+     spec), Performance Auditor (measure the claim), and any `…Auditor`
+     domain lens (accessibility, i18n, compliance).
+   - **Audit the evidence chain:** Proof Auditor — did the commands run,
+     does the output prove the claim, is the candidate identity real.
+
+   One writer per moving scope; every checking seat runs on the same frozen
+   candidate and reruns when it changes; a seat exists to change a verdict.
+   Remind the Human each seat costs tokens and attention — keep only seats
+   that can change a verdict.
+
+3. Grill one group at a time, each option on its own line, restating every
+   decision in plain words before continuing: what work actually lands
+   here and which kinds carry real risk; which shape fits each kind — or
+   whether one default covers the repo; which domain skills each chosen
+   disposition should use (a test-design or E2E skill for QC, a writing
+   skill for Tech Writer); which decisions stay Human-only.
+
+4. Record the confirmed shapes — a repo default plus exceptions, or
+   per-class rows — in the Task classes and gates table and each
+   disposition's intended skills in the protocol's skills notes, so Lead
+   names them in the assignment. The table states defaults and triggers,
+   not obligations; spawn-time dispositions stay free-form.
+
+The interview is complete when every work kind the Human named has a shape
+and gate, each chosen disposition has its skills noted, and the Human has
+heard the table is theirs to revise.
+
 ## Set up protocol and pool
 
 Use `node <slp-cli> init <absolute-repo>` to preview, then --apply within setup
@@ -73,8 +149,16 @@ authority. Init creates missing protocol, seeds the task-type skeleton catalog
 and a `.paseo-slp/notebook.md` Supervisor notebook scaffold without overwriting
 existing files. Fill the frontmatter `supervisor_notebook` field — the scaffolded path with
 its owner, or `timeline:<agentId>` plus a retrieval note the Human can follow.
-Complete tactics: task classes, ownership, topology, proof, budget,
-allowed operations, escalation and settlement. Keep role bytes out of the protocol.
+Complete tactics: record the task classes and dispositions confirmed in the
+interview, plus ownership, topology, proof, budget, allowed operations,
+escalation and settlement. Keep role bytes out of the protocol.
+
+Write the protocol only through a confirmed diff: present the exact complete
+diff with material consequences, obtain direct Human confirmation, verify the
+file is unchanged since the confirmed base, write the canonical file, then
+re-read it and verify the bytes match the confirmed target. Drift or a byte
+mismatch is a blocker, not a partial write. For a revision, bump the
+frontmatter version and refresh last_reviewed in the same diff.
 
 The default pool decision is inherit: a repository with no catalog resolves the
 user-scope catalog automatically. Any catalog file in the repo is authoritative

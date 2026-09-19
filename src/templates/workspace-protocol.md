@@ -37,7 +37,7 @@ decisions change; the frontmatter is the single source for those fields.
   modeId, and the spawner asks only when neither is set rather than letting
   agents inherit the host default.
 
-## Decision boundaries
+## Decision matrix
 
 Lead selects methods, routes bounded work, reconciles technical decisions and accepts
 project artifacts within the assignment. Human decides product/portfolio changes,
@@ -45,6 +45,11 @@ important owner-reserved architecture contracts, irreversible/cost trade-offs be
 the grant and external effects. Edits, commits, pushes, deploys, host configuration
 and other repositories each follow the applicable authority; profile permissions
 do not supply it. Record additional repository-specific reserved decisions here.
+
+Mark `must_ask` on every boundary where the Human alone decides: product and
+priority, owner-reserved contracts, irreversible or material-cost trade-offs,
+external effects and subjective acceptance. A missing must_ask answer pauses the
+dependent work — it never defaults to Lead.
 
 ## Task classes and gates
 
@@ -114,7 +119,7 @@ receipts, bounded lifetime and settlement follow references/monitoring.md.
 Record the creation/deletion receipts and retain pre-existing monitoring outside
 the task.
 
-## Proof and escalation
+## Candidate, verification, review, and acceptance
 
 Identify established repo checks for each requested outcome; record exact commands
 and the behavior they demonstrate in the assignment. Match evidence to the risk:
@@ -123,6 +128,8 @@ evaluation where needed. Coverage and mock-only checks cannot define success.
 Use a deterministic snapshot or exact commit with relevant working changes accounted
 for; record external proof separately. Review and verdict bind to the same candidate.
 
+## Reopen, dependency, and blocked handling
+
 Lead reconciles REOPEN_REQUEST (failed premise) and DEPENDENCY_REQUEST (another owner,
 API or scope). BLOCKED identifies a missing decision/prerequisite/capability. After
 repeated identical failures, inspect the shared mechanism and prerequisite changes
@@ -130,7 +137,7 @@ before retrying; any numeric retry threshold is a repository choice. Owner-only
 decisions go through the assigned Supervisor or directly to Human. At handback,
 record actual proof, unresolved findings and settlement of task-owned resources.
 
-## Repo anti-patterns and evolution
+## Repo anti-patterns
 
 `supervisor_notebook` in the frontmatter records `.paseo-slp/notebook.md`
 (scaffolded by init) or `timeline:<agentId>` with a retrieval note the Human can
@@ -141,6 +148,9 @@ retrieval is unavailable and reports the gap.
 For each observed repo-specific pattern, record signal, evidence/counterevidence,
 suspected mechanism, impact, open question, allowed response and outcome. Begin
 without invented repo patterns; use the installed generic catalog when relevant.
+
+## Evolution
+
 Distill repeated failures into tactics, keep authority changes with Human, and record
 version, review date, causal evidence, counterargument and reversal conditions.
 Review after recurring failures or material architecture change, and check whether
