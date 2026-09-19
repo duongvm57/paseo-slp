@@ -22,6 +22,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 import { registerHooks } from 'node:module';
 import { loadHostModule } from './helpers/plugin-doubles.mjs';
+import { CatalogModel, CatalogOutput } from '../plugin/shared/contracts.ts';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PLUGIN_DIR = join(REPO_ROOT, 'plugin');
@@ -113,7 +114,9 @@ export const createLauncherBuilder = () => ({
   return file;
 }
 
-test('contribute() registers the nine RPCs plus the two before-hooks, cleanup unregisters', async t => {
+// Import the real contribute() with the lane-stub resolve hook armed (real
+// lane modules win; stubs only cover lane-isolated worktrees).
+async function importContribute(t) {
   const stubFile = writeLaneStubs(t);
   const stubUrl = pathToFileURL(stubFile).href;
   const hooks = registerHooks({
@@ -133,7 +136,11 @@ test('contribute() registers the nine RPCs plus the two before-hooks, cleanup un
   t.after(() => hooks.deregister());
 
   const entry = await import(pathToFileURL(join(PLUGIN_DIR, 'index.server.ts')).href);
-  const contribute = entry.default;
+  return entry.default;
+}
+
+test('contribute() registers the nine RPCs plus the two before-hooks, cleanup unregisters', async t => {
+  const contribute = await importContribute(t);
   assert.equal(typeof contribute, 'function');
 
   const registrations = [];
@@ -177,6 +184,66 @@ test('contribute() registers the nine RPCs plus the two before-hooks, cleanup un
   assert.doesNotThrow(() => cleanup());
   assert.deepEqual(unregistered.sort(), ['agent.create', 'agent.session_open']);
   assert.doesNotThrow(() => cleanup(), 'cleanup must be idempotent');
+});
+
+// ---------------------------------------------------------------------------
+// (b2) the catalog RPC maps real model descriptors — thinking options included
+// ---------------------------------------------------------------------------
+
+test('the catalog RPC passes per-model thinking options through to CatalogOutput', async t => {
+  const contribute = await importContribute(t);
+  const registrations = [];
+  const cleanup = contribute({
+    handle: (contract, handler) => registrations.push({ name: contract.name, handler }),
+    before: () => () => {},
+  });
+  t.after(() => cleanup());
+  const catalogHandler = registrations.find(r => r.name === 'catalog')?.handler;
+  assert.equal(typeof catalogHandler, 'function');
+
+  // The shape listModels really returns (AgentModelDefinition): codex/pi
+  // declare thinkingOptions + a default; devin-style models declare none.
+  const thinking = [
+    { id: 'low', label: 'low' },
+    { id: 'medium', label: 'medium', description: 'd', isDefault: true, metadata: { tier: 2 } },
+    { id: 'high', label: 'high' },
+  ];
+  const paseo = {
+    providers: {
+      listModels: async () => ({
+        models: [
+          { id: 'gpt-5.6', label: 'GPT 5.6', thinkingOptions: thinking, defaultThinkingOptionId: 'medium' },
+          { id: 'swe-2-max' },
+        ],
+      }),
+      listModes: async () => ({ modes: [{ id: 'bypass' }] }),
+      listFeatures: async () => ({ features: [] }),
+    },
+  };
+  const result = await catalogHandler({ schemaVersion: 1, family: 'codex' }, { paseo });
+  // Options and the declared default survive verbatim; a model that
+  // declares none keeps absent keys — "not declared" is never rewritten
+  // into an invented empty list on the wire.
+  assert.deepEqual(result.models[0], {
+    id: 'gpt-5.6', label: 'GPT 5.6', thinkingOptions: thinking, defaultThinkingOptionId: 'medium',
+  });
+  assert.deepEqual(result.models[1], { id: 'swe-2-max', label: 'swe-2-max' });
+  // The wire schema round-trips the result — thinkingOptions and
+  // defaultThinkingOptionId are part of CatalogOutput now.
+  assert.deepEqual(CatalogOutput.parse(result), result);
+});
+
+test('CatalogModel round-trips thinking options and stays strict', () => {
+  const model = {
+    id: 'gpt-5.6',
+    label: 'GPT 5.6',
+    thinkingOptions: [
+      { id: 'medium', label: 'medium', description: 'd', isDefault: true, metadata: { tier: 2 } },
+    ],
+    defaultThinkingOptionId: 'medium',
+  };
+  assert.deepEqual(CatalogModel.parse(model), model);
+  assert.throws(() => CatalogModel.parse({ ...model, bogus: 1 }));
 });
 
 // ---------------------------------------------------------------------------

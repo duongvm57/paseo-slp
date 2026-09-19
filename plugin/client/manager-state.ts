@@ -5,6 +5,7 @@ import { AbsolutePath, Id } from "../shared/contracts.ts";
 import { OWNED_PROVIDER_ID_RE, ownedProviderId } from "../shared/families.ts";
 import type {
   CatalogResult,
+  CatalogSelectOptionValue,
   ConflictValue,
   FamilyName,
   FamilyViewValue,
@@ -327,6 +328,23 @@ export function routingDiverges(
  *  for anything else — used to prefill routing pickers from live profiles. */
 export function familyFromProviderId(provider: string | null | undefined): string | null {
   return OWNED_PROVIDER_ID_RE.exec(provider ?? "")?.[1] ?? null;
+}
+
+/** The picked model's declared thinking options and default, resolved from
+ *  a family catalog (§9 corrected finding). null means unresolvable — no
+ *  catalog, no picked model, or a picked model the catalog doesn't list —
+ *  the picker's established free-text fallback. A resolved model declaring
+ *  no options returns `{options: [], defaultId: null}` (the devin case:
+ *  thinking is baked into model ids, so free text would invite garbage).
+ *  The model id trims like featureKeyFor's — surrounding whitespace is not
+ *  part of the catalog key. */
+export function thinkingOptionsFor(
+  catalog: CatalogResult | null | undefined,
+  modelId: string,
+): { options: CatalogSelectOptionValue[]; defaultId: string | null } | null {
+  const entry = catalog?.models.find(model => model.id === modelId.trim());
+  if (!entry) return null;
+  return { options: entry.thinkingOptions ?? [], defaultId: entry.defaultThinkingOptionId ?? null };
 }
 
 // ---------------------------------------------------------------------------

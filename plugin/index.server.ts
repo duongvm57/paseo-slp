@@ -96,7 +96,15 @@ function detectDaemonHome() {
 interface ProviderCatalogApi {
   providers: {
     listModels(provider: string): Promise<{
-      models?: { id: string; label?: string }[]; error?: string | null;
+      models?: {
+        id: string; label?: string;
+        thinkingOptions?: {
+          id: string; label: string; description?: string;
+          isDefault?: boolean; metadata?: Record<string, unknown>;
+        }[];
+        defaultThinkingOptionId?: string;
+      }[];
+      error?: string | null;
     }>;
     listModes(provider: string): Promise<{
       modes?: { id: string; label?: string }[]; error?: string | null;
@@ -147,7 +155,15 @@ async function loadCatalog(input: CatalogRequest, paseo: ProviderCatalogApi) {
   if (featuresPayload?.error) errors.push(featuresPayload.error);
   return {
     schemaVersion: 1 as const,
-    models: (modelsPayload?.models ?? []).map(m => ({ id: m.id, label: m.label ?? m.id })),
+    // Per-model thinking options pass through untouched (§9 corrected
+    // finding — the host's AgentModelDefinition carries them; an absent
+    // key stays absent so the wire shape records "not declared").
+    models: (modelsPayload?.models ?? []).map(m => ({
+      id: m.id,
+      label: m.label ?? m.id,
+      ...(m.thinkingOptions ? { thinkingOptions: m.thinkingOptions } : {}),
+      ...(m.defaultThinkingOptionId ? { defaultThinkingOptionId: m.defaultThinkingOptionId } : {}),
+    })),
     modes: (modesPayload?.modes ?? []).map(m => ({ id: m.id, label: m.label ?? m.id })),
     features: featuresPayload?.features ?? [],
     error: errors.length > 0 ? errors.join("; ") : null,

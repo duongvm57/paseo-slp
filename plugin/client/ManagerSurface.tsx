@@ -51,6 +51,7 @@ import {
   statusRows,
   targetKey,
   recoverPendingStart,
+  thinkingOptionsFor,
   visibleConflicts,
 } from "./manager-state.ts";
 import type { ReconcileAction, RoutingRoleForm, TargetView } from "./manager-state.ts";
@@ -1099,6 +1100,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
           {(["supervisor", "lead"] as const).map(role => {
             const form = routingForm[role];
             const roleCatalog = catalogs[form.family];
+            const thinking = thinkingOptionsFor(roleCatalog, form.model);
             const disabled = !target || routingBusy;
             return (
               <View key={role} style={[styles.roleBox, { borderColor: colors.border }]}>
@@ -1223,15 +1225,61 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                     disabled={disabled}
                   />
                 )}
-                <Field
-                  colors={colors}
-                  label="Thinking option"
-                  hint="The catalog does not list thinking options — enter an option ID or leave empty for the provider default"
-                  value={form.thinkingOptionId}
-                  onChangeText={setRoutingField(role, "thinkingOptionId")}
-                  placeholder="Thinking option ID"
-                  disabled={disabled}
-                />
+                {thinking === null ? (
+                  // No catalog / no picked model / model not listed — the
+                  // established free-text degradation path.
+                  <Field
+                    colors={colors}
+                    label="Thinking option"
+                    hint="Enter an option ID or leave empty for the provider default"
+                    value={form.thinkingOptionId}
+                    onChangeText={setRoutingField(role, "thinkingOptionId")}
+                    placeholder="Thinking option ID"
+                    disabled={disabled}
+                  />
+                ) : thinking.options.length > 0 || form.thinkingOptionId !== "" ? (
+                  <View style={styles.field}>
+                    <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Thinking option</Text>
+                    <ChipSelect
+                      colors={colors}
+                      value={form.thinkingOptionId}
+                      options={[
+                        {
+                          label: thinking.defaultId
+                            ? `Provider default (${thinking.defaultId})`
+                            : "Provider default",
+                          value: "",
+                        },
+                        ...thinking.options.map(option => ({
+                          label: option.id === thinking.defaultId || option.isDefault
+                            ? `${option.label} (default)`
+                            : option.label,
+                          value: option.id,
+                        })),
+                        // Same escape hatch as the mode picker: a stored
+                        // option the model doesn't declare stays visible and
+                        // clearable, marked "(stored)" so it reads as
+                        // leftover rather than a real option.
+                        ...(form.thinkingOptionId !== "" &&
+                          !thinking.options.some(option => option.id === form.thinkingOptionId)
+                          ? [{ label: `${form.thinkingOptionId} (stored)`, value: form.thinkingOptionId }]
+                          : []),
+                      ]}
+                      onChange={setRoutingField(role, "thinkingOptionId")}
+                      disabled={disabled}
+                    />
+                  </View>
+                ) : (
+                  // Options resolved but the model declares none (devin
+                  // bakes thinking into model ids) — no free text to type
+                  // garbage into.
+                  <View style={styles.field}>
+                    <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Thinking option</Text>
+                    <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                      This model declares no thinking options
+                    </Text>
+                  </View>
+                )}
               </View>
             );
           })}

@@ -332,19 +332,41 @@ After this refactor the remaining steps are exactly three:
   RPC overrides.
 - **Features/thinking editable pre-binding** — the routing card carries
   the catalog-driven feature controls (toggle → switch, select → chips,
-  a raw JSON field when the provider declares no defs) plus a free-text
-  thinking-option field, so `featureValues`/`thinkingOptionId` are
+  a raw JSON field when the provider declares no defs) plus a
+  thinking-option picker, so `featureValues`/`thinkingOptionId` are
   editable before the first binding for the first time — the earlier
   trade-off note (features/thinking only editable post-binding via the
   profiles card) no longer applies. Feature defs are fetched per
-  routing-form `family|model|modeId` pick. `CatalogOutput` exposes
-  models/modes/features only — no thinking options — so thinking stays
-  a free-text field rather than a picker. Save maps empty fields to
-  absent keys (`RoleChoice` unset semantics — the live value is
-  preserved at activation; `null` is the profiles wire shape and is
-  never emitted), declared feature controls win over the raw JSON base,
-  undeclared keys are preserved from the base, and an empty control
-  drops the key.
+  routing-form `family|model|modeId` pick. **Corrected record
+  (2026-09-19, Run 8):** this bullet previously claimed "`CatalogOutput`
+  exposes models/modes/features only — no thinking options — so thinking
+  stays a free-text field." That was wrong about the host, not just the
+  plugin: `paseo.providers.listModels(provider)` returns the full
+  `AgentModelDefinition`, where every model carries
+  `thinkingOptions?: {id, label, description?, isDefault?, metadata?}[]`
+  and `defaultThinkingOptionId?` (verified live: codex and pi list
+  low/medium/high/xhigh/max/ultra with default medium; devin declares an
+  empty list — it bakes thinking into model ids). The capability existed
+  in the protocol; the plugin's narrowed `ProviderCatalogApi` was
+  over-narrowed and stripped the fields in `loadCatalog`. `CatalogModel`
+  now extends `CatalogOption` with both optional fields, `loadCatalog`
+  passes them through untouched, and the card renders a `ChipSelect`
+  when the picked model resolves: an auto entry (value `""`, labelled
+  `Provider default (<id>)` when `defaultThinkingOptionId` is known,
+  else `Provider default`), each declared option with `(default)`
+  appended to its label, plus a `<id> (stored)` escape — same pattern as
+  the mode picker — when the stored value isn't in the list. A resolved
+  model declaring zero options shows the static hint "This model
+  declares no thinking options" instead of a free-text field (typing
+  would invite garbage), unless a stale stored value exists — then the
+  ChipSelect still renders so the leftover stays visible and clearable.
+  No catalog, no picked model, or a model the catalog doesn't list keeps
+  the free-text field — the established degradation path. Save maps
+  empty fields to absent keys (`RoleChoice` unset semantics — the live
+  value is preserved at activation; `null` is the profiles wire shape
+  and is never emitted), declared feature controls win over the raw JSON
+  base, undeclared keys are preserved from the base, and an empty
+  control drops the key.
 - **"Preferred provider family" / "Initial profiles"** — removed from
   the Activation card by explicit human decision. Routing is the sole
   UI configurator for role→provider; the `profiles` and

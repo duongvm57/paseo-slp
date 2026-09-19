@@ -34,6 +34,7 @@ import {
   reconcileProblem,
   recoverPendingStart,
   familyFromProviderId,
+  thinkingOptionsFor,
   roleChoiceEquals,
   routingChoiceDiffers,
   routingDiverges,
@@ -448,6 +449,41 @@ test('the Save diff-gate enables only when the form-built choice differs from st
   assert.deepEqual(merged.choice.featureValues, { auto_accept: false, x: 1 });
 });
 
+test('thinkingOptionsFor resolves the picked model or falls back to free text', () => {
+  const catalogResult = (models, over = {}) => ({
+    schemaVersion: 1, models, modes: [], features: [], error: null, ...over,
+  });
+  const options = [
+    { id: 'low', label: 'low' },
+    { id: 'medium', label: 'medium', isDefault: true },
+  ];
+  // Declared options + declared default pass through.
+  assert.deepEqual(
+    thinkingOptionsFor(
+      catalogResult([{ id: 'gpt-5.6', label: 'GPT', thinkingOptions: options, defaultThinkingOptionId: 'medium' }]),
+      'gpt-5.6',
+    ),
+    { options, defaultId: 'medium' },
+  );
+  // The model id trims like featureKeyFor's catalog key.
+  assert.deepEqual(
+    thinkingOptionsFor(catalogResult([{ id: 'm1', label: 'M1' }]), '  m1  '),
+    { options: [], defaultId: null },
+  );
+  // A model that declares no options (devin bakes thinking into model
+  // ids) resolves to an honest empty set — not the free-text fallback.
+  assert.deepEqual(
+    thinkingOptionsFor(catalogResult([{ id: 'swe-2-max', label: 'SWE' }]), 'swe-2-max'),
+    { options: [], defaultId: null },
+  );
+  // Unresolvable → null → free text: no catalog, an errored/empty
+  // catalog, no picked model, or a model the catalog doesn't list.
+  assert.equal(thinkingOptionsFor(null, 'm1'), null);
+  assert.equal(thinkingOptionsFor(catalogResult([], { error: 'Catalog query failed' }), 'm1'), null);
+  assert.equal(thinkingOptionsFor(catalogResult([{ id: 'm1', label: 'M1' }]), ''), null);
+  assert.equal(thinkingOptionsFor(catalogResult([{ id: 'm1', label: 'M1' }]), 'other'), null);
+});
+
 test('familyFromProviderId parses managed provider ids for form prefill', () => {
   assert.equal(familyFromProviderId('slp-pi-supervisor'), 'pi');
   assert.equal(familyFromProviderId('slp-claude-peer'), 'claude');
@@ -591,6 +627,27 @@ test('the routing UI is one card with one save and one divergence warning', () =
     'the shared build merges the same defs for both roles',
   );
   assert.equal(occurrences(source, '"Feature values (JSON)"'), 1, 'JSON fallback field present');
+
+  // Thinking options resolve per picked model from the catalog (§9
+  // corrected finding): a ChipSelect when the model declares options (a
+  // stored unknown value stays visible via the "(stored)" escape), a
+  // static hint when it declares none, and the free-text Field kept only
+  // as the unresolvable fallback. The stale "catalog does not list" copy
+  // is gone.
+  assert.equal(occurrences(source, 'thinkingOptionsFor('), 1, 'thinking resolves via the catalog helper');
+  assert.equal(occurrences(source, 'thinking === null'), 1, 'free text remains only the fallback path');
+  assert.ok(
+    source.includes('Provider default (${thinking.defaultId})'),
+    'auto entry names the declared default',
+  );
+  assert.ok(source.includes('(stored)'), 'unknown stored option stays visible');
+  assert.ok(source.includes('This model declares no thinking options'), 'empty-options hint present');
+  assert.equal(
+    occurrences(source, 'The catalog does not list thinking options'),
+    0,
+    'stale free-text hint removed',
+  );
+  assert.ok(bundle.includes('This model declares no thinking options'), 'empty-options hint bundled');
   assert.equal(occurrences(source, '"Thinking option"'), 1, 'thinking option field present');
 
   // The Activation card no longer exposes the pre-binding configurators;

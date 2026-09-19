@@ -243,6 +243,26 @@ export const CatalogOption = z.object({
   id: z.string().min(1),
   label: z.string(),
 }).strict();
+/** One selectable option inside a provider feature or model descriptor —
+ *  id + display label plus optional description, default marker and
+ *  free-form metadata. Shared by CatalogFeature's select options and a
+ *  model's thinkingOptions (§9 corrected finding: the host's
+ *  AgentModelDefinition exposes them; the plugin interface had
+ *  over-narrowed the listing). */
+export const CatalogSelectOption = z.object({
+  id: z.string().min(1),
+  label: z.string(),
+  description: z.string().optional(),
+  isDefault: z.boolean().optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+}).strict();
+/** One catalog model: the picker identity plus the thinking options the
+ *  model declares and its declared default option id. Providers that bake
+ *  thinking into model ids (devin) declare an empty/absent list. */
+export const CatalogModel = CatalogOption.extend({
+  thinkingOptions: z.array(CatalogSelectOption).optional(),
+  defaultThinkingOptionId: z.string().min(1).optional(),
+}).strict();
 /** Provider feature definition — the same descriptor the host's profile
  *  editor renders as a toggle or select. `value` is the provider default;
  *  profile-level overrides live in `featureValues`. */
@@ -264,18 +284,12 @@ export const CatalogFeature = z.discriminatedUnion("type", [
     tooltip: z.string().optional(),
     icon: z.string().optional(),
     value: z.string().nullable(),
-    options: z.array(z.object({
-      id: z.string().min(1),
-      label: z.string(),
-      description: z.string().optional(),
-      isDefault: z.boolean().optional(),
-      metadata: z.record(z.string(), z.unknown()).optional(),
-    }).strict()),
+    options: z.array(CatalogSelectOption),
   }).strict(),
 ]);
 export const CatalogOutput = z.object({
   schemaVersion: z.literal(1),
-  models: z.array(CatalogOption),
+  models: z.array(CatalogModel),
   modes: z.array(CatalogOption),
   features: z.array(CatalogFeature),
   /** Non-fatal: a provider that cannot answer reports here instead of rejecting. */
@@ -441,6 +455,8 @@ export type AuthorityValue = z.infer<typeof Authority>;
 export type ActivateRequest = z.infer<typeof ActivateInput>;
 export type ProfilePrefsValue = z.infer<typeof ProfilePrefs>;
 export type CatalogOptionValue = z.infer<typeof CatalogOption>;
+export type CatalogSelectOptionValue = z.infer<typeof CatalogSelectOption>;
+export type CatalogModelValue = z.infer<typeof CatalogModel>;
 export type CatalogRequest = z.infer<typeof CatalogInput>;
 export type CatalogResult = z.infer<typeof CatalogOutput>;
 export type ReconcileRequest = z.infer<typeof ReconcileInput>;
