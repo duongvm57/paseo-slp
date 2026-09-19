@@ -536,6 +536,9 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   }>(emptyRoutingForm);
   const [routingDirty, setRoutingDirty] = useState(false);
   const [routingBusy, setRoutingBusy] = useState(false);
+  // `routingSaved` shows a one-line confirmation after a bound save until
+  // the next edit — the bound case otherwise gives no visible feedback.
+  const [routingSaved, setRoutingSaved] = useState(false);
   const [store] = useState(createTargetViews);
   const [view, setView] = useState<TargetView>(emptyTargetView);
 
@@ -667,6 +670,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     field: "family" | "model" | "modeId" | "thinkingOptionId" | "features",
   ) => (value: string) => {
     setRoutingDirty(true);
+    setRoutingSaved(false);
     setRoutingForm(current => ({
       ...current,
       [role]: { ...current[role], [field]: value },
@@ -678,6 +682,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     featureId: string,
   ) => (value: string) => {
     setRoutingDirty(true);
+    setRoutingSaved(false);
     setRoutingForm(current => ({
       ...current,
       [role]: { ...current[role], feature: { ...current[role].feature, [featureId]: value } },
@@ -744,6 +749,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
       });
       setRouting(result.routing);
       setRoutingDirty(false);
+      setRoutingSaved(true);
     } catch (error) {
       update({ lastError: errorMessage(error) }, target);
     } finally {
@@ -1087,6 +1093,45 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
         </Card>
       ) : null}
 
+      <Card
+        colors={colors}
+        title="Activation"
+        subtitle={statusView ? undefined : "Inspect the daemon first — the candidate and conflicts must be visible before any change."}
+      >
+        <CheckRow
+          colors={colors}
+          checked={exclusiveWindow}
+          onToggle={setExclusiveWindow}
+          title="Exclusive configuration window"
+          hint="No other writers may edit daemon configuration while an operation runs"
+        />
+        <CheckRow
+          colors={colors}
+          checked={mappingConfirmed}
+          onToggle={setMappingConfirmed}
+          disabled={!target}
+          title="Daemon home confirmed"
+          hint={target ? `${target.daemonHome} is the home of this daemon` : "Detect or configure the daemon home first"}
+        />
+        <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+          {EXCLUSIVE_WINDOW_NOTICE}
+        </Text>
+        {!statusView?.binding ? (
+          <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+            Activation creates the SLP Supervisor and SLP Lead agent profiles, bound per
+            the Role profiles card — an unrouted role falls back to the first enabled,
+            available family.
+          </Text>
+        ) : null}
+        <Button
+          colors={colors}
+          kind="primary"
+          label={statusView ? activationLabel(statusView) : "Activate"}
+          onPress={runActivate}
+          disabled={!canMutate || !statusView}
+        />
+      </Card>
+
       {statusView ? (
         // ONE card edits the full profile each role binds — family, model,
         // mode, feature values, thinking option — behind one Save issuing a
@@ -1253,10 +1298,20 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
               {` ${activationLabel(statusView)}`} to apply them.
             </Text>
           ) : null}
+          {routingSaved && statusView?.binding && !routingDiverged ? (
+            <Text style={[styles.mutedSmall, { color: colors.statusSuccess }]}>
+              Saved — matches the live binding.
+            </Text>
+          ) : null}
+          {!statusView?.binding ? (
+            <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+              Activate first — role profiles are saved against a live binding.
+            </Text>
+          ) : null}
           <Button
             colors={colors}
             label={routingBusy ? "Saving…" : "Save routing"}
-            disabled={!target || routingBusy || !routingDirty}
+            disabled={!target || routingBusy || !routingDirty || !statusView?.binding}
             onPress={() => void saveRouting()}
           />
         </Card>
@@ -1308,45 +1363,6 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
           ) : null}
         </Card>
       ) : null}
-
-      <Card
-        colors={colors}
-        title="Activation"
-        subtitle={statusView ? undefined : "Inspect the daemon first — the candidate and conflicts must be visible before any change."}
-      >
-        <CheckRow
-          colors={colors}
-          checked={exclusiveWindow}
-          onToggle={setExclusiveWindow}
-          title="Exclusive configuration window"
-          hint="No other writers may edit daemon configuration while an operation runs"
-        />
-        <CheckRow
-          colors={colors}
-          checked={mappingConfirmed}
-          onToggle={setMappingConfirmed}
-          disabled={!target}
-          title="Daemon home confirmed"
-          hint={target ? `${target.daemonHome} is the home of this daemon` : "Detect or configure the daemon home first"}
-        />
-        <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-          {EXCLUSIVE_WINDOW_NOTICE}
-        </Text>
-        {!statusView?.binding ? (
-          <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-            Activation creates the SLP Supervisor and SLP Lead agent profiles, bound per
-            the stored role profiles above — an unrouted role falls back to the first
-            enabled, available family.
-          </Text>
-        ) : null}
-        <Button
-          colors={colors}
-          kind="primary"
-          label={statusView ? activationLabel(statusView) : "Activate"}
-          onPress={runActivate}
-          disabled={!canMutate || !statusView}
-        />
-      </Card>
 
       <Collapse
         colors={colors}

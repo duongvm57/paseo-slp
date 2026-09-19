@@ -524,3 +524,57 @@ test('the routing UI is one card with one save and one divergence warning', () =
   assert.equal(occurrences(bundle, 'Preferred provider family'), 0);
   assert.equal(occurrences(bundle, 'Initial profiles'), 0);
 });
+
+test('activation is a prerequisite: it renders above Role profiles and gates Save', () => {
+  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+
+  // Human-mandated order (2026-09-19 round-2 polish): activation is the
+  // prerequisite, so its card sits above the Role profiles card it feeds,
+  // and Role profiles sits above Communication language — the apply action
+  // is adjacent to the "re-activation required" warning that names it.
+  const cardOrder = [
+    'title="Daemon home"',
+    'title="Status"',
+    'title="Activation"',
+    'title="Role profiles"',
+    'title="Communication language"',
+    'title="Advanced"',
+    'title="Maintenance"',
+  ];
+  const positions = cardOrder.map(marker => source.indexOf(marker));
+  positions.forEach((position, index) => {
+    assert.notEqual(position, -1, `card title missing: ${cardOrder[index]}`);
+  });
+  assert.ok(
+    positions.every((position, index) => index === 0 || position > positions[index - 1]),
+    `cards out of order: ${positions.join(', ')}`,
+  );
+
+  // Save is disabled while unbound — an unbound save wrote the routing file
+  // silently (no live profile to diverge from → dead-looking button) and the
+  // unbound prefill falls back to the codex default, so a careless
+  // save + activate could bind the wrong family. The hint names the
+  // prerequisite; the block is UI-only (set-role-routing is unchanged).
+  const saveButton = source.match(
+    /label=\{routingBusy \? "Saving…" : "Save routing"\}[\s\S]*?disabled=\{([^}]*)\}/,
+  );
+  assert.ok(saveButton, 'Save routing button not found');
+  assert.match(saveButton[1], /!statusView\?\.binding/, 'Save is not gated on a live binding');
+  assert.ok(
+    source.includes('Activate first — role profiles are saved against a live binding.'),
+    'activate-first hint missing',
+  );
+
+  // The bound case confirms the save until the next edit; the divergence
+  // warning still owns the diverged state, so the line is suppressed there.
+  assert.ok(
+    source.includes('Saved — matches the live binding.'),
+    'bound-case save feedback missing',
+  );
+
+  // The Activation card's pre-bind note references the Role profiles card
+  // by name — the previous "role profiles above" copy went spatially stale
+  // when the cards reordered.
+  assert.equal(occurrences(source, 'role profiles above'), 0, 'stale spatial copy');
+  assert.ok(source.includes('the Role profiles card'), 'activation note must name the card');
+});

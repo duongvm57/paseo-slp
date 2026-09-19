@@ -353,3 +353,41 @@ After this refactor the remaining steps are exactly three:
 - **Payload coupling** — `bin/`/`src/` deliberately do not import the
   registry; `npm run check:plugin-payload` verifies the embedded payload
   stays byte-identical unless deliberately regenerated.
+- **Activation above Role profiles** — Human decision (2026-09-19,
+  round-2 polish, complaint: "chưa active vẫn save được role profile à?
+  lại còn đặt cái role profile ở trên cái active/bind, xong rồi bấm save
+  mà ko báo lỗi dù chưa active/bind"). Activation is the prerequisite,
+  so its card renders above the Role profiles card it feeds, and the
+  Communication language card no longer sits between the apply action
+  and the "re-activation required" warning that names it. The
+  Activation card's pre-bind note now references "the Role profiles
+  card" by name — the previous "stored role profiles above" copy went
+  spatially stale after the reorder.
+- **Save disabled until bound** — Human decision. An unbound save wrote
+  `role-routing.json` silently (no live profile to diverge from → a
+  dead-looking button), and the unbound prefill falls back to the codex
+  default, so a careless save + activate could bind the wrong family.
+  The Save button is disabled while `statusView.binding` is absent, with
+  an adjacent "Activate first" hint naming the prerequisite. The block
+  is UI-only: `set-role-routing` is unchanged and scripted pre-binding
+  configuration still works.
+- **Fields stay editable when unbound** — Lead decision. Unbound edits
+  are draft staging for the supported configure-then-activate flow:
+  `routingDirty` keeps staged edits across the activation boundary so
+  they can be saved once bound. Locking the whole card would remove the
+  draft capability for marginal clarity while the disabled Save is the
+  hard guarantee against both cited harms. Accepted residual: staged
+  edits on the codex-default prefill persist across activation — the
+  user re-sees them when saving post-activation.
+- **Bound-case save feedback** — after a successful bound save the card
+  shows "Saved — matches the live binding." until the next edit
+  (`routingSaved`, cleared when `setRoutingDirty(true)` fires). It is
+  suppressed while `routingDiverged` so the divergence warning stays the
+  single "what happens next" text; the failure path already surfaces
+  `lastError`, and unbound saves cannot happen so no unbound feedback
+  string exists.
+- **impeccable principles applied** — visibility of system status (the
+  disabled Save + hint state the prerequisite and the saved line
+  confirms the bound save), context switch (binding state lives beside
+  the config it governs), and memory bridge (the hint co-locates the
+  next action with the blocked control).
