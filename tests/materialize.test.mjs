@@ -4,8 +4,9 @@ import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { json, readJson } from '../src/package.mjs';
+import { json, readJson, hash } from '../src/package.mjs';
 import { materializeWorkspace } from '../src/paseo-install.mjs';
+import { readCatalog } from '../src/routing.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 function fixture(t) {
@@ -46,6 +47,27 @@ test('materialize dry-runs, applies and rebases frontmatter paths without copyin
   assert.ok(again.files.every(file => file.preserved && !file.sha256));
 });
 
+test('materialize copies catalog bytes verbatim so a pinned route hash stays valid', t => {
+  const dir = fixture(t), source = slpCheckout(join(dir, 'source')), target = join(dir, 'target');
+  mkdirSync(target);
+  // A valid catalog with unusual formatting: odd indentation, a CRLF-free
+  // compact style and non-canonical key order — reserialization would change
+  // every byte and the sha256.
+  const raw = '{\n  "options": [],\n\t"policy": "test pool",\n  "version": 1,\n  "quotaFallback": {"enabled":false,"optionIds":[]}\n}\n\n\n';
+  const sourceCatalog = join(source, '.paseo-slp/slp-routing.json');
+  writeFileSync(sourceCatalog, raw);
+  const applied = materializeWorkspace(source, target, true);
+  const catalogEntry = applied.files.find(file => file.path.endsWith('slp-routing.json'));
+  assert.equal(catalogEntry.sha256, hash(raw));
+  // Byte identity source → target, not just semantic equality.
+  assert.equal(readFileSync(join(target, '.paseo-slp/slp-routing.json'), 'utf8'), raw);
+  // The route hash a seat pinned against the source resolves identically on
+  // the materialized target.
+  assert.equal(readCatalog(target).sha256, readCatalog(source).sha256);
+  // The source bytes themselves are untouched.
+  assert.equal(readFileSync(sourceCatalog, 'utf8'), raw);
+});
+
 test('materialize warns instead of silently keeping stale paths, and respects path boundaries', t => {
   const dir = fixture(t), source = slpCheckout(join(dir, 'source')), target = join(dir, 'target');
   mkdirSync(target);
@@ -75,6 +97,10 @@ test('materialize validates the catalog and refuses missing source files before 
   mkdirSync(target);
   writeFileSync(join(source, '.paseo-slp/slp-routing.json'), json({ version: 1, policy: 'x', options: [{ id: 'BAD ID' }] }));
   assert.throws(() => materializeWorkspace(source, target, true), /routing option id/i);
+  assert.equal(existsSync(join(target, '.paseo-slp')), false);
+  // Unparseable bytes fail at validation too — still before any target write.
+  writeFileSync(join(source, '.paseo-slp/slp-routing.json'), '{ not json');
+  assert.throws(() => materializeWorkspace(source, target, true), SyntaxError);
   assert.equal(existsSync(join(target, '.paseo-slp')), false);
   writeFileSync(join(source, '.paseo-slp/slp-routing.json'), json({ version: 1, policy: 'test pool', options: [] }));
   rmSync(join(source, '.paseo-slp/workspace-protocol.md'));

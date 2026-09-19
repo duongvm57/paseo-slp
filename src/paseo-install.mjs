@@ -295,11 +295,16 @@ export function materializeWorkspace(from, repository, apply = false) {
     if (!lstat(path)?.isFile()) throw new Error(`Source checkout lacks .paseo-slp/${name}`);
     return path;
   };
-  const catalog = validateCatalog(readJson(sourceFile('slp-routing.json')));
+  // Read the catalog once and validate those exact bytes: the target keeps
+  // them verbatim so a route.catalogSha256 pinned against the source stays
+  // valid after materialize — reserializing the parsed object would drift
+  // formatting and hash.
+  const catalogBytes = readFileSync(sourceFile('slp-routing.json'));
+  validateCatalog(JSON.parse(catalogBytes.toString('utf8')));
   const protocol = rebaseFrontmatter(readFileSync(sourceFile('workspace-protocol.md'), 'utf8'), source, repository);
   const entries = [
     { path: join(repository, '.paseo-slp/workspace-protocol.md'), bytes: protocol.text },
-    { path: join(repository, '.paseo-slp/slp-routing.json'), bytes: json(catalog) },
+    { path: join(repository, '.paseo-slp/slp-routing.json'), bytes: catalogBytes },
   ];
   const result = stageEntries(entries, repository, apply);
   const protocolFile = result.find(file => file.path.endsWith('workspace-protocol.md'));
