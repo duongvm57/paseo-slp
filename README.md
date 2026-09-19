@@ -617,6 +617,34 @@ plus `gaps` for agent cwds that fail the git probe. Read-only — it never
 copies, merges or edits notebook content, and picks no authoritative
 candidate; where governance lives stays per-checkout.
 
+### `status` / `local-target`
+
+The plugin's RPC surface (status, local-target, …) has no agent-facing
+invoke path — `paseo plugin` is lifecycle-only and the paseo MCP exposes no
+invoke tool (host gap H13). These probes recompute what local files can
+prove and mark the rest as gaps, never guesses:
+
+```bash
+node "$SLP_RT/bin/slp.mjs" local-target [--paseo-home /absolute/paseo-home]
+node "$SLP_RT/bin/slp.mjs" status       [--paseo-home /absolute/paseo-home]
+```
+
+`local-target` reports the daemon home this process would serve
+(`--paseo-home` > managed binding env > `PASEO_HOME` > `~/.paseo`).
+`status` reads `<daemonHome>/slp-runtime/state/` (receipt, role-routing,
+communication-language) plus `config.json` and reports: receipt state,
+binding summary, the managed profiles the activation injected, recorded
+operation journal entries, and local checks — target match, bound-runtime
+integrity (`verifyInstall` + recorded candidate hash), launcher byte hashes,
+and a presence-only drift scan for the injected `slp-*` providers/profiles.
+A missing receipt yields `INACTIVE`, or `RECOVERY_REQUIRED` when orphaned
+`slp-*` config entries remain; a corrupt receipt/config fails closed instead
+of guessing a clean state. Live-conflict recomputation and family
+availability probes are daemon-only views and are reported under `gaps`.
+Mutation RPCs (activate/reconcile/deactivate/set-language/set-role-routing)
+stay Human-authority and are not exposed. These probes retire when the host
+ships `paseo plugin invoke` or MCP `invoke_plugin_rpc`.
+
 ## Testing
 
 ```bash

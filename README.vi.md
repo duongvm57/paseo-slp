@@ -589,6 +589,34 @@ lastActivityAt, notebook, notebookExists}` sắp theo activity mới nhất, kè
 sửa nội dung notebook, và không chọn candidate nào là authoritative; vị trí
 governance vẫn là per-checkout.
 
+### `status` / `local-target`
+
+RPC surface của plugin (status, local-target, …) không có đường invoke cho
+agent — `paseo plugin` chỉ là lifecycle và MCP paseo không có tool invoke
+(host gap H13). Hai probe này tính lại phần mà file local chứng minh được và
+đánh dấu phần còn lại là gaps, không bao giờ đoán:
+
+```bash
+node "$SLP_RT/bin/slp.mjs" local-target [--paseo-home /absolute/paseo-home]
+node "$SLP_RT/bin/slp.mjs" status       [--paseo-home /absolute/paseo-home]
+```
+
+`local-target` báo daemon home mà process này sẽ phục vụ (`--paseo-home` >
+env binding của managed session > `PASEO_HOME` > `~/.paseo`). `status` đọc
+`<daemonHome>/slp-runtime/state/` (receipt, role-routing,
+communication-language) cùng `config.json` và báo: state trong receipt, tóm
+tắt binding, các managed profile mà activation đã inject, journal operation
+đã ghi, và các check local — khớp target, integrity của runtime đã bind
+(`verifyInstall` + candidate hash ghi sẵn), hash bytes của launcher, và quét
+drift theo presence cho các provider/profile `slp-*` đã inject. Thiếu
+receipt → `INACTIVE`, hoặc `RECOVERY_REQUIRED` khi còn entry `slp-*` mồ côi
+trong config; receipt/config hỏng → fail-closed thay vì đoán trạng thái
+sạch. Tính lại conflict live và probe family availability là view chỉ daemon
+tính được — nằm dưới `gaps`. Các RPC mutation
+(activate/reconcile/deactivate/set-language/set-role-routing) vẫn là
+Human-authority và không được expose. Hai probe này retire khi host có
+`paseo plugin invoke` hoặc MCP `invoke_plugin_rpc`.
+
 ## Kiểm thử
 
 ```bash
