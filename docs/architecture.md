@@ -110,8 +110,10 @@ human or agent calls create_agent(profile/provider, prompt)
         │
         ▼
 agent.create before-hook (plugin) reads the binding, resolves the role
-from the slp-* provider id (or the slp_role feature marker), renders
-roleBundle() from the materialized candidate and writes
+from the slp-* provider id (or the slp_role feature marker), re-verifies
+the published candidate (cached once per candidate sha per process —
+transitively covers the gate bytes the launcher is about to exec),
+renders roleBundle() from the materialized candidate and writes
 config.systemPrompt — role bytes first, any pre-existing prompt appended
         │
         ▼

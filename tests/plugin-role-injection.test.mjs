@@ -13,6 +13,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 import { createRoleInjection } from '../plugin/server/role-injection.ts';
 import { desiredProviderEntries } from '../plugin/server/config-transaction.ts';
+import { createMaterializer } from '../plugin/server/materializer.ts';
+import { embeddedPayload } from '../plugin/server/generated/runtime-payload.ts';
+import { OperationConflict } from '../plugin/shared/contracts.ts';
 import { identity, install } from '../src/package.mjs';
 import { roleBundle } from '../src/role-bundle.mjs';
 
@@ -47,6 +50,7 @@ function fixtureCandidate(t) {
 
 const bindingFor = f => ({
   candidateSha256: f.sha,
+  payloadSha256: 'a'.repeat(64),
   runtimePath: f.candidate,
   nodePath: process.execPath,
   daemonHome: f.home,
@@ -85,6 +89,7 @@ function makeInjection(t, overrides = {}) {
     fixture: f,
     injection: createRoleInjection({
       readActiveBinding: () => binding,
+      verifyCandidate: async () => {},
       ...overrides.deps,
     }),
   };
@@ -171,6 +176,7 @@ test('agent.create: candidate import failure aborts; eviction allows a later ret
   let calls = 0;
   const injection = createRoleInjection({
     readActiveBinding: () => bindingFor(f),
+    verifyCandidate: async () => {},
     importModule: specifier => {
       calls += 1;
       if (calls === 1) return Promise.reject(new Error('staged import failure'));
@@ -188,6 +194,7 @@ test('agent.create: the imported module is cached per candidate sha', async t =>
   let calls = 0;
   const injection = createRoleInjection({
     readActiveBinding: () => bindingFor(f),
+    verifyCandidate: async () => {},
     importModule: specifier => {
       calls += 1;
       return import(specifier);
@@ -207,6 +214,94 @@ test('agent.create: pre-set systemPrompt is appended after the role bundle', asy
   assert.ok(out.config.systemPrompt.startsWith(expected), 'role authority leads');
   assert.ok(out.config.systemPrompt.endsWith('existing host instructions'));
   assert.ok(out.config.systemPrompt.length > expected.length);
+});
+
+// ---------------------------------------------------------------------------
+// agent.create — per-create candidate verification (O1)
+// ---------------------------------------------------------------------------
+
+test('agent.create: candidate verification runs once per candidate sha', async t => {
+  const f = fixtureCandidate(t);
+  let calls = 0;
+  const injection = createRoleInjection({
+    readActiveBinding: () => bindingFor(f),
+    verifyCandidate: async binding => {
+      calls += 1;
+      assert.equal(binding.candidateSha256, f.sha);
+    },
+  });
+  await injection.agentCreate(createReq('slp-codex-peer'));
+  await injection.agentCreate(createReq('slp-pi-lead'));
+  await injection.agentCreate(createReq('slp-claude-supervisor'));
+  assert.equal(calls, 1, 'one verification per candidate sha per process');
+});
+
+test('agent.create: verification failure aborts; eviction lets a repaired candidate retry', async t => {
+  const f = fixtureCandidate(t);
+  let calls = 0;
+  const injection = createRoleInjection({
+    readActiveBinding: () => bindingFor(f),
+    verifyCandidate: async () => {
+      calls += 1;
+      if (calls === 1) throw new Error('staged integrity failure');
+    },
+  });
+  await assert.rejects(injection.agentCreate(createReq('slp-pi-peer')), /staged integrity failure/);
+  const out = await injection.agentCreate(createReq('slp-pi-peer'));
+  assert.ok(out.config.systemPrompt.startsWith('SLP role=peer'), 'retry re-verifies and succeeds');
+  assert.equal(calls, 2, 'a failed verification is not cached');
+});
+
+test('agent.create: a tampered candidate file aborts through the real verifyPublished', async t => {
+  // A real materialized candidate (install() fixtures lack the embedded
+  // installed.json anchor verifyPublished requires), then tamper a byte.
+  const dir = tmp(t, 'roleinj-verify-');
+  const home = join(dir, 'home');
+  const stableRoot = join(home, 'slp-runtime');
+  mkdirSync(join(stableRoot, 'state'), { recursive: true });
+  const materializer = createMaterializer(embeddedPayload);
+  const published = await materializer.materialize(stableRoot, `op-${process.pid}`);
+  const binding = {
+    candidateSha256: published.candidateSha256,
+    payloadSha256: published.payloadSha256,
+    runtimePath: published.runtimePath,
+    nodePath: process.execPath,
+    daemonHome: home,
+  };
+  const injection = createRoleInjection({
+    readActiveBinding: () => binding,
+    verifyCandidate: b => materializer.verifyPublished(b.runtimePath, b.candidateSha256, b.payloadSha256),
+  });
+
+  const bundlePath = join(published.runtimePath, 'src', 'role-bundle.mjs');
+  const original = readFileSync(bundlePath);
+  writeFileSync(bundlePath, '// tampered\n' + original.toString('utf8'));
+  const error = await injection.agentCreate(createReq('slp-codex-lead')).then(
+    () => null,
+    e => e,
+  );
+  assert.ok(error instanceof OperationConflict, `expected OperationConflict, got ${error}`);
+  assert.equal(error.code, 'RUNTIME_INTEGRITY', error.message);
+
+  // Eviction: restore the bytes and the same sha verifies + renders again.
+  writeFileSync(bundlePath, original);
+  const out = await injection.agentCreate(createReq('slp-codex-lead'));
+  assert.ok(out.config.systemPrompt.startsWith('SLP role=lead'), 'repaired candidate verifies and renders');
+});
+
+test('session_open: grants are minted without touching candidate verification', async t => {
+  const f = fixtureCandidate(t);
+  let calls = 0;
+  const injection = createRoleInjection({
+    readActiveBinding: () => bindingFor(f),
+    verifyCandidate: async () => {
+      calls += 1;
+    },
+  });
+  for (const reason of ['create', 'resume', 'refresh', 'import']) {
+    injection.sessionOpen(openReq('slp-codex-peer', { reason }));
+  }
+  assert.equal(calls, 0, 'session_open is grant-only — it never loads candidate code');
 });
 
 // ---------------------------------------------------------------------------
@@ -404,7 +499,10 @@ test('thin aliases: every entry gets a single-element launcher argv0; hook env a
 
 test('parity: hook systemPrompt and devin wrapper inject the identical bundle for every role', async t => {
   const f = fixtureCandidate(t);
-  const injection = createRoleInjection({ readActiveBinding: () => bindingFor(f) });
+  const injection = createRoleInjection({
+    readActiveBinding: () => bindingFor(f),
+    verifyCandidate: async () => {},
+  });
   // The candidate's own role-bundle module, loaded the same way the devin
   // wrapper loads it (static import inside the candidate tree — here via
   // dynamic import of the materialized file, the hook's own mechanism).

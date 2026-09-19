@@ -349,9 +349,11 @@ export const Binding = z.object({
   runtimePath: AbsolutePath,
   launchSetSha256: Sha,
   launchManifestSha256: Sha,
-  // Legacy bindings record all twelve launchers; Phase 2 bindings record
-  // only the devin wrapper launchers (hook families run the sentinel gate
-  // straight from the candidate, no generated launcher). Both validate.
+  // Legacy bindings record all twelve shim launchers; Phase 2 bindings
+  // record all twelve launchers too — nine gate launchers plus the three
+  // devin shim launchers (the transitional devin-only layout also
+  // validates). The launch manifest's launcherFamilies/gateFamilies fields
+  // carry the per-file kind.
   launcherFiles: z.array(LauncherFile).min(1),
   node: z.object({ path: AbsolutePath, version: z.string().min(1) }).strict(),
   binaries: z.object({ codex: Binary, pi: Binary, devin: Binary, claude: Binary }).strict(),

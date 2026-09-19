@@ -19,9 +19,10 @@ import { createRoleInjection } from "./server/role-injection.ts";
 // the daemon compiler's Hermes interop eagerly copies export values before
 // module bodies run, so `export default const` evaluates to undefined.
 export default function contribute(server: Parameters<PluginServerContribution>[0]): ReturnType<PluginServerContribution> {
+  const materializer = createMaterializer(embeddedPayload);
   const manager: Manager = createManager({
     payload: embeddedPayload,
-    materializer: createMaterializer(embeddedPayload),
+    materializer,
     executables: createExecutableResolver(),
     launchers: createLauncherBuilder(),
   });
@@ -41,7 +42,15 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   // picked up without re-registering; failures propagate to the host, which
   // is what makes the managed path fail closed during a hook gap.
   const journal = createJournal();
-  const injection = createRoleInjection({ readActiveBinding: () => readActiveBinding(journal) });
+  const injection = createRoleInjection({
+    readActiveBinding: () => readActiveBinding(journal),
+    // O1: the create-hook re-verifies the published candidate (cached once
+    // per sha) before importing its role bundle — same verifyPublished the
+    // management plane uses; covers the gate transitively (see
+    // role-injection.ts header).
+    verifyCandidate: binding =>
+      materializer.verifyPublished(binding.runtimePath, binding.candidateSha256, binding.payloadSha256),
+  });
   const offAgentCreate = server.before("agent.create", injection.agentCreate);
   const offSessionOpen = server.before("agent.session_open", injection.sessionOpen);
   return () => {
@@ -64,6 +73,7 @@ function readActiveBinding(journal: ReturnType<typeof createJournal>) {
   const binding = receipt.binding;
   return {
     candidateSha256: binding.candidateSha256,
+    payloadSha256: binding.payloadSha256,
     runtimePath: binding.runtimePath,
     nodePath: binding.node.path,
     daemonHome: receipt.target.daemonHome,

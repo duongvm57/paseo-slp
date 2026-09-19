@@ -145,13 +145,18 @@ As built on `feat/slp-paseo-plugin`:
   - `agent.create` resolves the role from an owned
     `slp-(codex|pi|claude)-(supervisor|lead|peer)` provider id (or the
     `featureValues.slp_role` marker on an un-suffixed `slp-*` id), reads the
-    active binding from the journal receipt, dynamically imports the
-    materialized candidate's `src/role-bundle.mjs` (cached per candidate
-    sha), and writes `config.systemPrompt` — role bundle first, a
-    pre-existing prompt appended after it. Foreign providers and
-    `slp-devin-*` pass through untouched; an `slp-*` provider whose role,
-    binding or candidate cannot be resolved aborts the create (fail-closed).
-    `config.provider` is never rewritten.
+    active binding from the journal receipt, re-verifies the published
+    candidate via the materializer's `verifyPublished` (cached once per
+    candidate sha per plugin process; failures evict so a repaired
+    candidate re-verifies), then dynamically imports the materialized
+    candidate's `src/role-bundle.mjs` (cached per candidate sha) and writes
+    `config.systemPrompt` — role bundle first, a pre-existing prompt
+    appended after it. Foreign providers and `slp-devin-*` pass through
+    untouched; an `slp-*` provider whose role, binding or candidate cannot
+    be resolved — or whose candidate fails verification — aborts the
+    create (fail-closed). `config.provider` is never rewritten. The
+    per-create verification also covers `bin/slp-gate.mjs` transitively:
+    the gate launcher execs it after this hook in the same launch flow.
   - `agent.session_open` overlays a non-empty per-open
     `SLP_SESSION_OPEN_GRANT` onto the provider env for hook-family ids —
     every open reason (create/resume/refresh/import).
@@ -206,6 +211,12 @@ As built on `feat/slp-paseo-plugin`:
   gap-spawned seats (e.g. marking creates with a durable role marker the
   gate or reconcile can check on resume).
 - Drift/receipt/journal entries record which mechanism each entry uses.
+- Gate self-verification: the create-hook's per-sha `verifyPublished` covers
+  `bin/slp-gate.mjs` transitively on the normal create→open path, but a
+  launch that reaches the gate without a preceding `agent.create` hook (a
+  spawn path outside the hook flow) runs unverified bytes. Embedding a
+  sha256 check in the shell gate launchers was considered and deferred —
+  per-spawn cost plus `sha256sum` availability on minimal environments.
 
 ## 8. Explicit non-changes
 
