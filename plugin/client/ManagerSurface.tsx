@@ -20,9 +20,9 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { activate, catalog, deactivate, reconcile, status, localTarget, setLanguage, getRoleRouting, setRoleRouting } from "../shared/contracts.ts";
+import { activate, catalog, deactivate, reconcile, status, localTarget, setLanguage, getRoleRouting, setRoleRouting, getJev, setJev, setJevKey, testJev } from "../shared/contracts.ts";
 import { FAMILY_IDS, FAMILY_LABEL, FAMILY_PICKER_ORDER } from "../shared/families.ts";
-import type { CatalogOptionValue, CatalogResult, FamilyName, RoleRoutingValue, StartResult, StatusResult, TargetValue } from "../shared/contracts.ts";
+import type { CatalogOptionValue, CatalogResult, FamilyName, JevViewValue, RoleRoutingValue, StartResult, StatusResult, TargetValue } from "../shared/contracts.ts";
 import {
   DISABLE_REMOVE_NOTICE,
   EXCLUSIVE_WINDOW_NOTICE,
@@ -214,7 +214,7 @@ function ChipSelect<T extends string>({ colors, value, options, onChange, disabl
   );
 }
 
-function Field({ colors, label, hint, value, onChangeText, placeholder, disabled }: {
+function Field({ colors, label, hint, value, onChangeText, placeholder, disabled, secure }: {
   colors: Colors;
   label: string;
   hint?: string;
@@ -222,6 +222,7 @@ function Field({ colors, label, hint, value, onChangeText, placeholder, disabled
   onChangeText(text: string): void;
   placeholder?: string;
   disabled?: boolean;
+  secure?: boolean;
 }) {
   return (
     <View style={styles.field}>
@@ -234,6 +235,7 @@ function Field({ colors, label, hint, value, onChangeText, placeholder, disabled
         editable={!disabled}
         autoCapitalize="none"
         autoCorrect={false}
+        secureTextEntry={secure === true}
         style={[
           styles.input,
           { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.surface0 },
@@ -462,6 +464,10 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   const callSetLanguage = useRpc(setLanguage);
   const callGetRoleRouting = useRpc(getRoleRouting);
   const callSetRoleRouting = useRpc(setRoleRouting);
+  const callGetJev = useRpc(getJev);
+  const callSetJev = useRpc(setJev);
+  const callSetJevKey = useRpc(setJevKey);
+  const callTestJev = useRpc(testJev);
 
   const [detectedHome, setDetectedHome] = useState<string | null>(null);
   const [homeOverride, setHomeOverride] = useState("");
@@ -476,7 +482,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   const [catalogLoadingFor, setCatalogLoadingFor] = useState<FamilyName | null>(null);
   // Feature definitions depend on the selected model (the host requires a
   // provider/model draft) — cached per family|model|modeId key.
-  const [featureSets, setFeatureSets] = useState<Record<string, CatalogResult["features"]>>({});
+  const [featureSets, setFeatureSets] = useState<Record<string, { defs: CatalogResult["features"]; error: string | null }>>({});
   const [featuresLoadingFor, setFeaturesLoadingFor] = useState<string | null>(null);
   const [reconcileAction, setReconcileAction] = useState<ReconcileAction>("inspect");
   const [interruptedId, setInterruptedId] = useState("");
@@ -514,6 +520,19 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   // `routingSaved` shows a one-line confirmation after a bound save until
   // the next edit — the bound case otherwise gives no visible feedback.
   const [routingSaved, setRoutingSaved] = useState(false);
+  // Jev (OpenRouter): per-daemon config + key — the key value lives only in
+  // jevKeyInput until Save, is cleared right after, and status reports hasKey
+  // only. Provider fields are pinned v1 values, shown read-only.
+  const [jevView, setJevView] = useState<JevViewValue | null>(null);
+  const [jevEnabledOn, setJevEnabledOn] = useState(false);
+  const [jevRoutingOn, setJevRoutingOn] = useState(false);
+  const [jevDirty, setJevDirty] = useState(false);
+  const [jevBusy, setJevBusy] = useState(false);
+  const [jevSaved, setJevSaved] = useState(false);
+  const [jevKeyInput, setJevKeyInput] = useState("");
+  const [jevKeyBusy, setJevKeyBusy] = useState(false);
+  const [jevTest, setJevTest] = useState<{ ok: boolean; detail: string | null } | null>(null);
+  const [jevTestBusy, setJevTestBusy] = useState(false);
   const [store] = useState(createTargetViews);
   const [view, setView] = useState<TargetView>(emptyTargetView);
 
@@ -603,6 +622,85 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- key captures target
   }, [key]);
+
+  // Fetch the Jev view once per target — the config is plugin-owned and
+  // independent of any binding, so it loads with the first status.
+  const jevLoadedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!target || !key || jevLoadedFor.current === key) return;
+    jevLoadedFor.current = key;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const result = await callGetJev({ schemaVersion: 1, target });
+        if (!cancelled) setJevView(result.jev);
+      } catch {
+        if (!cancelled) setJevView(null);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- key captures target
+  }, [key]);
+
+  // Prefill the toggles from the stored config until the Human edits —
+  // same tracking discipline as the language form.
+  useEffect(() => {
+    if (jevDirty) return;
+    setJevEnabledOn(jevView?.enabled === true);
+    setJevRoutingOn(jevView?.capabilities?.routing === true);
+  }, [jevView, jevDirty]);
+
+  // Provider is pinned for v1 — the card shows it read-only; only toggles and
+  // the key are editable. Saving writes the whole config document.
+  const JEV_PINNED_PROVIDER = { kind: "openrouter", baseUrl: "https://openrouter.ai", model: "typesafe/jev-1.13" } as const;
+  const saveJev = async () => {
+    if (!target) return;
+    setJevBusy(true);
+    try {
+      const result = await callSetJev({
+        schemaVersion: 1,
+        target,
+        jev: { schemaVersion: 1, enabled: jevEnabledOn, capabilities: { routing: jevRoutingOn }, provider: JEV_PINNED_PROVIDER },
+      });
+      setJevView(result.jev);
+      setJevDirty(false);
+      setJevSaved(true);
+    } catch (error) {
+      update({ lastError: errorMessage(error) }, target);
+    } finally {
+      setJevBusy(false);
+    }
+  };
+
+  const saveJevKey = async (key: string | null) => {
+    if (!target) return;
+    setJevKeyBusy(true);
+    try {
+      await callSetJevKey({ schemaVersion: 1, target, key });
+      setJevKeyInput("");
+      setJevTest(null);
+      const result = await callGetJev({ schemaVersion: 1, target });
+      setJevView(result.jev);
+    } catch (error) {
+      update({ lastError: errorMessage(error) }, target);
+    } finally {
+      setJevKeyBusy(false);
+    }
+  };
+
+  const runJevTest = async () => {
+    if (!target) return;
+    setJevTestBusy(true);
+    setJevTest(null);
+    try {
+      const result = await callTestJev({ schemaVersion: 1, target });
+      setJevTest({ ok: result.ok, detail: result.detail });
+    } catch (error) {
+      setJevTest({ ok: false, detail: errorMessage(error) });
+    } finally {
+      setJevTestBusy(false);
+    }
+  };
 
   // Prefill the routing form from the stored routing until the Human edits —
   // every field falls back to the live profile's value, then the defaults.
@@ -779,35 +877,59 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     .map(role => featureKeyFor(role))
     .filter((key): key is string => key !== null);
   const neededFeaturesKey = neededFeatureKeys.join(",");
+  // A failed feature-defs fetch keeps the raw-JSON fallback but records the
+  // error — silently caching [] made a dropped mobile RPC look exactly like
+  // "provider declares no features". One automatic retry absorbs transient
+  // drops; only a persistent failure degrades to the JSON field + Retry.
+  const fetchFeatureSet = async (key: string) => {
+    const [family, model, modeId] = key.split("|") as [FamilyName, string, string];
+    const request = {
+      schemaVersion: 1 as const, family, model,
+      ...(modeId ? { modeId } : {}),
+      ...(target ? { cwd: target.daemonHome } : {}),
+    };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const result = await callCatalog(request);
+        setFeatureSets(current => ({ ...current, [key]: { defs: result.features, error: result.error } }));
+        return;
+      } catch (error) {
+        if (attempt === 1) {
+          setFeatureSets(current => ({ ...current, [key]: { defs: [], error: errorMessage(error) } }));
+        } else {
+          await new Promise(resolve => setTimeout(resolve, 1500));
+        }
+      }
+    }
+  };
   useEffect(() => {
     const missing = neededFeaturesKey.split(",").filter(k => k !== "" && featureSets[k] === undefined);
     if (missing.length === 0) return;
     let cancelled = false;
     void (async () => {
       for (const key of missing) {
-        const [family, model, modeId] = key.split("|") as [FamilyName, string, string];
         setFeaturesLoadingFor(key);
-        try {
-          const result = await callCatalog({
-            schemaVersion: 1, family, model,
-            ...(modeId ? { modeId } : {}),
-            ...(target ? { cwd: target.daemonHome } : {}),
-          });
-          if (!cancelled) setFeatureSets(current => ({ ...current, [key]: result.features }));
-        } catch {
-          if (!cancelled) setFeatureSets(current => ({ ...current, [key]: [] }));
-        }
+        await fetchFeatureSet(key);
+        if (cancelled) return;
       }
       if (!cancelled) setFeaturesLoadingFor(null);
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the needed feature set
   }, [neededFeaturesKey]);
+  const retryFeatureSet = async (key: string) => {
+    setFeaturesLoadingFor(key);
+    await fetchFeatureSet(key);
+    setFeaturesLoadingFor(null);
+  };
   const featureDefsFor = (role: "supervisor" | "lead") => {
     const key = featureKeyFor(role);
+    const set = key ? featureSets[key] : undefined;
     return {
-      defs: key ? (featureSets[key] ?? []) : [],
-      loading: key !== null && featuresLoadingFor === key && featureSets[key] === undefined,
+      key,
+      defs: set?.defs ?? [],
+      error: set?.error ?? null,
+      loading: key !== null && featuresLoadingFor === key,
     };
   };
 
@@ -1122,6 +1244,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
             const form = routingForm[role];
             const roleCatalog = catalogs[form.family];
             const thinking = thinkingOptionsFor(roleCatalog, form.model);
+            const featureDefs = featureDefsFor(role);
             const disabled = !target || routingBusy;
             return (
               <View key={role} style={[styles.roleBox, { borderColor: colors.border }]}>
@@ -1201,11 +1324,11 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                     disabled={disabled}
                   />
                 )}
-                {featureDefsFor(role).loading ? (
+                {featureDefs.loading ? (
                   <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Loading features…</Text>
                 ) : null}
-                {featureDefsFor(role).defs.length > 0 ? (
-                  featureDefsFor(role).defs.map(def => (
+                {featureDefs.defs.length > 0 ? (
+                  featureDefs.defs.map(def => (
                     def.type === "toggle" ? (
                       <SwitchRow
                         key={def.id}
@@ -1236,15 +1359,32 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                     )
                   ))
                 ) : (
-                  <Field
-                    colors={colors}
-                    label="Feature values (JSON)"
-                    hint='Provider feature flags — e.g. {"auto_accept": true}'
-                    value={form.features}
-                    onChangeText={setRoutingField(role, "features")}
-                    placeholder="{}"
-                    disabled={disabled}
-                  />
+                  <>
+                    <Field
+                      colors={colors}
+                      label="Feature values (JSON)"
+                      hint='Provider feature flags — e.g. {"auto_accept": true}'
+                      value={form.features}
+                      onChangeText={setRoutingField(role, "features")}
+                      placeholder="{}"
+                      disabled={disabled}
+                    />
+                    {featureDefs.error ? (
+                      <>
+                        <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
+                          Feature controls unavailable: {featureDefs.error} — edit JSON or retry.
+                        </Text>
+                        <Button
+                          colors={colors}
+                          label="Retry feature controls"
+                          onPress={() => {
+                            if (featureDefs.key) void retryFeatureSet(featureDefs.key);
+                          }}
+                          disabled={disabled || featureDefs.loading}
+                        />
+                      </>
+                    ) : null}
+                  </>
                 )}
                 {thinking === null ? (
                   // No catalog / no picked model / model not listed — the
@@ -1377,6 +1517,114 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                 onPress={() => void applyLanguage(languageValue.trim())}
               />
             </>
+          ) : null}
+        </Card>
+      ) : null}
+
+      {target ? (
+        // Jev config is per-daemon-home — independent of activation state, so
+        // the card shows whenever a target resolves (unlike the binding-bound
+        // cards above). Provider fields are pinned read-only for v1; toggles
+        // save through one set-jev call and take effect at the NEXT
+        // preparation — a running session is never mutated. The key is
+        // write-only: the card reports hasKey, never the value.
+        <Card
+          colors={colors}
+          title="Jev (OpenRouter)"
+          subtitle="Bounded routing decisions — a Lead runs `slp route-decide` so Jev picks the pool seat from the eligible set, and prepare verifies the receipt offline. All toggles default off; an outage fails closed and disabling restores Lead-judgment routing."
+        >
+          <View style={styles.kvRow}>
+            <Text style={[styles.kvLabel, { color: colors.foregroundMuted }]}>Provider</Text>
+            <Text style={[styles.kvValue, { color: colors.foreground }]}>openrouter · typesafe/jev-1.13</Text>
+          </View>
+          <View style={styles.kvRow}>
+            <Text style={[styles.kvLabel, { color: colors.foregroundMuted }]}>Endpoint</Text>
+            <Text style={[styles.kvValue, { color: colors.foreground }]}>https://openrouter.ai/api/alpha/decisions</Text>
+          </View>
+          <View style={styles.kvRow}>
+            <Text style={[styles.kvLabel, { color: colors.foregroundMuted }]}>Status</Text>
+            <Text style={[styles.kvValue, { color: jevView?.error ? colors.statusDanger : colors.foreground }]}>
+              {jevView === null
+                ? "loading…"
+                : jevView.error
+                  ? `config error: ${jevView.error}`
+                  : jevView.configured
+                    ? jevView.enabled ? "configured · enabled" : "configured · disabled"
+                    : "not configured"}
+            </Text>
+          </View>
+          <View style={styles.kvRow}>
+            <Text style={[styles.kvLabel, { color: colors.foregroundMuted }]}>Key</Text>
+            <Text style={[styles.kvValue, { color: jevView?.keyPermissionsOk === false ? colors.statusWarning : colors.foreground }]}>
+              {jevView === null
+                ? "…"
+                : !jevView.hasKey
+                  ? "not stored"
+                  : jevView.keyPermissionsOk === false
+                    ? "stored — file permissions too open (chmod 600)"
+                    : "stored"}
+            </Text>
+          </View>
+          <SwitchRow
+            colors={colors}
+            checked={jevEnabledOn}
+            disabled={!target || jevBusy}
+            onToggle={next => { setJevDirty(true); setJevSaved(false); setJevEnabledOn(next); }}
+            title="Enable Jev"
+            hint="Master toggle — off keeps every capability inert without deleting the stored key."
+          />
+          <SwitchRow
+            colors={colors}
+            checked={jevRoutingOn}
+            disabled={!target || jevBusy || !jevEnabledOn}
+            onToggle={next => { setJevDirty(true); setJevSaved(false); setJevRoutingOn(next); }}
+            title="Routing decisions"
+            hint="When armed, prepare requires a Jev decision receipt for catalog routing (run `slp route-decide`); Lead judgment alone no longer suffices."
+          />
+          {jevSaved && !jevDirty ? (
+            <Text style={[styles.mutedSmall, { color: colors.statusSuccess }]}>Saved.</Text>
+          ) : null}
+          <Button
+            colors={colors}
+            label={jevBusy ? "Saving…" : "Apply Jev settings"}
+            disabled={!target || jevBusy || !jevDirty}
+            onPress={() => void saveJev()}
+          />
+          <View style={[styles.divider, { borderTopColor: colors.border }]} />
+          <Field
+            colors={colors}
+            label="OpenRouter API key"
+            hint="Stored at slp-runtime/state/jev-openrouter.key (0600) — never shown back; enter a new key to replace it"
+            value={jevKeyInput}
+            onChangeText={setJevKeyInput}
+            placeholder="sk-or-v1-…"
+            disabled={!target || jevKeyBusy}
+            secure
+          />
+          <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+            <Button
+              colors={colors}
+              label={jevKeyBusy ? "Working…" : "Save key"}
+              disabled={!target || jevKeyBusy || jevKeyInput.trim() === ""}
+              onPress={() => void saveJevKey(jevKeyInput.trim())}
+            />
+            <Button
+              colors={colors}
+              label="Remove key"
+              disabled={!target || jevKeyBusy || jevView?.hasKey !== true}
+              onPress={() => void saveJevKey(null)}
+            />
+            <Button
+              colors={colors}
+              label={jevTestBusy ? "Testing…" : "Test connection"}
+              disabled={!target || jevTestBusy || jevView?.hasKey !== true}
+              onPress={() => void runJevTest()}
+            />
+          </View>
+          {jevTest ? (
+            <Text style={[styles.mutedSmall, { color: jevTest.ok ? colors.statusSuccess : colors.statusDanger }]}>
+              {jevTest.ok ? "Connection OK" : "Connection failed"}{jevTest.detail ? ` — ${jevTest.detail}` : ""}
+            </Text>
           ) : null}
         </Card>
       ) : null}

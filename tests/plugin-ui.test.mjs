@@ -708,13 +708,16 @@ test('the routing UI is one card with one save and one divergence warning', () =
     source.includes('const family = routingForm[role].family'),
     'feature defs fetch keys on the routing form',
   );
-  assert.equal(occurrences(source, 'featureDefsFor(role)'), 3, 'feature controls rendered');
+  assert.equal(occurrences(source, 'featureDefsFor(role)'), 1, 'feature defs resolved once per role');
   assert.equal(
     occurrences(source, 'featureDefsFor("'),
     2,
     'the shared build merges the same defs for both roles',
   );
   assert.equal(occurrences(source, '"Feature values (JSON)"'), 1, 'JSON fallback field present');
+  assert.ok(source.includes('featureDefs.error'), 'feature fetch error surfaced in the fallback');
+  assert.ok(source.includes('Retry feature controls'), 'retry affordance for failed feature fetch');
+  assert.ok(source.includes('errorMessage(error)'), 'fetch rejection recorded, not swallowed');
 
   // Thinking options resolve per picked model from the catalog (§9
   // corrected finding): a ChipSelect when the model declares options (a
