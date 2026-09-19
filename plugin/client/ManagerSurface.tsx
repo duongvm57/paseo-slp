@@ -139,6 +139,40 @@ function CheckRow({ colors, checked, onToggle, title, hint, disabled }: {
   );
 }
 
+function SwitchRow({ colors, checked, onToggle, title, hint, disabled }: {
+  colors: Colors;
+  checked: boolean;
+  onToggle(next: boolean): void;
+  title: string;
+  hint?: string;
+  disabled?: boolean;
+}) {
+  return (
+    <Pressable
+      onPress={() => onToggle(!checked)}
+      disabled={disabled}
+      accessibilityRole="switch"
+      accessibilityState={{ checked, disabled }}
+      style={({ pressed }) => [styles.checkRow, disabled && { opacity: 0.45 }, pressed && !disabled && { opacity: 0.75 }]}
+    >
+      <View style={[
+        styles.switchTrack,
+        { backgroundColor: checked ? colors.accent : colors.border },
+      ]}>
+        <View style={[
+          styles.switchThumb,
+          { backgroundColor: checked ? colors.accentForeground : colors.foregroundMuted },
+          checked ? styles.switchThumbOn : styles.switchThumbOff,
+        ]} />
+      </View>
+      <View style={styles.checkText}>
+        <Text style={[styles.checkTitle, { color: colors.foreground }]}>{title}</Text>
+        {hint ? <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>{hint}</Text> : null}
+      </View>
+    </Pressable>
+  );
+}
+
 function ChipSelect<T extends string>({ colors, value, options, onChange, disabled }: {
   colors: Colors;
   value: T;
@@ -341,6 +375,10 @@ const styles = StyleSheet.create({
   buttonLabel: { fontSize: 14, fontWeight: "600" },
   checkRow: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
   checkbox: { width: 20, height: 20, borderWidth: 1.5, borderRadius: 5, alignItems: "center", justifyContent: "center", marginTop: 1 },
+  switchTrack: { width: 38, height: 22, borderRadius: 11, justifyContent: "center", paddingHorizontal: 3, marginTop: 1 },
+  switchThumb: { width: 16, height: 16, borderRadius: 8 },
+  switchThumbOn: { alignSelf: "flex-end" },
+  switchThumbOff: { alignSelf: "flex-start" },
   checkmark: { fontSize: 13, fontWeight: "700" },
   checkText: { flex: 1, gap: 2 },
   checkTitle: { fontSize: 14, fontWeight: "500" },
@@ -1103,7 +1141,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
           title="Communication language"
           subtitle="One line injected into every managed session at entry — unset keeps each model's default."
         >
-          <CheckRow
+          <SwitchRow
             colors={colors}
             checked={languageOn}
             disabled={!target || languageBusy}
@@ -1124,13 +1162,13 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
               <Field
                 colors={colors}
                 label="Language"
-                hint="As it should appear in the instruction, e.g. Vietnamese"
+                hint="As it should appear in the instruction, e.g. English"
                 value={languageValue}
                 onChangeText={text => {
                   setLanguageDirty(true);
                   setLanguageValue(text);
                 }}
-                placeholder="Vietnamese"
+                placeholder="English"
                 disabled={languageBusy}
               />
               <Button
