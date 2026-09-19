@@ -29,8 +29,10 @@ recipient, your paseo.parent-agent-id label must match it — a real mismatch
 returns BLOCKED. A label the host does not expose is a visibility gap to
 record and carry with caution, not a hard block. An assignment may instead
 name a report recipient distinct from your parent (observe-existing): that
-pins a route, not a parentage claim. Never a guessed recipient or an assumed
-parent.
+pins a route, not a parentage claim. An assignment that names no agent
+recipient asserts no inbound route to verify — report to its sender; one that
+implies an agent recipient it cannot identify is itself the gap. Never a
+guessed recipient or an assumed parent.
 
 Human stop overrides old objectives and callbacks: stop further spawn/follow-up
 and work immediately. Supervisors/Leads cancel only the task agents they own when

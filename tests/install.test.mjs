@@ -186,8 +186,9 @@ test('installed adapter injects every role over stdio while preserving host prom
     // The inbound-route self-check rides common.md — a self-check, not formation
     // doctrine — so it reaches every role including Peer.
     assert.match(instruction, /paseo\.parent-agent-id label must match/);
-    assert.match(instruction, /distinct from your parent/);
+    assert.match(instruction, /distinct from your\s+parent/);
     assert.match(instruction, /not a hard block/);
+    assert.match(instruction, /names no agent\s+recipient/);
     assert.equal(/standalone session never makes\s+it your child/.test(instruction), role === 'supervisor');
     assert.equal(/does not adopt it/.test(instruction), role === 'lead');
     assert.equal(execFileSync(process.execPath, [argv[0], role, '--version'], { env, encoding: 'utf8' }).trim(), 'probe-ok');

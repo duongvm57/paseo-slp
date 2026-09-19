@@ -174,8 +174,9 @@ test('agent.create: injected bundle carries the review-gate invariant and Lead t
       // The inbound-route self-check is a Peer-visible self-check (common.md),
       // not formation doctrine.
       assert.match(prompt, /paseo\.parent-agent-id label must match/, id);
-      assert.match(prompt, /distinct from your parent/, `${id} keeps the observe-existing carve-out`);
+      assert.match(prompt, /distinct from your\s+parent/, `${id} keeps the observe-existing carve-out`);
       assert.match(prompt, /not a hard block/, id);
+      assert.match(prompt, /names no agent\s+recipient/, id);
       continue;
     }
     assert.match(prompt, /does not license merging\s+the axes into one seat/, id);
@@ -187,8 +188,9 @@ test('agent.create: injected bundle carries the review-gate invariant and Lead t
     assert.match(prompt, /not filesystem\s+isolation/, id);
     assert.match(prompt, /send_agent_prompt to a\s+parentless or differently parented/, id);
     assert.match(prompt, /second workspace\s+for the same team with no isolation reason/, id);
-    assert.match(prompt, /distinct from your parent/, `${id} keeps the observe-existing carve-out`);
+    assert.match(prompt, /distinct from your\s+parent/, `${id} keeps the observe-existing carve-out`);
     assert.match(prompt, /not a hard block/, id);
+    assert.match(prompt, /names no agent\s+recipient/, id);
     assert.equal(/standalone session never makes\s+it your child/.test(prompt), role === 'supervisor', id);
     assert.equal(/does not adopt it/.test(prompt), role === 'lead', id);
   }
