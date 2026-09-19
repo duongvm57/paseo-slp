@@ -526,8 +526,20 @@ non-ignored paths, contents, symlinks, permission modes and deleted markers.
 An untracked directory that is the root of a nested Git repo is snapshotted
 recursively and recorded under `nested` (each sub-repo gets its own `{path,
 head, sha256, files}` and may carry its own `nested`, all counted in the
-overall sha256). Staged submodule gitlinks (mode 160000) and listed
-directories that are not repos remain unsupported.
+overall sha256). Listed directories that are not repos remain unsupported.
+
+An index gitlink (submodule entry, mode 160000) snapshots as
+`{path, kind:"gitlink", indexOid, headOid, state}` — pointer plus observed
+state, never a descent into submodule content. `indexOid` is the stage-0
+index OID: the one staging-intent exception, because for a gitlink the index
+entry itself is the identity object (no working-tree bytes represent the
+pointer); regular files still hash worktree bytes only. A conflicted index
+(stages 1–3) records `indexOid:null` and `state:"conflicted"` rather than
+picking a stage. `headOid` is the submodule's own HEAD resolved read-only;
+`state` is `missing`, `uninitialized`, `clean`, `dirty` or `conflicted`. Any
+non-clean state adds the path to top-level `incomplete` — that submodule scope
+is unproven content: `prepare-handoff` carries the list into the handoff
+packet and tells the new seat not to claim full-candidate coverage for it.
 
 ### `materialize`
 

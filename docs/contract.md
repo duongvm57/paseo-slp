@@ -33,7 +33,7 @@ Local installation/transport checks do not constitute workflow acceptance.
 | src/spawn-kit.mjs | Package-owned approximation of the Paseo MCP tool surface per role (orchestrating vs peer), emitted in prepare plans so seats skip live schema re-derivation; marked approximate pending live `mcp_list_tools` verification. |
 | src/monitor.mjs | On-demand signal scan over daemon-owned agent state plus each declared worktree's git status; emits `{agentId, kind, evidence, observedAt}` candidates (attention, follow-up-round, idle-dirty, scope-drift, test-mirror, file-churn, tool-mix, correction-cadence) only for new fingerprints when a stateFile checkpoint is supplied — that checkpoint is the only write. Never a verdict, daemon or rendered-log parse; broken cwd becomes an evidence gap. An opt-in `devinSessionsDb` request field probes the devin CLI sessions.db read-only for devin-family agents (joined by `persistence.nativeHandle` = `sessions.id`; a missing or unmatched handle is a gap — never a cwd guess) to derive tool-mix and correction-cadence candidates; every failure is an evidence gap, not a crash. |
 | src/notebook.mjs | Read-only locator for a repository's active governance notebook: resolves the repository's git common dir — the property linking a worktree back to its repository — then lists Supervisor agents (provider containing `supervisor`, or a Supervisor-titled state file) whose `cwd` shares it. Output is candidates only, sorted by lastActivityAt, each with notebook path and `notebookExists`; broken agent cwds become gaps. Never copies or mutates notebook content, and picks no authoritative candidate — governance stays per-checkout. |
-| src/package.mjs | Package identity, exclusive staging, integrity checks and stable Git work snapshot; untracked nested Git work-tree roots are snapshotted recursively under `nested`, and sub-repos can carry their own `nested`. |
+| src/package.mjs | Package identity, exclusive staging, integrity checks and stable Git work snapshot; untracked nested Git work-tree roots are snapshotted recursively under `nested`, sub-repos can carry their own `nested`, and index gitlinks record `{path, kind:"gitlink", indexOid, headOid, state}` with non-clean states listed in top-level `incomplete`. |
 | bin/slp.mjs | Install/upgrade/preview, verify/uninstall, init, materialize, routes, prepare/handoff, inventory, agents, monitor, notebook, identity, snapshot and instructions (raw session-entry bundle bytes on stdout, provenance on stderr) entrypoints. |
 | skills/paseo-slp-e2e/SKILL.md | Single-session full-suite execution procedure; requires the source checkout and authorized Paseo actors. |
 | e2e/evidence.mjs | One contract per evidence kind: what may enter the ledger and what discharges the kind's requirement at seal. |
@@ -247,9 +247,18 @@ outputs, staging intent, external artifacts and processes; relevant external
 proof must be recorded separately. An untracked directory that is itself a Git
 work-tree root is snapshotted recursively and recorded under `nested` with its
 own HEAD/sha256/files (a sub-repo can itself carry `nested`); the top-level
-sha256 covers nested content. Staged
-submodule gitlinks and listed directories that are not repositories remain
-unsupported. Before/after
+sha256 covers nested content. An index gitlink (mode 160000) records
+`{path, kind:"gitlink", indexOid, headOid, state}`: indexOid is the stage-0
+pointer — the single staging-intent exception, because a gitlink's index entry
+is itself the identity object and no working-tree bytes represent it; a
+conflicted index (stages 1–3) records `indexOid:null` and `state:"conflicted"`
+rather than picking a stage. headOid is the submodule's own HEAD, resolved
+read-only (never fetch/init/update); state is `missing` (no directory on disk),
+`uninitialized` (no resolvable HEAD), `clean` (HEAD resolves, empty porcelain),
+`dirty` or `conflicted`. Any non-clean state lists the path in top-level
+`incomplete` — that submodule scope is unproven content, so handoff packets
+record it as an evidence gap instead of claiming full-candidate coverage.
+Listed directories that are not repositories remain unsupported. Before/after
 snapshots detect drift while Peer is paused, not transient or malicious writes.
 
 Peer quota fallback is configured by catalog quotaFallback.enabled and optionIds.

@@ -498,8 +498,20 @@ tracked/untracked không bị ignore, nội dung, symlink, permission mode và
 deleted marker. Thư mục untracked là root của một repo Git lồng nhau được
 snapshot đệ quy và ghi dưới `nested` (mỗi sub-repo có `{path, head, sha256,
 files}` riêng và có thể mang `nested` của chính nó, tính vào sha256 tổng).
-Gitlink submodule đã stage (mode 160000) và thư mục được liệt kê mà không
-phải repo vẫn không được hỗ trợ.
+Thư mục được liệt kê mà không phải repo vẫn không được hỗ trợ.
+
+Gitlink trong index (entry submodule, mode 160000) được snapshot dạng
+`{path, kind:"gitlink", indexOid, headOid, state}` — pointer cộng trạng thái
+quan sát được, không bao giờ đi vào nội dung submodule. `indexOid` là OID
+stage-0 trong index: ngoại lệ staging-intent duy nhất, vì với gitlink chính
+entry index là identity object (không có worktree bytes nào biểu diễn
+pointer); file thường vẫn hash worktree bytes. Index conflict (stage 1–3)
+ghi `indexOid:null` và `state:"conflicted"` thay vì chọn đại một stage.
+`headOid` là HEAD riêng của submodule, resolve read-only; `state` ∈
+`missing`, `uninitialized`, `clean`, `dirty`, `conflicted`. Mọi state khác
+`clean` đưa path vào `incomplete` ở top-level — phạm vi submodule đó là nội
+dung chưa chứng minh: `prepare-handoff` đưa danh sách này vào handoff packet
+và báo seat mới không được claim full-candidate coverage cho phạm vi đó.
 
 ### `materialize`
 
