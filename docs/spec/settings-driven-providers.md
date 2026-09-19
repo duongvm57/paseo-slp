@@ -200,8 +200,20 @@ As built on `feat/slp-paseo-plugin`:
 - Byte-parity test between hook-rendered and wrapper-rendered bundles
   across all twelve owned ids (tests/plugin-role-injection.test.mjs).
 - Devin wrapper path untouched.
-- Live-daemon smoke remains pending — unit/parity coverage plus the Phase 0
-  live evidence stand in per the assignment.
+- Live-daemon smoke ran 2026-09-19 (candidate `97a179eb`, commit `390820b`):
+  it immediately caught the capability-probe refusal described above —
+  fixed the same day. Verified live after the fix: codex seat `af398549`
+  spawned through `slp-codex-peer` and echoed `SLP role=peer` (agent.create
+  hook injection reached a real seat); `PASEO_AGENT_ID` in the provider
+  process env proves the grant path, not passthrough; the grant itself is
+  stripped before exec. Plugin disabled → session spawn refused with
+  "managed session launched without live SLP hook grant" — fail-closed
+  holds on a real hook gap. Settings-driven generation verified live:
+  `{supervisor: pi, lead: devin}` routing → one re-activation → six
+  entries (chosen combos + four peers), profiles repointed, non-chosen
+  combos removed; restored to the devin pair cleanly. Pi/claude seats not
+  live-spawned (same hook/gate path; their launchContext.env overlay is
+  verified in daemon source); resume/refresh opens not exercised.
 
 ## 7. Phase 3 — mixed-artifact operations
 
