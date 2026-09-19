@@ -1255,8 +1255,8 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
         // configure; a separate card would orphan one line of disclosure.
         <Card
           colors={colors}
-          title="Role routing"
-          subtitle="Which managed provider each role's saved profile binds to — applied at the next activation, never on save."
+          title="Role providers"
+          subtitle="Which managed provider each role's profile binds to — applied at the next activation."
         >
           {(["supervisor", "lead"] as const).map(role => {
             const form = routingForm[role];

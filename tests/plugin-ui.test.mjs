@@ -469,13 +469,17 @@ test('the routing UI is one card with one save and one divergence warning', () =
   const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
   const bundle = clientBundle();
 
-  // One consolidated "Role routing" card holds both role pickers; the old
-  // per-role card titles and the separate peer card are gone.
-  assert.equal(occurrences(source, '"Role routing"'), 1, 'exactly one Role routing card title');
+  // One consolidated "Role providers" card holds both role pickers; the old
+  // per-role card titles and the separate peer card are gone. The "routing"
+  // metaphor is retired from the card title only — the stored artifact keeps
+  // its role-routing file/RPC names.
+  assert.equal(occurrences(source, '"Role providers"'), 1, 'exactly one Role providers card title');
+  assert.equal(occurrences(source, '"Role routing"'), 0);
   assert.equal(occurrences(source, '"Supervisor routing"'), 0);
   assert.equal(occurrences(source, '"Lead routing"'), 0);
   assert.equal(occurrences(source, '"Peer routing"'), 0);
-  assert.ok(bundle.includes('Role routing'));
+  assert.ok(bundle.includes('Role providers'));
+  assert.ok(!bundle.includes('Role routing'));
 
   // One Save action — a single button label and a single dispatch site for
   // the one set-role-routing call that carries both roles.

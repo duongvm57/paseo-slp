@@ -300,13 +300,20 @@ After this refactor the remaining steps are exactly three:
   `executables.ts` and `config-view.ts` re-export `FAMILIES`/`ROLES`/
   `OWNED_PROVIDER_IDS`/`PROVIDER_EXTENDS` under their historical names
   so existing consumers keep one import site; nothing defines a literal.
-- **Peer note placement** — inside the "Role routing" card, not a
+- **Peer note placement** — inside the "Role providers" card, not a
   separate card: the note scopes what routing does not configure and a
   separate card would orphan one line of disclosure.
-- **Routing surface shape** — one "Role routing" card carrying the
+- **Routing surface shape** — one "Role providers" card carrying the
   supervisor and lead pickers behind a single Save that issues one
   `set-role-routing` call (the RPC payload is the full routing object
   anyway). The divergence warning renders once on the card, not per role.
+- **Card title** — "Role providers", per the Human's proposal: the
+  "routing" metaphor was wrong because the binding is static (a stored
+  role→provider assignment applied at activation), not per-request
+  dispatch. Only the UI title changed — the stored artifact keeps its
+  `role-routing.json` file name and the `get-role-routing`/
+  `set-role-routing` RPC names, so "Save routing" and "stored routing"
+  in the warning still name the actual artifact.
 - **"Preferred provider family" / "Initial profiles"** — removed from the
   Activation card by explicit human decision. Routing is the sole UI
   configurator for role→provider; the `profiles` and
