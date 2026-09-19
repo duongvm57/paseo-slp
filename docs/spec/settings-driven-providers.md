@@ -367,6 +367,17 @@ After this refactor the remaining steps are exactly three:
   and is never emitted), declared feature controls win over the raw JSON
   base, undeclared keys are preserved from the base, and an empty
   control drops the key.
+- **Provider label unification** — generated provider entries now emit
+  one label template for every transport: `SLP <Family> <Role>`
+  (`SLP Codex Peer`, `SLP Pi Peer`, `SLP Claude Code Peer`,
+  `SLP Devin Peer`), with `FAMILY_LABEL` from the registry as the single
+  display-name source. The templates had diverged: the hook branch wrote
+  `<family> — <Role> (SLP)` (`pi — Peer (SLP)`, raw lowercase family id)
+  while the wrapper branch already wrote `SLP ${FAMILY_LABEL[family]}
+  ${ROLE_DISPLAY[role]}`. `label` sits inside `WRITTEN_PROVIDER_FIELDS`,
+  so live entries keep their old labels until the next activation
+  rewrites them — no migration, and a pre-existing live entry whose
+  label differs simply reads as drift until then.
 - **"Preferred provider family" / "Initial profiles"** — removed from
   the Activation card by explicit human decision. Routing is the sole
   UI configurator for role→provider; the `profiles` and

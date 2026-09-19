@@ -532,7 +532,13 @@ export function desiredProviderEntries(
       // probe-time source, the env copy is the spawn-time source.
       entries[id] = {
         extends: PROVIDER_EXTENDS[family],
-        label: `${family} — ${ROLE_DISPLAY[role]} (SLP)`,
+        // One label template for every transport (§9): `SLP <Family> <Role>`
+        // with FAMILY_LABEL as the single display-name source — the hook
+        // branch previously emitted '<family> — <Role> (SLP)' while the
+        // wrapper branch already emitted this form. `label` sits inside
+        // WRITTEN_PROVIDER_FIELDS, so live entries keep their old labels
+        // until the next activation rewrites them; no migration.
+        label: `SLP ${FAMILY_LABEL[family]} ${ROLE_DISPLAY[role]}`,
         command: [launcherPathFor(launchSet, id)],
         env: {
           ...desiredProviderEnv(family, {

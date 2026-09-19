@@ -16,6 +16,7 @@ import { desiredProviderEntries } from '../plugin/server/config-transaction.ts';
 import { createMaterializer } from '../plugin/server/materializer.ts';
 import { embeddedPayload } from '../plugin/server/generated/runtime-payload.ts';
 import { OperationConflict } from '../plugin/shared/contracts.ts';
+import { FAMILY_LABEL } from '../plugin/shared/families.ts';
 import { identity, install } from '../src/package.mjs';
 import { roleBundle } from '../src/role-bundle.mjs';
 
@@ -487,14 +488,15 @@ test('thin aliases: every entry gets a single-element launcher argv0; hook env a
     assert.equal(entry.env.SLP_DAEMON_HOME, f.home);
     assert.equal(entry.env.PASEO_HOME, f.home);
     assert.equal(entry.env[`SLP_${family.toUpperCase()}_BIN`], `/opt/bin/${family}`);
+    // One label template for every transport: `SLP <Family> <Role>` with
+    // FAMILY_LABEL as the single display-name source.
+    assert.equal(entry.label, `SLP ${FAMILY_LABEL[family]} ${roleDisplay}`);
     if (family === 'devin') {
       assert.equal(entry.extends, 'acp');
-      assert.equal(entry.label, `SLP Devin ${roleDisplay}`);
       assert.equal(entry.env.SLP_FAMILY_BIN, undefined);
       continue;
     }
     assert.equal(entry.extends, family);
-    assert.equal(entry.label, `${family} — ${roleDisplay} (SLP)`);
     assert.equal(entry.env.SLP_FAMILY_BIN, `/opt/bin/${family}`);
   }
   // An unavailable hook-family binary disables the alias; the gate env keeps

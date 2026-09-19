@@ -28,6 +28,7 @@ import {
   patchForDirection,
 } from '../plugin/server/config-transaction.ts';
 import { OperationConflict } from '../plugin/shared/contracts.ts';
+import { FAMILY_LABEL } from '../plugin/shared/families.ts';
 import {
   MiniStore,
   OWNED_IDS,
@@ -99,14 +100,15 @@ test('happy activate: INACTIVE → ACTIVE, providers/profiles/injection written,
     assert.equal(entry.env.SLP_MANAGED_RUNTIME, '1');
     assert.equal(entry.env.PASEO_HOME, home);
     assert.ok(entry.env.SLP_NODE_BIN, `SLP_NODE_BIN for ${id}`);
+    // One label template for every transport: `SLP <Family> <Role>` with
+    // FAMILY_LABEL as the single display-name source.
+    assert.equal(entry.label, `SLP ${FAMILY_LABEL[family]} ${roleLabel}`);
     if (family === 'devin') {
-      assert.equal(entry.label, `SLP Devin ${roleLabel}`);
       assert.equal(entry.env.SLP_DEVIN_BIN, binaries.devin);
       continue;
     }
     // Hook families are sentinel-gated thin aliases: same launcher shape,
     // managed env backstop, plus the family binary the gate execs through.
-    assert.equal(entry.label, `${family} — ${roleLabel} (SLP)`);
     assert.equal(entry.env.SLP_FAMILY_BIN, binaries[family]);
     assert.equal(entry.env[`SLP_${family.toUpperCase()}_BIN`], binaries[family]);
     assert.equal(entry.env.SLP_RUNTIME_ROOT, join(home, 'slp-runtime', deps.payload.candidate.sha256));
