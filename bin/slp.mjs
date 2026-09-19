@@ -13,6 +13,7 @@ import { inventory } from '../src/inventory.mjs';
 import { agents } from '../src/agents.mjs';
 import { monitor } from '../src/monitor.mjs';
 import { notebook } from '../src/notebook.mjs';
+import { localTarget, runtimeStatus } from '../src/runtime-state.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const argv = process.argv.slice(2);
@@ -41,7 +42,7 @@ try {
       target = key;
     } else throw new Error(`Unknown flag ${key}`);
   }
-  const commandFlags = { install: ['--paseo-home', '--apply', '--reload'], uninstall: ['--apply', '--reload'], upgrade: ['--from', '--apply', '--reload'], init: ['--routing-from', '--apply'], materialize: ['--from', '--apply'], routes: ['--paseo-home'], inventory: ['--paseo-home'], agents: ['--paseo-home'], monitor: [], notebook: ['--paseo-home'], prepare: ['--check', '--emit', '--schema'], 'prepare-handoff': ['--check', '--emit', '--schema'] };
+  const commandFlags = { install: ['--paseo-home', '--apply', '--reload'], uninstall: ['--apply', '--reload'], upgrade: ['--from', '--apply', '--reload'], init: ['--routing-from', '--apply'], materialize: ['--from', '--apply'], routes: ['--paseo-home'], inventory: ['--paseo-home'], agents: ['--paseo-home'], monitor: [], notebook: ['--paseo-home'], prepare: ['--check', '--emit', '--schema'], 'prepare-handoff': ['--check', '--emit', '--schema'], status: ['--paseo-home'], 'local-target': ['--paseo-home'] };
   for (const key of Object.keys(options)) if (!commandFlags[command]?.includes(key)) throw new Error(`${key} is not valid for ${command}`);
   const prepareModes = ['--check', '--emit', '--schema'].filter(key => options[key]);
   if (prepareModes.length > 1) throw new Error(`${prepareModes.join(' and ')} are separate modes — pick one`);
@@ -75,6 +76,8 @@ try {
   else if (command === 'routes') result = readCatalog(target, options['--paseo-home']);
   else if (command === 'inventory') result = inventory(options['--paseo-home']);
   else if (command === 'agents') result = agents(options['--paseo-home']);
+  else if (command === 'local-target') result = localTarget(options['--paseo-home']);
+  else if (command === 'status') result = runtimeStatus(options['--paseo-home']);
   else if (command === 'init') result = initWorkspace(root, target, Boolean(options['--apply']), options['--routing-from']);
   else if (command === 'materialize') result = materializeWorkspace(options['--from'], target, Boolean(options['--apply']));
   else if (command === 'monitor') result = monitor(readJson(target));
@@ -119,6 +122,6 @@ try {
         process.exitCode = 1;
       }
     }
-  } else throw new Error('Usage: slp.mjs identity | snapshot <repo> | install [absolute-dir] [--paseo-home <absolute-home>] [--apply] [--reload] | upgrade <absolute-new-dir> --from <previous-installation> [--apply] [--reload] | verify <dir> | uninstall <dir> [--apply] [--reload] | init <absolute-repo> [--routing-from <absolute-json>] [--apply] | routes <absolute-repo> [--paseo-home <absolute-home>] | inventory [--paseo-home <absolute-home>] | agents [--paseo-home <absolute-home>] | prepare <request.json> [--check | --emit create | --schema] | prepare-handoff <request.json> [--check | --emit create | --schema] | materialize <repository> --from <source-repository> [--apply] | monitor <request.json> | notebook <repository> [--paseo-home <absolute-home>] | instructions <role>');
+  } else throw new Error('Usage: slp.mjs identity | snapshot <repo> | install [absolute-dir] [--paseo-home <absolute-home>] [--apply] [--reload] | upgrade <absolute-new-dir> --from <previous-installation> [--apply] [--reload] | verify <dir> | uninstall <dir> [--apply] [--reload] | init <absolute-repo> [--routing-from <absolute-json>] [--apply] | routes <absolute-repo> [--paseo-home <absolute-home>] | inventory [--paseo-home <absolute-home>] | agents [--paseo-home <absolute-home>] | prepare <request.json> [--check | --emit create | --schema] | prepare-handoff <request.json> [--check | --emit create | --schema] | materialize <repository> --from <source-repository> [--apply] | monitor <request.json> | notebook <repository> [--paseo-home <absolute-home>] | instructions <role> | status [--paseo-home <absolute-home>] | local-target [--paseo-home <absolute-home>]');
   if (result !== undefined) process.stdout.write(json(result));
 } catch (error) { console.error(error.message); process.exitCode = 1; }
