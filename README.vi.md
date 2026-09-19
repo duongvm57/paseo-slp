@@ -17,6 +17,66 @@ spawn kit, policy locators kèm sha256 và managed runtime helpers — phần
 này được inject lúc tạo session và không hiện trong tab agent. Chi tiết ở
 [Kiến trúc plugin](docs/architecture.md).
 
+## Vì sao SLP
+
+Paseo đã sẵn tạo agent, workspace, parentage và timeline — nó giải quyết
+*tạo tiến trình*. Phần nó không quyết là ownership, phán đoán độc lập,
+kỷ luật phối hợp và nghiệm thu. Thêm agent mà thiếu những thứ đó chỉ tăng
+niềm tin và hoạt động, không tăng correctness. Công việc đa-agent thường
+hỏng theo vài cách quen thuộc:
+
+- **Authority gradient** — parent đưa sẵn câu trả lời thì nhận lại sự đồng
+  thuận, không phải sự kiểm tra premise.
+- **Perfect-plan trap** — coordinator chọn trước file và hướng làm sẽ biến
+  worker thành tay đánh máy; dependency thật lộ ra muộn dưới dạng vá.
+- **Attention dilution** — coordinator vừa điều phối vừa implement sẽ mất
+  tầm nhìn toàn dự án về ownership, dependency và lifecycle.
+- **Song song không an toàn** — hai agent cùng một checkout ghi đè cùng
+  file đang thay đổi; workspace hay agent ID không phải filesystem
+  isolation.
+- **Review thiên lệch hoặc cũ** — reviewer thừa hưởng framing của tác
+  giả, hoặc review file vẫn đang thay đổi, sẽ duyệt một candidate không
+  còn tồn tại.
+- **Hoàn thành giả** — `finished`, `idle`, "xong" và test xanh là tín
+  hiệu, không phải bằng chứng rằng đúng artifact đã được đúng authority
+  review.
+- **Tách control plane** — worker tự spawn worker không ai biết khiến
+  không hệ nào biết ai sở hữu task, workspace hay đợt sửa.
+
+SLP trả lời bằng cách tách *các loại phán đoán* thay vì xây một thứ bậc
+cứng `Supervisor > Lead > Peer`:
+
+```
+                         Human
+                           │
+              ┌────────────┴────────────┐
+              │                         │
+        Supervisor                    Lead
+   quan sát quy trình           điều phối dự án
+              │                         │
+              └──── observes ───────────┤
+                                        │
+                                    Peer(s)
+                        Engineer / Architect /
+                          Reviewer / Scout
+```
+
+- **Human** giữ owner authority: intent, trade-off quan trọng, grant đặc
+  biệt, thay đổi protocol và nghiệm thu cuối.
+- **Supervisor** bảo vệ chất lượng của workflow và quá trình lập luận —
+  bias, lỗi lặp, mất đà, scope trôi, bằng chứng yếu. Nó không implement
+  và không nghiệm thu project.
+- **Lead** sở hữu framing, routing, dependency, integration và verdict dự
+  án. Nó không giải trước phần khó rồi đưa Peer một công việc đánh máy.
+- **Peer** là đồng nghiệp độc lập sở hữu một outcome có giới hạn. Nó có
+  thể challenge premise, xin dependency hoặc dừng ở blocked — bất đồng
+  được dàn xếp bằng bằng chứng chứ không bị coi là chống đối.
+
+Dùng pack này khi các ranh giới đó quan trọng; với task nhỏ một agent,
+một agent thường đơn giản hơn. Bản deep dive — role model, design
+rationale, và cách plugin chở toàn bộ trên primitive của Paseo nguyên
+bản — nằm ở link kiến trúc phía trên.
+
 ## Yêu cầu
 
 - Paseo `>=0.8.0 <0.9.0` với `pluginsEnabled: true` trong `config.json` của

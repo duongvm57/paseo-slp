@@ -18,6 +18,68 @@ delegation rules, spawn kit, sha256 policy locators and managed runtime
 helpers — injected at session entry and not shown in the agent tab.
 Details in [Plugin architecture](docs/architecture.md).
 
+## Why SLP
+
+Paseo already creates agents, workspaces, parentage and timelines — it
+solves *process creation*. What it does not decide is ownership,
+independent judgment, coordination discipline or acceptance. Adding more
+agents without those raises confidence and activity without raising
+correctness. Multi-agent coding commonly fails in the same few ways:
+
+- **Authority gradient** — a parent that presents its answer gets
+  agreement back, not a check of the premise.
+- **Perfect-plan trap** — a coordinator that pre-selects files and
+  approach turns the worker into a typing bot; real dependencies surface
+  late as patches.
+- **Attention dilution** — a coordinator that also implements loses the
+  project-wide view of ownership, dependencies and lifecycle.
+- **Unsafe parallelism** — two agents sharing one checkout overwrite the
+  same moving files; a workspace or agent ID is not filesystem isolation.
+- **Biased or stale review** — a reviewer that inherits the author's
+  framing, or reviews files that are still moving, approves a candidate
+  that no longer exists.
+- **False completion** — `finished`, `idle`, "done" and passing tests are
+  signals, not proof that the right artifact was reviewed by the right
+  authority.
+- **Split control planes** — workers spawning their own untracked workers
+  leave no single system that knows who owns the task, the workspace or
+  the correction.
+
+SLP answers by separating *kinds of judgment* rather than building a
+rigid `Supervisor > Lead > Peer` hierarchy:
+
+```
+                         Human
+                           │
+              ┌────────────┴────────────┐
+              │                         │
+        Supervisor                    Lead
+   process observation          project coordination
+              │                         │
+              └──── observes ───────────┤
+                                        │
+                                    Peer(s)
+                        Engineer / Architect /
+                          Reviewer / Scout
+```
+
+- **Human** keeps owner authority: intent, important trade-offs,
+  exceptional grants, protocol changes and final acceptance.
+- **Supervisor** protects the quality of the workflow and reasoning —
+  bias, repeated failure, lost momentum, drifting scope, weak evidence.
+  It does not implement or accept the project.
+- **Lead** owns framing, routing, dependencies, integration and the
+  project verdict. It does not pre-solve difficult work and hand Peers a
+  typing job.
+- **Peer** is an independent co-worker owning one bounded outcome. It may
+  challenge the premise, request a dependency or stop as blocked —
+  disagreement is reconciled with evidence, not treated as disobedience.
+
+Use this pack when those boundaries matter; for a small single-agent
+task, a plain agent is simpler. The deep dive — role model, design
+rationale, and how the plugin carries it on stock Paseo primitives — is
+in the architecture doc linked above.
+
 ## Requirements
 
 - Paseo `>=0.8.0 <0.9.0` with `pluginsEnabled: true` in the daemon's

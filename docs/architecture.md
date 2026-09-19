@@ -11,6 +11,52 @@ This document draws that architecture. For requirements and file-level
 contracts see [contract.md](contract.md); for the implementation spec see
 [spec/paseo-plugin-implementation.md](spec/paseo-plugin-implementation.md).
 
+## Why this shape
+
+Paseo already supplies agent creation, workspaces, parentage and
+timelines — it solves *process creation*. It does not decide ownership,
+independent judgment, coordination or acceptance. The failure modes this
+design exists to prevent are the ordinary ones of multi-agent coding:
+
+- **Authority gradient** — a parent that presents the answer gets
+  agreement back, not a check of the premise.
+- **Perfect-plan trap** — the coordinator pre-selects files, APIs and
+  lifecycle; the worker becomes a typing bot and real dependencies
+  surface late as compatibility patches.
+- **Attention dilution** — a coordinator that also implements and
+  explains local details loses the project-wide view of ownership and
+  lifecycle.
+- **Unsafe parallelism** — two agents sharing one checkout overwrite the
+  same moving files; an agent or workspace ID is not filesystem
+  isolation.
+- **Biased or stale review** — a reviewer that inherits the author's
+  framing, or reviews files that are still moving, approves a candidate
+  that no longer exists.
+- **False completion** — `finished`, `idle`, "done" and passing tests are
+  attention signals, not proof the right artifact was reviewed by the
+  right authority.
+- **Split control planes** — workers spawning their own untracked workers
+  leave no single system that knows who owns the task, the workspace,
+  the correction or the cleanup.
+
+Five ideas carry the design:
+
+1. **Lead is a binding arbiter, not a plan-authoring bot-herder.** It
+   owns framing, routing, ownership, dependencies, integration and the
+   project verdict — not a pre-solved implementation handed to Peers as
+   a typing job.
+2. **Peer is an independent co-worker, not a function call.** One thin
+   peer provider per family; the assignment's disposition makes the seat
+   an Engineer, Architect, Reviewer or Scout.
+3. **Supervisor is governance, outside the execution flow.** It observes
+   Lead–Peer work for bias, lost momentum and anti-patterns, and relays
+   Human decisions. It never owns implementation or acceptance.
+4. **Three instruction layers, not one fat prompt.** Role bundle →
+   workspace protocol → assignment. Precedence is one-way: a lower layer
+   narrows but never widens a higher layer.
+5. **Paseo is the only control plane.** The plugin adds policy bytes and
+   managed configuration — not another scheduler or agent database.
+
 ## The role model
 
 ```
@@ -38,11 +84,92 @@ is an independent co-worker: the same `slp-*-peer` provider can be an
 Engineer, Architect, Reviewer or Scout depending on the assignment it is
 born with. Peers never spawn agents.
 
+**Human — owner.** Keeps product intent and priority, irreversible
+trade-offs, protocol and authority changes, external effects, material
+cost or risk, and final acceptance. Creates the Supervisor and Lead
+seats; may converse mainly with the Supervisor to keep the Lead's
+coordination attention free.
+
+**Supervisor — governance observer.** Protects the quality of the
+*workflow and reasoning process*: bias, repeated failure, lost momentum,
+drifting scope, weak evidence. It may observe assigned workspaces, ask
+the bound Lead why a strategy was chosen, report risk to the Human, relay
+a recorded Human decision, propose profile or protocol revisions, and
+record causal evidence in the notebook. It does not hold implementation
+scope, architecture or acceptance; it messages only a bound Lead — never
+Peers — and never acts as a substitute Lead.
+
+**Lead — project authority.** Turns an objective into a trustworthy
+project-level result: framing, topology, decomposition, ownership,
+dependencies, checkpoints, review, integration, verdict. It reconstructs
+the task without pre-solving it, assigns exactly one owner per moving
+scope, writes neutral bounded briefs, and grants Peers the right to
+reopen, request dependencies or stop blocked. Tiny, tightly-coupled work
+may be Lead self-work; bounded implementation goes to a Peer Engineer;
+difficult acceptance goes to a Reviewer that did not implement;
+subjective or product decisions go to the Human with evidence, not a
+simulated proof.
+
+**Peer — bounded independent worker.** Owns one bounded outcome and
+forms independent technical judgment. It works only in the assigned
+scope, preserves unrelated work, never self-expands scope, challenges
+the premise with evidence, verifies its own writes but never
+self-accepts a difficult change. It talks only to the route its
+assignment names — `send_agent_prompt` to the report-recipient — and
+never spawns or manages agents.
+
 Three separate layers carry three separate concerns:
 
-- **Role policy** — who the seat is, what it may do (injected, see below)
-- **Workspace protocol** — this repository's tactics, written per-repo
-- **Assignment** — the specific task, in the visible prompt
+| Layer | Lifetime | Holds | Must not hold |
+|---|---|---|---|
+| Role bundle (injected) | durable, cross-repo | identity, authority, invariants, anti-pattern guards | one repo's tactics |
+| Workspace protocol (`.paseo-slp/workspace-protocol.md`) | durable per repo | topology, model/effort policy, review gates, escalation | one task's detail |
+| Assignment (visible prompt) | one task | objective, scope, ownership, exclusions, verification, handback | the organization manual |
+
+Precedence is one-way: a lower layer narrows but never widens a higher
+layer, and omission grants nothing. Peers never receive the whole
+protocol — the Lead extracts the relevant constraints into each
+assignment. The protocol itself evolves like the work it governs: a new
+anti-pattern is a hypothesis, then causal evidence, then a
+Human-confirmed revision applied to new work.
+
+## Operating principles
+
+Six rules fall out of the role model and shape everything below:
+
+- **One control plane.** Within a task, only Paseo owns agent lifecycle,
+  workspace, parentage and timeline. Seats create children through
+  agent-scoped `create_agent` so the host records who spawned whom; a
+  Peer's role contract forbids it from spawning or managing agents. If
+  seats could create their own untracked workers, two control planes
+  would share no ledger and review/cleanup would become unreliable.
+- **Independent judgment needs an independent seat.** A reviewer created
+  from the author's context inherits its framing. Reviewers are fresh
+  seats briefed neutrally against an exact candidate — the split-axis
+  gate (a spec reviewer and a standards reviewer in parallel) is the
+  default for work that needs review, and a required gate never
+  collapses into one seat.
+- **Workspace isolation is explicit.** One workspace ID is not
+  filesystem isolation. The minimum safe rule is one writer per moving
+  scope; same-team seats share the assignment workspace by default, and
+  separate worktrees are an option for concurrent writers — declared
+  with a reason, not used silently.
+- **Providers are discovered, not assumed.** Role policy never
+  hard-codes a model ID. The protocol carries selection principles; the
+  routing catalog and saved profiles carry concrete picks; the Lead
+  inspects live providers/models before routing. Two models agreeing
+  does not make an unevidenced conclusion true.
+- **Acceptance needs evidence.** `idle`, `finished`, "done" and exit
+  code 0 are attention signals, not acceptance. Acceptance requires the
+  exact artifact, a stable candidate identity, verification output,
+  independent review when required, and an owner with the authority to
+  accept. A correction produces a new candidate and invalidates reviews
+  tied to the old one.
+- **Human decision boundaries are recorded, not remembered.** The
+  protocol states up front which work needs independent review, what may
+  be edited, committed, pushed or deployed, which scope changes the Lead
+  may decide, which decisions require the Human, the model budget, and
+  the evidence level for acceptance.
 
 ## What the plugin adds to Paseo
 
@@ -260,6 +387,13 @@ MCP schema-discovery tax.
 
 Peers return results by prompting the agent ID named in their assignment
 (`report-recipient`) — Paseo agent messaging, no special channel.
+
+Coordination is event-driven, not polled: a seat confirms a spawn
+started, then waits for the finish notification or the handback rather
+than re-reading timelines to "feel like it is managing". Heartbeats
+exist only as a low-frequency safety net when the task and authority
+allow — cadence and stop conditions belong to the protocol or the
+assignment, and there is no monitoring daemon.
 
 ## Ownership, state and recovery
 
