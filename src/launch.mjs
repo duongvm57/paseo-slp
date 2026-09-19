@@ -63,13 +63,17 @@ function handoffPacket(request) {
   }
   if (!Array.isArray(handoff.resources)) throw new Error('Handoff requires a resources list (including remaining Peer IDs and wake owners)');
   const candidate = snapshot(request.repository);
-  return { ...handoff, candidate: { head: candidate.head, sha256: candidate.sha256 } };
+  return { ...handoff, candidate: { head: candidate.head, sha256: candidate.sha256,
+    ...(candidate.incomplete ? { incomplete: candidate.incomplete } : {}) } };
 }
 
 const handoffNotice = (role, packet) => `\nProvider handoff evidence:\n${JSON.stringify(packet, null, 2)}\n` +
   'Before taking ownership, verify the current candidate and old-owner settlement against host/repository evidence. ' +
   'Reconcile existing Peer/workspace/resource ownership with the Human or assigned Supervisor. ' +
   'Parentage has not changed; do not claim control of old descendants or create duplicate writers. ' +
+  (packet?.candidate?.incomplete?.length
+    ? `Snapshot evidence gap: ${packet.candidate.incomplete.join(', ')} is unproven submodule scope — do not claim full-candidate coverage for it. `
+    : '') +
   'Acknowledge the transferred assignment. ' +
   (orchestrates(role) ? 'Use references/provider-routing.md for the handoff procedure.\n' : 'Return bounded findings to Lead; do not manage agents.\n');
 

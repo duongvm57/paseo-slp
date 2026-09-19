@@ -197,6 +197,133 @@ test('work snapshot detects untracked edits, deletion and executable mode withou
   execFileSync('git', ['-C', dir, 'add', 'owned.txt']);
   rmSync(join(dir, 'owned.txt'));
   assert.deepEqual(snapshot(dir).files, [{ path: 'owned.txt', deleted: true }]);
+  assert.ok(!('incomplete' in snapshot(dir)), 'a tree without gitlinks stays complete');
+});
+
+const gitRun = (dir, args) => execFileSync('git', ['-C', dir, ...args]);
+const gitCommit = (dir, message = 'c') => gitRun(dir, ['-c', 'user.email=t@slp', '-c', 'user.name=t', 'commit', '--quiet', '-m', message]);
+// A real superproject + submodule: upstream is a standalone repo the main repo
+// links at `subPath`. Returns the superproject root, the submodule checkout and
+// the upstream repo for making new commits.
+function submoduleFixture(t, subPath = 'sub') {
+  const base = fixture(t);
+  const upstream = join(base, 'upstream');
+  mkdirSync(upstream);
+  gitRun(upstream, ['init', '--quiet']);
+  writeFileSync(join(upstream, 'u.txt'), 'u1');
+  gitRun(upstream, ['add', 'u.txt']);
+  gitCommit(upstream);
+  const dir = join(base, 'main');
+  mkdirSync(dir);
+  gitRun(dir, ['init', '--quiet']);
+  writeFileSync(join(dir, 'owned.txt'), 'o');
+  gitRun(dir, ['add', 'owned.txt']);
+  gitCommit(dir);
+  gitRun(dir, ['-c', 'protocol.file.allow=always', 'submodule', 'add', '--quiet', upstream, subPath]);
+  gitCommit(dir);
+  return { dir, sub: join(dir, subPath), upstream };
+}
+const gitlinkOf = (snap, path = 'sub') => snap.files.find(entry => entry.path === path);
+
+test('snapshot records a clean initialized gitlink as pointer plus observed HEAD', t => {
+  const { dir, sub } = submoduleFixture(t);
+  const headOid = gitRun(sub, ['rev-parse', 'HEAD']).toString().trim();
+  const snap = snapshot(dir);
+  assert.deepEqual(gitlinkOf(snap), { path: 'sub', kind: 'gitlink', indexOid: headOid, headOid, state: 'clean' });
+  assert.ok(!('incomplete' in snap));
+  assert.equal(snapshot(dir).sha256, snap.sha256, 'snapshot stays deterministic');
+});
+
+test('snapshot digest follows a moved submodule checkout while the staged pointer stays put', t => {
+  const { dir, sub, upstream } = submoduleFixture(t);
+  const first = snapshot(dir);
+  writeFileSync(join(upstream, 'u.txt'), 'u2');
+  gitRun(upstream, ['add', 'u.txt']);
+  gitCommit(upstream);
+  const moved = gitRun(upstream, ['rev-parse', 'HEAD']).toString().trim();
+  gitRun(sub, ['fetch', '--quiet', 'origin']);
+  gitRun(sub, ['checkout', '--quiet', moved]);
+  const after = snapshot(dir);
+  const entry = gitlinkOf(after);
+  assert.equal(entry.headOid, moved);
+  assert.equal(entry.indexOid, first.files.find(e => e.path === 'sub').indexOid, 'index pointer unchanged until staged');
+  assert.equal(entry.state, 'clean');
+  assert.ok(!('incomplete' in after));
+  assert.notEqual(after.sha256, first.sha256, 'headOid is part of the digest');
+});
+
+test('snapshot distinguishes a staged pointer from the checkout it no longer matches', t => {
+  const { dir, sub, upstream } = submoduleFixture(t);
+  const staged = gitRun(sub, ['rev-parse', 'HEAD']).toString().trim();
+  writeFileSync(join(upstream, 'u.txt'), 'u2');
+  gitRun(upstream, ['add', 'u.txt']);
+  gitCommit(upstream);
+  const moved = gitRun(upstream, ['rev-parse', 'HEAD']).toString().trim();
+  gitRun(sub, ['fetch', '--quiet', 'origin']);
+  gitRun(sub, ['checkout', '--quiet', moved]);
+  gitRun(dir, ['add', 'sub']);
+  gitRun(sub, ['checkout', '--quiet', staged]);
+  const entry = gitlinkOf(snapshot(dir));
+  assert.equal(entry.indexOid, moved, 'staging intent is the gitlink identity object');
+  assert.equal(entry.headOid, staged);
+  assert.equal(entry.state, 'clean');
+});
+
+test('snapshot marks dirty or untracked submodule content as unproven scope', t => {
+  const { dir, sub } = submoduleFixture(t);
+  writeFileSync(join(sub, 'u.txt'), 'edited');
+  let snap = snapshot(dir);
+  assert.equal(gitlinkOf(snap).state, 'dirty');
+  assert.deepEqual(snap.incomplete, ['sub']);
+  // A second dirty tree with different content keeps the same digest — the
+  // scope is unproven, so the snapshot must not claim completeness for it.
+  writeFileSync(join(sub, 'u.txt'), 'edited again');
+  const snap2 = snapshot(dir);
+  assert.equal(snap2.sha256, snap.sha256);
+  assert.deepEqual(snap2.incomplete, ['sub']);
+  // Untracked-only content is dirty too.
+  execFileSync('git', ['-C', sub, 'checkout', '--quiet', '--', 'u.txt']);
+  writeFileSync(join(sub, 'untracked.txt'), 'x');
+  snap = snapshot(dir);
+  assert.equal(gitlinkOf(snap).state, 'dirty');
+  assert.deepEqual(snap.incomplete, ['sub']);
+});
+
+test('snapshot reports uninitialized, deleted and replaced gitlink paths without failing', t => {
+  const { dir, sub } = submoduleFixture(t);
+  gitRun(dir, ['submodule', 'deinit', '--force', 'sub']);
+  let snap = snapshot(dir);
+  assert.equal(gitlinkOf(snap).state, 'uninitialized');
+  assert.equal(gitlinkOf(snap).headOid, null);
+  assert.deepEqual(snap.incomplete, ['sub']);
+  gitRun(dir, ['-c', 'protocol.file.allow=always', 'submodule', 'update', '--quiet', '--init', 'sub']);
+  assert.equal(gitlinkOf(snapshot(dir)).state, 'clean');
+  rmSync(sub, { recursive: true, force: true });
+  snap = snapshot(dir);
+  assert.equal(gitlinkOf(snap).state, 'missing');
+  assert.deepEqual(snap.incomplete, ['sub']);
+  // A regular file where the submodule dir was is also missing, not a crash.
+  writeFileSync(sub, 'not a directory');
+  assert.equal(gitlinkOf(snapshot(dir)).state, 'missing');
+});
+
+test('snapshot records a conflicted gitlink index without picking a stage', t => {
+  const { dir, sub } = submoduleFixture(t);
+  const headOid = gitRun(sub, ['rev-parse', 'HEAD']).toString().trim();
+  execFileSync('git', ['-C', dir, 'update-index', '--index-info'], {
+    input: `0 ${'0'.repeat(40)}\tsub\n160000 ${'1'.repeat(40)} 1\tsub\n160000 ${'2'.repeat(40)} 2\tsub\n160000 ${'3'.repeat(40)} 3\tsub\n` });
+  const entry = gitlinkOf(snapshot(dir));
+  assert.equal(entry.indexOid, null, 'conflict must not pick stage 0');
+  assert.equal(entry.state, 'conflicted');
+  assert.equal(entry.headOid, headOid);
+  assert.deepEqual(snapshot(dir).incomplete, ['sub']);
+});
+
+test('snapshot handles a gitlink path containing spaces', t => {
+  const { dir, sub } = submoduleFixture(t, 'my lib');
+  const headOid = gitRun(sub, ['rev-parse', 'HEAD']).toString().trim();
+  const snap = snapshot(dir);
+  assert.deepEqual(gitlinkOf(snap, 'my lib'), { path: 'my lib', kind: 'gitlink', indexOid: headOid, headOid, state: 'clean' });
 });
 
 test('role bundle load paths are the contract: Peer never receives delegation policy', t => {

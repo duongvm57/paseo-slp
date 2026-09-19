@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { install, json, hash } from '../src/package.mjs';
 import { launchPlan, handoffPlan, launchCheck, requestSchema } from '../src/launch.mjs';
 import { readCatalog } from '../src/routing.mjs';
@@ -272,4 +273,30 @@ test('handoff plans carry modeId, spawnKit and orientation alongside the packet'
   // Handed-off seats receive the carrier inside the prompt too.
   assert.ok(plan.create.initialPrompt.includes('- create_agent(title: string'));
   assert.match(plan.create.initialPrompt, /Provider handoff evidence:/);
+});
+
+test('handoff packet surfaces unproven submodule scope as an evidence gap, not a refusal', t => {
+  const { dir, installed } = fixture(t);
+  // Build a real repository with a dirty gitlink so the snapshot is incomplete.
+  const git = (cwd, args) => execFileSync('git', ['-C', cwd, ...args]);
+  const upstream = join(dir, 'upstream');
+  mkdirSync(upstream);
+  git(upstream, ['init', '--quiet']);
+  writeFileSync(join(upstream, 'u.txt'), 'u');
+  git(upstream, ['add', 'u.txt']);
+  git(upstream, ['-c', 'user.email=t@slp', '-c', 'user.name=t', 'commit', '--quiet', '-m', 'u']);
+  const repo = join(dir, 'repo');
+  mkdirSync(repo);
+  git(repo, ['init', '--quiet']);
+  writeFileSync(join(repo, 'owned.txt'), 'o');
+  git(repo, ['add', 'owned.txt']);
+  git(repo, ['-c', 'user.email=t@slp', '-c', 'user.name=t', 'commit', '--quiet', '-m', 'o']);
+  git(repo, ['-c', 'protocol.file.allow=always', 'submodule', 'add', '--quiet', upstream, 'sub']);
+  git(repo, ['-c', 'user.email=t@slp', '-c', 'user.name=t', 'commit', '--quiet', '-m', 'sub']);
+  writeFileSync(join(repo, 'sub/u.txt'), 'unproven edit');
+  const handoff = { previousAgentId: 'old-lead', reason: 'quota', authority: 'Human requests replacement',
+    state: 'paused on snapshot', previousOwner: { settled: true, evidence: 'cancel receipt' }, resources: [] };
+  const plan = handoffPlan(installed, { ...request, repository: repo, role: 'lead', binding: piBinding, handoff });
+  assert.deepEqual(plan.handoff.candidate.incomplete, ['sub']);
+  assert.match(plan.create.initialPrompt, /Snapshot evidence gap: sub is unproven submodule scope/);
 });

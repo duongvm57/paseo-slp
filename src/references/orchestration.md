@@ -138,7 +138,7 @@ Require exact artifacts/diff (including relevant untracked and pre-existing work
 actual commands/output/exit codes and a stable identity. Use the installed snapshot
 helper or an exact commit with all relevant working changes accounted for. Record
 external evidence separately; ignored outputs/processes are outside a Git snapshot.
-The helper aggregates untracked nested repository roots with per-sub-repo identity; staged gitlinks/submodules remain unsupported and require a separately agreed identity method.
+The helper aggregates untracked nested repository roots with per-sub-repo identity; staged gitlinks snapshot as `{path, indexOid, headOid, state}` — any state other than `clean` lands in top-level `incomplete`, and that submodule scope stays unproven until separately agreed evidence covers it.
 
 Keep candidate writers paused during review and verification. A before/after identity
 change invalidates that acceptance attempt. Reviewers report severity, evidence,

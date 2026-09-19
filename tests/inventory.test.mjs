@@ -206,16 +206,23 @@ test('snapshot recurses into nested repositories and detects nested drift', t =>
   assert.ok(third.nested[0].nested[0].files.some(f => f.path === 'leaf.txt'));
 });
 
-test('snapshot still rejects staged gitlinks and directory entries that are not repos', t => {
+test('snapshot handles staged gitlinks and still rejects index file entries that are directories', t => {
   const dir = fixture(t);
   execFileSync('git', ['init', '-q', dir]);
   writeFileSync(join(dir, 'owned.txt'), 'root');
   mkdirSync(join(dir, 'linked'));
   execFileSync('git', ['init', '-q', join(dir, 'linked')]);
   execFileSync('git', ['-C', dir, 'update-index', '--add', '--cacheinfo', '160000,1111111111111111111111111111111111111111,linked']);
-  assert.throws(() => snapshot(dir), /Submodules\/directories unsupported: linked/);
-  execFileSync('git', ['-C', dir, 'update-index', '--remove', 'linked']);
+  // The staged pointer is recorded verbatim; the linked repo has no commits so
+  // no HEAD resolves and the scope is unproven rather than a crash.
+  const snap = snapshot(dir);
+  assert.deepEqual(snap.files.find(entry => entry.path === 'linked'),
+    { path: 'linked', kind: 'gitlink', indexOid: '1111111111111111111111111111111111111111', headOid: null, state: 'uninitialized' });
+  assert.deepEqual(snap.incomplete, ['linked']);
+  // An index entry claiming a regular file while a non-repo directory sits on
+  // disk is still unsupported — only gitlinks get pointer semantics.
+  execFileSync('git', ['-C', dir, 'update-index', '--force-remove', 'linked']);
   rmSync(join(dir, 'linked', '.git'), { recursive: true });
-  mkdirSync(join(dir, 'linked', '.git'));
-  assert.throws(() => snapshot(dir));
+  execFileSync('git', ['-C', dir, 'update-index', '--add', '--cacheinfo', '100644,2222222222222222222222222222222222222222,linked']);
+  assert.throws(() => snapshot(dir), /Submodules\/directories unsupported: linked/);
 });
