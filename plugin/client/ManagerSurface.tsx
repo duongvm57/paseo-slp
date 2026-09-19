@@ -980,7 +980,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
         {featureDefsFor(role).defs.length > 0 ? (
           featureDefsFor(role).defs.map(def => (
             def.type === "toggle" ? (
-              <CheckRow
+              <SwitchRow
                 key={def.id}
                 colors={colors}
                 checked={pref(`${role}.feature.${def.id}`) === "" ? def.value : pref(`${role}.feature.${def.id}`) === "true"}
@@ -1296,7 +1296,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
         {homeOverride.trim() !== "" && !isDaemonHome(homeOverride.trim()) ? (
           <Text style={[styles.mutedSmall, { color: colors.statusDanger }]}>Enter an absolute path</Text>
         ) : null}
-        <CheckRow
+        <SwitchRow
           colors={colors}
           checked={adoptIdentical}
           onToggle={setAdoptIdentical}

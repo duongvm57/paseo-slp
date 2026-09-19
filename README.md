@@ -141,16 +141,47 @@ paseo plugin remove paseo-slp
 
 ## Getting started
 
-1. Install and activate the plugin (above), then open a work workspace in
-   Paseo.
-2. Pick **SLP Supervisor** and enter an objective plus a normal authority
-   scope, e.g. "Fix the cart-total display bug; you may edit code/tests in
-   this repo; no commit/push/deploy."
-3. Initialize each work repo once and onboard it (below).
+Setup is one-time; per task only steps 4–5 repeat.
 
-Supervisor and Lead already carry the procedures for picking child profiles,
-keeping parentage and using finish notifications. **SLP Lead** also works
-when you want to hand work straight to a Lead.
+1. Install and activate the plugin (above).
+2. Optional, once: on the SLP surface, the **Communication language** card
+   sets the language every managed seat uses for reports, handbacks and
+   replies to you. Toggle on, enter e.g. `English`, Apply — the value
+   lives in plugin state, is injected into each new session, and needs no
+   re-activation. Leave it off and each model follows the prompt's own
+   language; nothing is injected.
+3. Initialize each work repo once and onboard it (below).
+4. Per task: **New agent** in the repo's workspace → profile
+   **SLP Supervisor** → title `Supervisor — <task>` → an objective:
+
+   ```text
+   <task — e.g. fix bug A, add feature B, review change C>
+   ```
+
+5. Send, then keep chatting in that session — it is the whole interface.
+   The Supervisor asks there when it needs you and reports the outcome
+   there when the work settles.
+
+   Behind the prompt, the seat already carries its role contract,
+   delegation rules and spawn kit (see
+   [Plugin architecture](docs/architecture.md)): it observes or creates a
+   Lead, and the Lead picks Peers from the repo pool. You never name the
+   child seats — they are ordinary Paseo agents you can open if curious.
+
+Two prompt lines are cheap insurance, not requirements:
+
+- `Repository:` — the seat resolves the repo itself from its workspace;
+  include the line when the session's workspace may not be the target, or
+  the task spans repos.
+- `Report back…` — the handback has nowhere else to go; the line marks
+  the prompt as a bounded assignment with a deliverable rather than an
+  open conversation, so an idle seat reads as "waiting on the Lead", not
+  "done".
+
+**SLP Lead** also works when you want to hand work straight to a Lead —
+same flow, one less layer. Supervisor and Lead already carry the
+procedures for picking child profiles, keeping parentage and using
+finish notifications.
 
 ## Skills
 

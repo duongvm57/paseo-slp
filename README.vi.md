@@ -136,15 +136,44 @@ paseo plugin remove paseo-slp
 
 ## Bắt đầu
 
-1. Cài và kích hoạt plugin (ở trên), rồi mở workspace công việc trong Paseo.
-2. Chọn **SLP Supervisor**, nhập objective và phạm vi quyền bình thường, ví
-   dụ: "Sửa lỗi hiển thị tổng giỏ hàng; được sửa code/test trong repo này,
-   không commit/push/deploy."
-3. Khởi tạo và onboard từng repo công việc một lần (bên dưới).
+Cài đặt làm một lần; mỗi task chỉ lặp bước 4–5.
 
-Supervisor và Lead đã có procedure chọn profile con, giữ parentage và dùng
-finish notifications. **SLP Lead** cũng dùng được nếu bạn muốn giao trực tiếp
-cho Lead.
+1. Cài và kích hoạt plugin (ở trên).
+2. Tuỳ chọn, một lần: trên màn SLP, card **Communication language** đặt
+   ngôn ngữ mà mọi seat được quản lý dùng cho report, handback và trả lời
+   bạn. Bật toggle, nhập ví dụ `English`, Apply — giá trị nằm trong
+   state của plugin, được inject vào mỗi session mới, không cần
+   re-activation. Để tắt thì mỗi model tự theo ngôn ngữ của prompt; không
+   có gì được inject.
+3. Khởi tạo và onboard từng repo công việc một lần (bên dưới).
+4. Mỗi task: **New agent** trong workspace của repo → profile
+   **SLP Supervisor** → title `Supervisor — <task>` → objective:
+
+   ```text
+   <task — ví dụ sửa bug A, thêm feature B, review change C>
+   ```
+
+5. Gửi, rồi chat tiếp trong session đó — đó là toàn bộ giao diện.
+   Supervisor hỏi ở đó khi cần bạn và report kết quả ở đó khi việc xong.
+
+   Phía sau prompt, seat đã mang sẵn role contract, delegation rules và
+   spawn kit (xem [Kiến trúc plugin](docs/architecture.md)): nó quan sát
+   hoặc tạo Lead, Lead chọn Peer từ pool của repo. Bạn không cần gọi tên
+   các seat con — chúng là agent Paseo thường, mở ra xem cũng được.
+
+Hai dòng trong prompt là bảo hiểm rẻ, không phải yêu cầu:
+
+- `Repository:` — seat tự resolve repo từ workspace của nó; ghi dòng này
+  khi workspace của session có thể không phải target, hoặc task đụng
+  nhiều repo.
+- `Report về session này…` — handback không có chỗ nào khác để đi; dòng
+  này đánh dấu prompt là bounded assignment có deliverable thay vì cuộc
+  chat mở, để một seat idle đọc là "đang chờ Lead" chứ không phải "xong
+  rồi".
+
+**SLP Lead** cũng dùng được nếu bạn muốn giao trực tiếp cho Lead — cùng
+flow, bớt một tầng. Supervisor và Lead đã có procedure chọn profile con,
+giữ parentage và dùng finish notifications.
 
 ## Skills
 
