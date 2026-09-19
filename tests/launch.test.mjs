@@ -47,6 +47,25 @@ test('plan surfaces the intended modeId and warns when the binding lacks one', t
     ['initialPrompt', 'notifyOnFinish', 'provider', 'settings', 'title', 'workspaceId']);
 });
 
+test('prepare on a non-installed root names the root and the installed CLI, never raw ENOENT', t => {
+  const { dir, installed } = fixture(t);
+  // dir itself has no installed.json — the same failure a source checkout hits.
+  let error;
+  try { launchPlan(dir, request); } catch (e) { error = e; }
+  assert.match(error.message, /No installed runtime at .*missing installed\.json receipt/);
+  assert.match(error.message, /bin\/slp\.mjs/);
+  assert.ok(!/ENOENT/.test(error.message), `raw ENOENT leaked: ${error.message}`);
+  // A corrupt receipt is tampering evidence, not a missing install.
+  writeFileSync(join(dir, 'installed.json'), 'not json');
+  assert.throws(() => launchPlan(dir, request), /not valid JSON/);
+  assert.throws(() => launchPlan(dir, request), /^(?!.*No installed runtime)/s);
+  // A receipt-present install missing a package file is tampering — the
+  // candidate mismatch surfaces, never the "not installed" hint.
+  rmSync(join(installed, 'src/common.md'));
+  assert.throws(() => launchPlan(installed, request), /Installed candidate changed/);
+  assert.throws(() => launchPlan(installed, request), /^(?!.*No installed runtime)/s);
+});
+
 test('spawnKit carries role-scoped approximate MCP tool signatures', t => {
   const { dir, installed } = fixture(t);
   const orchestrating = ['create_agent', 'send_agent_prompt', 'create_workspace', 'list_workspaces',

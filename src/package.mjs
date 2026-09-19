@@ -20,11 +20,31 @@ export function identity(root) {
   const entries = paths.map(path => ({ path, sha256: hash(readFileSync(join(root, path))) }));
   return { sha256: hash(json(entries)), files: entries };
 }
+// Missing receipt, unreadable receipt and tampered package are three different
+// failures: only the first means "not installed". Corrupt JSON or a vanished
+// payload file must never collapse into the install hint.
 export function verifyInstall(root) {
-  const expected = readJson(join(root, 'installed.json'));
-  const actual = identity(root);
+  let expected;
+  try { expected = readJson(join(root, 'installed.json')); }
+  catch (error) {
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') throw new Error(`No installed runtime at ${root} (missing installed.json receipt). `
+      + `Run the CLI from the installed runtime instead: node <installed-root>/bin/slp.mjs <command> — `
+      + `<installed-root> is the directory 'install <dir>' or plugin activation wrote (the managed role `
+      + `instructions name it); verify it with 'verify <installed-root>'. A source checkout cannot prepare plans.`);
+    if (error instanceof SyntaxError) throw new Error(`installed.json at ${root} is not valid JSON: ${error.message}`);
+    throw error;
+  }
+  let actual;
+  try { actual = identity(root); }
+  catch (error) {
+    if (error.code === 'ENOENT') throw new Error(`Installed runtime at ${root} is incomplete — a package file is missing: ${error.message}`);
+    throw error;
+  }
   if (json(actual) !== json(expected.candidate)) throw new Error('Installed candidate changed');
-  if (expected.paseoBindingSha256 && hash(readFileSync(join(root, 'paseo-binding.json'))) !== expected.paseoBindingSha256) throw new Error('Installed Paseo binding changed');
+  if (expected.paseoBindingSha256) {
+    if (!existsSync(join(root, 'paseo-binding.json'))) throw new Error(`Installed runtime at ${root} is incomplete — paseo-binding.json is missing`);
+    if (hash(readFileSync(join(root, 'paseo-binding.json'))) !== expected.paseoBindingSha256) throw new Error('Installed Paseo binding changed');
+  }
   return expected;
 }
 export function install(source, destination) {
