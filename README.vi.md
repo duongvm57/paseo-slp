@@ -435,6 +435,27 @@ create_agent arguments; xem
 [ví dụ handoff](examples/provider-handoff.request.json). Hai lệnh chỉ chuẩn
 bị arguments; Supervisor/Lead dùng Paseo để thực sự tạo agent.
 
+Ba mode hỗ trợ viết request — đều không có side effect:
+
+- `prepare --schema` in request contract (required keys theo role, các binding
+  source, ví dụ minimal với placeholder) ngay từ source checkout — không cần
+  request file, install receipt hay daemon. `prepare-handoff --schema` thêm
+  các trường settlement evidence.
+- `prepare <request.json> --check` chạy đúng các validation stage của planner
+  và report từng stage fail theo tên — thiếu profile/provider/model, settings
+  không tương thích, catalog hash stale — phân biệt "profile đầy đủ" với
+  "provider đã live-verify". Exit 1 khi có stage fail; không tạo gì.
+- `prepare <request.json> --emit create` in đúng member `create` — record
+  create_agent arguments nguyên vẹn — cho caller truyền thẳng.
+
+Một request đầy đủ gồm: `taskLabel` (mặc định tên repo), role (và
+`disposition` cho Peer), `repository` path và `workspaceId` thật,
+`assignment` nêu scope, authority, agent ID nhận report và kỳ vọng
+verification/handback, cùng một binding source. Brief dài dùng
+`assignmentFile` — file riêng từng seat, được tham chiếu read-first chứ
+không inline. Trước mọi create_agent, Lead ghi lại lý do topology đã chọn
+(seat nào, pool option nào) khớp assignment.
+
 ### `inventory` / `agents`
 
 Hai lệnh read-only hỗ trợ discovery, chạy được offline (không cần daemon hay

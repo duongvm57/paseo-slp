@@ -459,6 +459,29 @@ create_agent arguments; see the
 Both commands only prepare arguments; Supervisor/Lead use Paseo to actually
 create the agent.
 
+Three modes support request authoring — all side-effect free:
+
+- `prepare --schema` prints the request contract (required keys per role,
+  binding sources, minimal examples with placeholders) straight from a source
+  checkout — no request file, install receipt or daemon needed.
+  `prepare-handoff --schema` adds the settlement-evidence fields.
+- `prepare <request.json> --check` runs the planner's own validation stages
+  and reports each named failure — missing profile/provider/model,
+  incompatible settings, stale catalog hash — distinguishing a complete
+  profile from a live-verified provider. Exits 1 when any stage fails; nothing
+  is created.
+- `prepare <request.json> --emit create` prints exactly the `create` member —
+  the create_agent argument record, untrimmed — for callers that pass it
+  through directly.
+
+A complete request carries: `taskLabel` (or the repo name is used), the role
+(and `disposition` for Peer), the real `repository` path and `workspaceId`,
+an `assignment` naming scope, authority, the report-recipient agent ID and
+the verification/handback expectations, plus one binding source. For longer
+briefs use `assignmentFile` — a separate file per seat, referenced read-first
+rather than inlined. Before any create_agent call, Lead records why the chosen
+topology (which seats, which pool options) fits the assignment.
+
 ### `inventory` / `agents`
 
 Two read-only commands support discovery and work offline (no daemon or

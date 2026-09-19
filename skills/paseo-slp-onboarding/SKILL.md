@@ -198,8 +198,19 @@ Validate with `node <slp-cli> routes <absolute-repo>`. It returns the catalog ha
 and complete options. For each intended eligible option, use prepare with
 role: "peer", repository, workspaceId, assignment, fresh providers, and
 route: { optionId, catalogSha256 } to inspect launch arguments without creating
-an agent. Verify the wrapper/model/settings match the option. Include profiles
+an agent — or `prepare <request.json> --check` to get every failing stage named
+in one report (missing profile/provider/model, stale hash) with exit 1 on
+failure. `prepare --schema` prints the request contract from a source checkout;
+`prepare <request.json> --emit create` prints the exact create_agent record.
+Verify the wrapper/model/settings match the option. Include profiles
 only if useful for discovery; they never select or override the Peer runtime.
+
+A complete request carries: taskLabel, the role (and Peer disposition), the real
+repository path and workspaceId, an assignment naming scope, authority, the
+report-recipient agent ID and verification/handback expectations, plus one
+binding source. Keep each seat's full brief in its own assignmentFile — the
+prompt references it read-first and never inlines it. Before any create_agent
+call, Lead records why the chosen topology fits the assignment.
 For repeated prepares, capture discovery once: `node <slp-cli> inventory
 --paseo-home <absolute-home>` prints {providers, profiles} to stdout in the
 shape prepare consumes — pass the file's absolute path as request.inventoryFile (inline arrays,
