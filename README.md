@@ -324,7 +324,7 @@ another repo's catalog.
 
 The protocol picks topology and proof gates by risk: a small task may use a
 single Engineer; architecture/lifecycle-sensitive work gets an Architect, an
-independent Reviewer or several lanes. The Peer role receives its disposition
+independent review gate or several lanes. The Peer role receives its disposition
 through the assignment, independent of the runtime option. The Lead keeps
 integration and technical acceptance; the Supervisor keeps observation and
 relays Human decisions.

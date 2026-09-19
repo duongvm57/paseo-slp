@@ -71,7 +71,9 @@ repository wants: each row is a default shape for a kind of work — which
 seats (Peer dispositions) run, in what order, with what write authority
 and evidence gate. Rows describe the task's nature (bounded, hard to
 reverse, vague spec), not file paths; Lead judges each task against its
-row and may lighten or strengthen the seats. Whoever runs onboarding
+row and may lighten or strengthen the seats — never below a required
+gate, and a single seat only for the change classes the review-gate
+rules list explicitly. Whoever runs onboarding
 interviews the Human before writing it, in plain language, one question
 at a time — the Human describes their workflow; you translate answers
 into classes, dispositions and gates. Ask in the Human's words: show the

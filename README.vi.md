@@ -312,7 +312,7 @@ repo vẫn authoritative (chặn delegation) cho tới khi bị xóa. Không bao
 
 Protocol chọn topology và proof gate theo risk: task nhỏ có thể dùng một
 Engineer; việc nhạy về architecture/lifecycle có Architect, independent
-Reviewer hoặc nhiều lane. Role Peer nhận disposition qua assignment, độc lập
+review gate hoặc nhiều lane. Role Peer nhận disposition qua assignment, độc lập
 với option runtime. Lead giữ integration và technical acceptance; Supervisor
 giữ quan sát và relay quyết định của Human.
 
