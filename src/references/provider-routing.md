@@ -84,7 +84,18 @@ pool with the user-scope catalog as fallback and emits arguments; it never creat
 an agent or chooses the option for Lead.
 Pass the array returned by live list_providers as request.providers, extracting
 it from the tool response envelope when necessary. Each entry carries the observed
-id, enabled and status (and extends when present). A missing inventory is a request
+id, enabled and status (and extends when present). The same data can arrive by
+file: `node <installed>/bin/slp.mjs inventory --paseo-home <exact-home>` emits
+{providers, profiles} in the shape preparation consumes — write it to a file and
+pass its absolute path as request.inventoryFile, which fills only fields the
+request did not inline; an explicit inline array, including [], always wins.
+Under a managed runtime (SLP_MANAGED_RUNTIME=1) that helper never calls paseo:
+its providers are static config reads labeled provenance configured that launch
+planning refuses, so take live providers from the same daemon's list_providers
+and pass them inline as request.providers. Either way an inventory proves
+configuration completeness, never provider health — a listed entry can be stale
+(`paseo provider ls` status included), so its presence is not permission to
+launch. A missing inventory is a request
 construction error: supply the discovery already obtained and rerun preparation;
 it is not a reason to change the selected model or read package implementation.
 Use taskLabel for a short Human-readable work label and disposition for the Peer

@@ -200,6 +200,14 @@ role: "peer", repository, workspaceId, assignment, fresh providers, and
 route: { optionId, catalogSha256 } to inspect launch arguments without creating
 an agent. Verify the wrapper/model/settings match the option. Include profiles
 only if useful for discovery; they never select or override the Peer runtime.
+For repeated prepares, capture discovery once: `node <slp-cli> inventory
+--paseo-home <absolute-home>` writes {providers, profiles} in the shape prepare
+consumes — pass the file's absolute path as request.inventoryFile (inline arrays,
+including [], still win). Under a managed runtime its providers are labeled
+provenance configured and are refused as launch evidence; pass live
+list_providers output from the same daemon inline as providers instead. Inventory
+output proves configuration completeness, not provider readiness — never treat a
+listed entry as healthy.
 
 An empty catalog is valid init output but incomplete Peer onboarding — it also
 remains authoritative and shadows the user-scope catalog until removed. Report no

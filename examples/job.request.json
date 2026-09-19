@@ -1,17 +1,11 @@
 {
-  "installed": "/home/duongvm/.local/share/paseo-slp",
-  "repository": "/absolute/path/to/separate-job-repository",
-  "workspaceId": "REPLACE_WITH_HOST_WORKSPACE_ID",
-  "binding": {
-    "provider": "codex",
-    "model": "gpt-5.6-luna",
-    "modeId": "auto",
-    "thinkingOptionId": "medium"
-  },
-  "assignment": "DRAFT — replace with a real bounded objective, owned/excluded paths, current user changes to preserve, edit/commit/push/external-effect authority, verification expectations and stop/handback condition. Authorize Supervisor to establish one Lead and Lead to delegate one Engineer. No extra lanes, schedules or heartbeats. No commit, push or external effects unless explicitly granted.",
-  "deadlineSeconds": 1800,
-  "evidence": "/absolute/path/to/separate-evidence/job-001",
-  "checklist": "/absolute/path/to/confirmed-review-checklist.md",
-  "outcomeCheck": "/absolute/path/to/independently-confirmed-outcome-check.md",
-  "reviewConfirmedBy": null
+  "role": "supervisor",
+  "repository": "/absolute/path/to/job-repository",
+  "workspaceId": "replace-with-discovered-workspace-id",
+  "taskLabel": "replace-with-short-task-label",
+  "inventoryFile": "/absolute/path/to/inventory.json",
+  "providers": [
+    { "id": "slp-<family>-supervisor", "enabled": true, "status": "available" }
+  ],
+  "assignment": "Replace with a real bounded objective: owned/excluded paths, current user changes to preserve, distinct edit/commit/push/external-effect authority, verification expectations and the stop/handback condition, plus your agent ID as report recipient. Authorize the Supervisor to form the team the task needs — topology is its judgment call, not a fixed seat count."
 }

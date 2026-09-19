@@ -52,6 +52,14 @@ parentage.
    Use prepare with role=peer, route.optionId, route.catalogSha256, repository,
    workspaceId, assignment and fresh providers to validate the selection and obtain
    create arguments. Profile inventory never overrides a Peer pool selection.
+   For any role, discovery can arrive by file: the installed `slp.mjs inventory`
+   helper emits {providers, profiles} for the exact daemon home (managed seats
+   carry the verified invocation in their runtime helper block) — pass its
+   absolute path as request.inventoryFile; an explicit inline array, including
+   [], always wins. Managed-runtime inventory providers are labeled provenance
+   configured — static config, not live evidence — so pass live list_providers
+   output from the same daemon inline as providers instead. An inventory shows
+   configuration completeness, never provider health or readiness.
    All catalog settings are complete; do not overlay model/effort/features from
    slp-peer, the Lead or a different option. No saved slp-peer profile is required.
    Map catalog provider pi/codex/devin/claude to slp-pi-peer/slp-codex-peer/slp-devin-peer/slp-claude-peer. Combine the wrapper

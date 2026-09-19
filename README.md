@@ -425,7 +425,11 @@ never replace the pool. Two more optional fields, both also honored by
 
 - `inventoryFile`: absolute path to a JSON object carrying
   `providers`/`profiles`; these arrays only fill request fields that are not
-  inline — an explicit inline array (even `[]`) always wins.
+  inline — an explicit inline array (even `[]`) always wins. Generate it with
+  `inventory --paseo-home <absolute-home>` (below); under a managed runtime
+  its providers are `provenance: "configured"` and are refused as launch
+  evidence — pass live `list_providers` output from the same daemon inline as
+  `providers` instead.
 - `assignmentFile`: absolute path to the full assignment brief (must exist,
   be a regular file and be readable). The prompt keeps `assignment` as a
   short brief and appends `Assignment file: <path> — read it first; it is
@@ -463,10 +467,18 @@ node "$SLP_RT/bin/slp.mjs" agents [--paseo-home /absolute/paseo-home]
 ```
 
 `inventory` prints `{providers, profiles, source}` in exactly the shape
-`prepare` consumes. It only calls `paseo provider ls --json` when the given
+`prepare` consumes — the intended pipeline is
+`inventory --paseo-home <absolute-home> > inventory.json`, then
+`"inventoryFile": "/absolute/path/to/inventory.json"` in the request (see
+[`prepare`](#prepare--prepare-handoff) above). It only calls `paseo provider ls --json` when the given
 home's `paseo.pid` names a live process; otherwise it reads
 `agents.providers` from that home's own `config.json` — it never takes
-providers from another daemon and never creates directories. Live providers
+providers from another daemon and never creates directories. Under a managed
+runtime (`SLP_MANAGED_RUNTIME=1`) the CLI listing is never invoked and every
+provider is labeled `provenance: "configured"` — static config, refused as
+launch evidence. Either way the inventory proves configuration completeness,
+not provider health; a listed entry can be stale and is not a readiness
+stamp. Live providers
 are normalized to `{id, enabled, status}` (`enabled` may be `null` when the
 state is unrecognized), while config yields `{id, enabled, extends}`;
 profiles always come from `daemon.agentProfiles`. On multi-daemon hosts, the
