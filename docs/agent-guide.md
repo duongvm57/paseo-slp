@@ -72,7 +72,9 @@ repository wants: each row is a default shape for a kind of work — which
 seats (Peer dispositions) run, in what order, with what write authority
 and evidence gate. Rows describe the task's nature (bounded, hard to
 reverse, vague spec), not file paths; Lead judges each task against its
-row and may lighten or strengthen the seats. The template rows are
+row and may lighten or strengthen the seats — never below a required
+gate, and a single seat only for the change classes the review-gate
+rules list explicitly. The template rows are
 examples — grill the Human one group at a time
 in plain language; the Human describes their workflow and you translate
 answers into classes, dispositions and gates. Ask in the Human's words:
