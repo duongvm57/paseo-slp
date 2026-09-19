@@ -113,7 +113,7 @@ export const createLauncherBuilder = () => ({
   return file;
 }
 
-test('contribute() registers the five RPCs and returns a callable cleanup', async t => {
+test('contribute() registers the nine RPCs and returns a callable cleanup', async t => {
   const stubFile = writeLaneStubs(t);
   const stubUrl = pathToFileURL(stubFile).href;
   const hooks = registerHooks({
@@ -145,7 +145,17 @@ test('contribute() registers the five RPCs and returns a callable cleanup', asyn
   const cleanup = contribute(server);
   assert.deepEqual(
     registrations.map(r => r.name).sort(),
-    ['activate', 'catalog', 'deactivate', 'local-target', 'reconcile', 'set-language', 'status'],
+    [
+      'activate',
+      'catalog',
+      'deactivate',
+      'get-role-routing',
+      'local-target',
+      'reconcile',
+      'set-language',
+      'set-role-routing',
+      'status',
+    ],
   );
   for (const { handler } of registrations) {
     assert.equal(typeof handler, 'function');

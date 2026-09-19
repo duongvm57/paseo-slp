@@ -35,6 +35,8 @@ import {
   type ProfilePrefsValue,
   type ProfileValue,
   type ProjectionValue,
+  type RoleChoiceValue,
+  type RoleRoutingValue,
 } from "../shared/contracts.ts";
 import {
   FAMILIES,
@@ -462,32 +464,54 @@ function launcherPathFor(launchSet: LaunchSet, providerId: string): string {
   return file.path;
 }
 
-/** The twelve generated provider entries for a launch set + resolution. */
+/** The generated provider entries for a launch set + resolution.
+ *
+ *  Settings-driven generation (settings-driven-providers.md §5 Phase 1):
+ *  when `routing` is set, only the chosen supervisor combo, the chosen lead
+ *  combo and all four `slp-<family>-peer` entries are emitted — peers stay
+ *  pool-driven per Lead delegation, so they are always generated. Ids absent
+ *  from the returned map record `present:false` in the plan endpoint, which
+ *  the patch turns into a removal on rebind. A null routing keeps the v1
+ *  all-twelve generation — the documented backward-compatibility decision
+ *  for an absent or legacy routing file. */
 export function desiredProviderEntries(
   launchSet: LaunchSet,
   resolution: ExecutableResolution,
   runtimePath: string,
   daemonHome: string,
+  routing: RoleRoutingValue | null = null,
 ): Record<string, OwnedProviderValue> {
+  const combos: { family: FamilyName; role: "supervisor" | "lead" | "peer" }[] = [];
+  if (routing === null) {
+    for (const family of FAMILIES) {
+      for (const role of ["supervisor", "lead", "peer"] as const) {
+        combos.push({ family, role });
+      }
+    }
+  } else {
+    combos.push(
+      { family: routing.supervisor.family, role: "supervisor" },
+      { family: routing.lead.family, role: "lead" },
+    );
+    for (const family of FAMILIES) combos.push({ family, role: "peer" });
+  }
   const entries: Record<string, OwnedProviderValue> = {};
-  for (const family of FAMILIES) {
+  for (const { family, role } of combos) {
     const binary = resolution.binaries[family];
     const binaryPath = binary.available ? binary.path : null;
-    for (const role of ["supervisor", "lead", "peer"] as const) {
-      const id = ownedProviderId(family, role);
-      entries[id] = {
-        extends: PROVIDER_EXTENDS[family] as OwnedProviderValue["extends"],
-        label: `SLP ${FAMILY_DISPLAY[family]} ${ROLE_DISPLAY[role]}`,
-        command: [launcherPathFor(launchSet, id)],
-        env: desiredProviderEnv(family, {
-          runtimePath,
-          nodePath: resolution.node.path,
-          binaryPath,
-          daemonHome,
-        }),
-        enabled: binary.available,
-      };
-    }
+    const id = ownedProviderId(family, role);
+    entries[id] = {
+      extends: PROVIDER_EXTENDS[family] as OwnedProviderValue["extends"],
+      label: `SLP ${FAMILY_DISPLAY[family]} ${ROLE_DISPLAY[role]}`,
+      command: [launcherPathFor(launchSet, id)],
+      env: desiredProviderEnv(family, {
+        runtimePath,
+        nodePath: resolution.node.path,
+        binaryPath,
+        daemonHome,
+      }),
+      enabled: binary.available,
+    };
   }
   return entries;
 }
@@ -495,31 +519,44 @@ export function desiredProviderEntries(
 /** The two owned saved profiles for a fresh binding (§6, src conventions).
  *  Human-supplied preferences are merged verbatim — the plugin invents no
  *  model, mode, or feature defaults of its own. `family` picks the managed
- *  provider for that role; `null` and absent fields are simply not written. */
+ *  provider for that role; `null` and absent fields are simply not written.
+ *
+ *  Precedence under a stored routing (Phase 1): the routing choice supplies
+ *  the provider (`slp-<routing.family>-<role>`) plus whichever of model,
+ *  modeId, thinkingOptionId and featureValues it sets; an explicit
+ *  `profiles` input on `activate` remains the override applied after
+ *  routing — a per-role `family` pref still repoints the provider. */
 export function desiredProfiles(
   family: FamilyName,
   prefs?: { supervisor?: ProfilePrefsValue; lead?: ProfilePrefsValue },
+  routing: RoleRoutingValue | null = null,
 ): ProfileValue[] {
   const notes = (role: string) =>
     `Managed by the paseo-slp plugin — remove via the SLP surface, not by deleting this profile. SLP ${role}; installed role instructions load automatically. Use Paseo delegation and finish notifications.`;
+  const providerFor = (role: "supervisor" | "lead") =>
+    ownedProviderId(prefs?.[role]?.family ?? routing?.[role].family ?? family, role);
   const fields = (role: "supervisor" | "lead") => {
-    const { family: _family, ...rest } = prefs?.[role] ?? {};
-    return Object.fromEntries(
-      Object.entries(rest).filter(([, value]) => value !== null && value !== undefined),
-    );
+    const { family: _family, ...prefRest } = prefs?.[role] ?? {};
+    const { family: _routingFamily, ...routingRest } = routing?.[role] ?? {};
+    return {
+      ...routingRest,
+      ...Object.fromEntries(
+        Object.entries(prefRest).filter(([, value]) => value !== null && value !== undefined),
+      ),
+    } as Pick<ProfileValue, "model" | "modeId" | "thinkingOptionId" | "featureValues">;
   };
   return [
     {
       id: "slp-supervisor",
       name: "SLP Supervisor",
-      provider: ownedProviderId(prefs?.supervisor?.family ?? family, "supervisor"),
+      provider: providerFor("supervisor"),
       notes: notes("supervisor"),
       ...fields("supervisor"),
     },
     {
       id: "slp-lead",
       name: "SLP Lead",
-      provider: ownedProviderId(prefs?.lead?.family ?? family, "lead"),
+      provider: providerFor("lead"),
       notes: notes("lead"),
       ...fields("lead"),
     },
@@ -548,6 +585,44 @@ export function applyProfilePrefs(
     else next[key] = value;
   }
   return next as ProfileValue;
+}
+
+/** Settings-driven repoint of a live owned profile under a binding (Phase
+ *  1): the routing choice always supplies the provider and whichever
+ *  optional fields it sets; absent optional fields are simply not applied —
+ *  they preserve the live value. `input.profiles` stays the override applied
+ *  after this (absent = preserve, null = clear, family = repoint). */
+function applyRoleRouting(
+  live: ProfileValue,
+  choice: RoleChoiceValue,
+  role: "supervisor" | "lead",
+): ProfileValue {
+  const next: Record<string, unknown> = { ...live, provider: ownedProviderId(choice.family, role) };
+  for (const key of ["model", "modeId", "thinkingOptionId", "featureValues"] as const) {
+    if (choice[key] !== undefined) next[key] = choice[key];
+  }
+  return next as ProfileValue;
+}
+
+/** An effective routing (stored choice plus any `profiles` family override)
+ *  that names an unavailable family can never produce a working seat — fail
+ *  closed rather than bind a profile to a disabled provider, the same rule
+ *  `profiles`/`initialProfileFamily` requests already follow. */
+function assertRoutingAvailable(
+  resolution: ExecutableResolution,
+  routing: RoleRoutingValue,
+): void {
+  const available = availableFamilies(resolution);
+  for (const role of ["supervisor", "lead"] as const) {
+    const family = routing[role].family;
+    if (!available.includes(family)) {
+      throw new OperationConflict(
+        "EXECUTABLE_UNAVAILABLE",
+        `provider family ${family} selected for ${role} is unavailable; the binding would point at a disabled provider`,
+        { path: `daemon.agentProfiles.slp-${role}` },
+      );
+    }
+  }
 }
 
 const PROFILE_ROLE: Record<string, string> = {
@@ -863,6 +938,10 @@ export interface ActivationPlanArgs {
   previousBinding: BindingValue | null;
   resolution: ExecutableResolution;
   launchSet: LaunchSet;
+  /** Settings-driven role routing read from slp-runtime/state/role-routing.json
+   *  (Phase 1): drives which supervisor/lead provider combos are generated and
+   *  what the owned profiles bind to. null → legacy all-twelve generation. */
+  roleRouting: RoleRoutingValue | null;
   /** Candidate identity: freshly materialized result or reused binding assets. */
   candidateSha256: string;
   payloadSha256: string;
@@ -951,6 +1030,19 @@ function validateOwnedProfilesForRebind(
 
 export function planActivation(args: ActivationPlanArgs): PlanResult {
   const { raw, input, previousBinding, resolution, launchSet } = args;
+  const routing = args.roleRouting;
+  // Effective provider generation follows the same precedence as the
+  // profiles themselves (§5 Phase 1): the routing supplies each role's
+  // family, and an explicit `profiles` input family repoint is the later
+  // override — which must also generate its provider, since a profile may
+  // never bind to a provider this very patch removes.
+  const effectiveRouting: RoleRoutingValue | null = routing === null
+    ? null
+    : {
+        ...routing,
+        supervisor: { ...routing.supervisor, family: input.profiles?.supervisor?.family ?? routing.supervisor.family },
+        lead: { ...routing.lead, family: input.profiles?.lead?.family ?? routing.lead.family },
+      };
   const effective = effectiveView(args.effectiveConfig);
   if (effective.enabled !== true) {
     throw new OperationConflict(
@@ -969,6 +1061,7 @@ export function planActivation(args: ActivationPlanArgs): PlanResult {
     resolution,
     args.runtimePath,
     args.daemonHome,
+    effectiveRouting,
   );
   const rawProviders = providersRecord(raw.json);
   const rawProfiles = profilesArray(raw.json);
@@ -1014,6 +1107,21 @@ export function planActivation(args: ActivationPlanArgs): PlanResult {
       );
     }
     desiredProfiles_ = validateOwnedProfilesForRebind(raw.json, resolution);
+    if (routing !== null) {
+      // Phase 1: the stored routing repoints each profile at its chosen
+      // provider and supplies the fields it sets — applied over the
+      // validated live entries, before the explicit `profiles` override.
+      // Availability is asserted on the effective families so a `profiles`
+      // family override cannot bind a provider whose binary is missing.
+      assertRoutingAvailable(resolution, effectiveRouting as RoleRoutingValue);
+      desiredProfiles_ = desiredProfiles_.map(entry =>
+        applyRoleRouting(
+          entry,
+          routing[PROFILE_ROLE[entry.id] as "supervisor" | "lead"],
+          PROFILE_ROLE[entry.id] as "supervisor" | "lead",
+        ),
+      );
+    }
     if (input.profiles) {
       // Explicit profile edit on an existing binding: apply each role's prefs
       // over the validated live entry. A requested provider family must be
@@ -1064,8 +1172,19 @@ export function planActivation(args: ActivationPlanArgs): PlanResult {
         );
       }
     }
-    const family = selectProfileFamily(resolution, effective, input.initialProfileFamily);
-    desiredProfiles_ = desiredProfiles(family, input.profiles);
+    if (routing !== null) {
+      // Phase 1: routing is the source of truth for the initial binding —
+      // the supervisor/lead families come from the stored choice (each must
+      // resolve to an available binary), and `initialProfileFamily` no
+      // longer applies. `profiles` input still overrides per role; a family
+      // override is checked through the effective families so the plan never
+      // binds a provider whose binary is missing.
+      assertRoutingAvailable(resolution, effectiveRouting as RoleRoutingValue);
+      desiredProfiles_ = desiredProfiles(routing.supervisor.family, input.profiles, routing);
+    } else {
+      const family = selectProfileFamily(resolution, effective, input.initialProfileFamily);
+      desiredProfiles_ = desiredProfiles(family, input.profiles);
+    }
     for (const wanted of desiredProfiles_) {
       const existing = rawProfiles.value.filter(
         entry => isRecord(entry) && entry.id === wanted.id,
@@ -1104,8 +1223,16 @@ export function planActivation(args: ActivationPlanArgs): PlanResult {
   const slots = computeSlots(rawProfiles.value, desiredProfiles_);
   const desiredArray = applyOwnedSlots(rawProfiles.value, slots);
   const afterOwned: ProjectionValue = {
+    // The projection still covers the full twelve-id ownership set; under a
+    // routing the non-chosen combos record present:false, which the patch
+    // turns into a removal and the endpoint matchers treat as absent.
     providers: Object.fromEntries(
-      OWNED_PROVIDER_IDS.map(id => [id, { present: true as const, value: desiredProviders[id] }]),
+      OWNED_PROVIDER_IDS.map(id => [
+        id,
+        desiredProviders[id] !== undefined
+          ? { present: true as const, value: desiredProviders[id] }
+          : { present: false as const },
+      ]),
     ),
     profilesPresent: true,
     profiles: slots,
@@ -1120,10 +1247,19 @@ export function planActivation(args: ActivationPlanArgs): PlanResult {
   const alreadyThere = diskMatchesEndpoint(
     raw.json, afterOwned, afterAllProfilesSha256, before.unrelatedPersistedSha256,
   ).match && effective.injectIntoAgents === true;
+  // Owned ids the generation did not emit are removed by this patch. The §6
+  // check-before-removal guard applies to exactly that set: a foreign profile
+  // or metadataGeneration entry referencing a non-chosen provider would be
+  // stranded by a routing-driven removal, so the plan refuses first.
+  const removedProviderIds = OWNED_PROVIDER_IDS.filter(id => desiredProviders[id] === undefined);
+  if (removedProviderIds.length > 0 && !alreadyThere) {
+    assertNoDependentReferences(raw.json, removedProviderIds);
+  }
   const patch = alreadyThere
     ? null
     : {
         providers: desiredProviders,
+        ...(removedProviderIds.length > 0 ? { removeProviders: removedProviderIds } : {}),
         agentProfiles: desiredArray,
         mcp: { injectIntoAgents: true },
       };

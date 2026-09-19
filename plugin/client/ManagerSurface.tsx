@@ -20,8 +20,8 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { activate, catalog, deactivate, reconcile, status, localTarget, setLanguage } from "../shared/contracts.ts";
-import type { CatalogOptionValue, CatalogResult, FamilyName, StartResult, StatusResult, TargetValue } from "../shared/contracts.ts";
+import { activate, catalog, deactivate, reconcile, status, localTarget, setLanguage, getRoleRouting, setRoleRouting } from "../shared/contracts.ts";
+import type { CatalogOptionValue, CatalogResult, FamilyName, RoleRoutingValue, StartResult, StatusResult, TargetValue } from "../shared/contracts.ts";
 import {
   DISABLE_REMOVE_NOTICE,
   EXCLUSIVE_WINDOW_NOTICE,
@@ -34,6 +34,7 @@ import {
   createTargetViews,
   emptyTargetView,
   errorMessage,
+  familyFromProviderId,
   familyHint,
   isDaemonHome,
   newOperationId,
@@ -41,6 +42,7 @@ import {
   operationRows,
   pollDelayAfterStatus,
   reconcileProblem,
+  routingDiverges,
   startPatch,
   stateHint,
   statusRows,
@@ -438,6 +440,8 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   const callLocalTarget = useRpc(localTarget);
   const callCatalog = useRpc(catalog);
   const callSetLanguage = useRpc(setLanguage);
+  const callGetRoleRouting = useRpc(getRoleRouting);
+  const callSetRoleRouting = useRpc(setRoleRouting);
 
   const [detectedHome, setDetectedHome] = useState<string | null>(null);
   const [homeOverride, setHomeOverride] = useState("");
@@ -464,6 +468,21 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   const [languageValue, setLanguageValue] = useState("");
   const [languageDirty, setLanguageDirty] = useState(false);
   const [languageBusy, setLanguageBusy] = useState(false);
+  // Role routing (Phase 1): `routing` is the stored server-side value,
+  // `routingForm` the editable family/model/mode per role. Fields the form
+  // does not edit (thinkingOptionId, featureValues) pass through untouched
+  // on save so the card never silently drops a stored choice.
+  const [routing, setRouting] = useState<RoleRoutingValue | null>(null);
+  const emptyRoutingForm = () => ({
+    supervisor: { family: "codex" as FamilyName, model: "", modeId: "" },
+    lead: { family: "codex" as FamilyName, model: "", modeId: "" },
+  });
+  const [routingForm, setRoutingForm] = useState<{
+    supervisor: { family: FamilyName; model: string; modeId: string };
+    lead: { family: FamilyName; model: string; modeId: string };
+  }>(emptyRoutingForm);
+  const [routingDirty, setRoutingDirty] = useState(false);
+  const [routingBusy, setRoutingBusy] = useState(false);
   const [store] = useState(createTargetViews);
   const [view, setView] = useState<TargetView>(emptyTargetView);
 
@@ -540,6 +559,97 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     setLanguageValue(stored ?? "");
   }, [statusView, languageDirty]);
 
+  // Fetch the stored role routing once per target — the file is plugin-owned
+  // and independent of any binding, so it loads with the first status.
+  const routingLoadedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!target || !key || routingLoadedFor.current === key) return;
+    routingLoadedFor.current = key;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const result = await callGetRoleRouting({ schemaVersion: 1, target });
+        if (!cancelled) setRouting(result.routing);
+      } catch {
+        if (!cancelled) setRouting(null);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- key captures target
+  }, [key]);
+
+  // Prefill the routing form from the stored routing until the Human edits —
+  // falling back to the live profiles' provider/model, then codex. Same
+  // tracking discipline as the language and profile forms.
+  useEffect(() => {
+    if (routingDirty) return;
+    const liveOf = (role: "supervisor" | "lead") =>
+      statusView?.managedProfiles.find(profile => profile.id === `slp-${role}`);
+    const prefill = (role: "supervisor" | "lead") => ({
+      family:
+        routing?.[role].family ??
+        (familyFromProviderId(liveOf(role)?.provider) as FamilyName | null) ??
+        "codex",
+      model: routing?.[role].model ?? liveOf(role)?.model ?? "",
+      modeId: routing?.[role].modeId ?? liveOf(role)?.modeId ?? "",
+    });
+    const next = { supervisor: prefill("supervisor"), lead: prefill("lead") };
+    setRoutingForm(current =>
+      current.supervisor.family === next.supervisor.family &&
+      current.supervisor.model === next.supervisor.model &&
+      current.supervisor.modeId === next.supervisor.modeId &&
+      current.lead.family === next.lead.family &&
+      current.lead.model === next.lead.model &&
+      current.lead.modeId === next.lead.modeId
+        ? current
+        : next,
+    );
+  }, [routing, statusView, routingDirty]);
+
+  const setRoutingField = (
+    role: "supervisor" | "lead",
+    field: "family" | "model" | "modeId",
+  ) => (value: string) => {
+    setRoutingDirty(true);
+    setRoutingForm(current => ({
+      ...current,
+      [role]: { ...current[role], [field]: value },
+    }));
+  };
+
+  // Save validates through the strict schema server-side and lands
+  // atomically; it takes effect at the NEXT activation — never here.
+  const saveRouting = async () => {
+    if (!target) return;
+    setRoutingBusy(true);
+    try {
+      const build = (role: "supervisor" | "lead") => {
+        const choice: Record<string, unknown> = {
+          ...(routing?.[role] ?? {}),
+          family: routingForm[role].family,
+        };
+        const model = routingForm[role].model.trim();
+        const modeId = routingForm[role].modeId.trim();
+        if (model) choice.model = model;
+        else delete choice.model;
+        if (modeId) choice.modeId = modeId;
+        else delete choice.modeId;
+        return choice;
+      };
+      const result = await callSetRoleRouting({
+        schemaVersion: 1,
+        target,
+        routing: { schemaVersion: 1, supervisor: build("supervisor"), lead: build("lead") } as RoleRoutingValue,
+      });
+      setRouting(result.routing);
+      setRoutingDirty(false);
+    } catch (error) {
+      update({ lastError: errorMessage(error) }, target);
+    } finally {
+      setRoutingBusy(false);
+    }
+  };
+
   // Toggle off applies immediately (nothing to type); toggle on waits for
   // the Apply press so an empty value is never written.
   const applyLanguage = async (value: string | null) => {
@@ -592,11 +702,17 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   // once bound. Cached per family; a failure caches an error result so the
   // picker degrades to free text instead of retrying forever.
   const bound = statusView?.binding != null;
-  const neededFamilies: FamilyName[] = !bound
-    ? (profileFamily === "auto" ? [] : [profileFamily])
-    : (["supervisor", "lead"] as const)
-        .map(role => pref(`${role}.family`))
-        .filter((family): family is FamilyName => (FAMILIES as string[]).includes(family));
+  // Role routing cards add their two chosen families so their pickers are
+  // populated even when the profile form isn't editing that family.
+  const neededFamilies: FamilyName[] = [...new Set([
+    ...(!bound
+      ? (profileFamily === "auto" ? [] : [profileFamily])
+      : (["supervisor", "lead"] as const)
+          .map(role => pref(`${role}.family`))
+          .filter((family): family is FamilyName => (FAMILIES as string[]).includes(family))),
+    routingForm.supervisor.family,
+    routingForm.lead.family,
+  ])];
   const neededKey = neededFamilies.join(",");
   useEffect(() => {
     const missing = neededKey.split(",").filter(f => f !== "" && catalogs[f as FamilyName] === undefined);
@@ -1133,6 +1249,125 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
             </View>
           ) : null}
         </Card>
+      ) : null}
+
+      {statusView ? (
+        // Phase 1 role routing: one card per role. The stored routing selects
+        // which managed provider each managed profile binds to at the NEXT
+        // activation — saving never activates on its own, and a divergence
+        // between the stored routing and the live binding is surfaced as a
+        // re-activation-required notice instead.
+        <>
+          {(["supervisor", "lead"] as const).map(role => {
+            const form = routingForm[role];
+            const roleCatalog = catalogs[form.family];
+            const disabled = !target || routingBusy;
+            const diverged = routingDiverges(routing, statusView.managedProfiles);
+            return (
+              <Card
+                key={role}
+                colors={colors}
+                title={role === "supervisor" ? "Supervisor routing" : "Lead routing"}
+                subtitle="Which managed provider the role's saved profile binds to — applied at the next activation, never on save."
+              >
+                <View style={styles.field}>
+                  <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Provider family</Text>
+                  <ChipSelect
+                    colors={colors}
+                    value={form.family}
+                    options={PROFILE_FAMILY_ORDER.map(entry => ({
+                      label: FAMILY_LABEL[entry],
+                      value: entry,
+                    }))}
+                    onChange={setRoutingField(role, "family")}
+                    disabled={disabled}
+                  />
+                </View>
+                {catalogLoadingFor === form.family ? (
+                  <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                    Loading {FAMILY_LABEL[form.family]} catalog…
+                  </Text>
+                ) : null}
+                {roleCatalog?.error ? (
+                  <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
+                    Catalog unavailable: {roleCatalog.error} — enter values manually.
+                  </Text>
+                ) : null}
+                {roleCatalog && roleCatalog.models.length > 0 ? (
+                  <OptionPicker
+                    colors={colors}
+                    label="Model"
+                    hint="Provider default when unset"
+                    options={roleCatalog.models}
+                    value={form.model}
+                    onChange={setRoutingField(role, "model")}
+                    disabled={disabled}
+                    placeholder="Filter models…"
+                  />
+                ) : (
+                  <Field
+                    colors={colors}
+                    label="Model"
+                    hint="Provider default when unset"
+                    value={form.model}
+                    onChangeText={setRoutingField(role, "model")}
+                    placeholder="Model ID — e.g. swe-2-max"
+                    disabled={disabled}
+                  />
+                )}
+                {roleCatalog && roleCatalog.modes.length > 0 ? (
+                  <View style={styles.field}>
+                    <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Mode</Text>
+                    <ChipSelect
+                      colors={colors}
+                      value={form.modeId}
+                      options={[
+                        { label: "Provider default", value: "" },
+                        ...roleCatalog.modes.map(mode => ({ label: mode.label, value: mode.id })),
+                        // A stored mode the catalog doesn't list stays visible.
+                        ...(form.modeId !== "" && !roleCatalog.modes.some(mode => mode.id === form.modeId)
+                          ? [{ label: form.modeId, value: form.modeId }]
+                          : []),
+                      ]}
+                      onChange={setRoutingField(role, "modeId")}
+                      disabled={disabled}
+                    />
+                  </View>
+                ) : (
+                  <Field
+                    colors={colors}
+                    label="Mode"
+                    value={form.modeId}
+                    onChangeText={setRoutingField(role, "modeId")}
+                    placeholder="Mode ID — e.g. bypass"
+                    disabled={disabled}
+                  />
+                )}
+                {diverged ? (
+                  <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
+                    Stored routing differs from the live binding — re-activation required. Run
+                    {statusView ? ` ${activationLabel(statusView)}` : " Activate"} to apply it; nothing activates on save.
+                  </Text>
+                ) : null}
+                <Button
+                  colors={colors}
+                  label={routingBusy ? "Saving…" : "Save routing"}
+                  disabled={disabled || !routingDirty}
+                  onPress={() => void saveRouting()}
+                />
+              </Card>
+            );
+          })}
+          <Card
+            colors={colors}
+            title="Peer routing"
+            subtitle="Peers are pool-driven — each Lead delegation picks a family, so all four managed peer providers stay generated."
+          >
+            <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+              No per-peer selection: the supervisor and lead picks above are the only routed roles.
+            </Text>
+          </Card>
+        </>
       ) : null}
 
       {statusView ? (

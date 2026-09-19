@@ -10,14 +10,17 @@
 // RECOVERY_REQUIRED and wait for reconcile inspect/complete/restore-before.
 
 import { randomUUID } from "node:crypto";
-import { lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   ActivateInput,
   DeactivateInput,
+  GetRoleRoutingInput,
   OperationConflict,
   ReconcileInput,
+  RoleRouting,
   SetLanguageInput,
+  SetRoleRoutingInput,
   StatusInput,
   normalizeConflict,
   type ActivateRequest,
@@ -26,6 +29,7 @@ import {
   type ConflictValue,
   type ConnectedDaemon,
   type DeactivateRequest,
+  type GetRoleRoutingResult,
   type IntentValue,
   type Manager,
   type ManagerDeps,
@@ -33,7 +37,9 @@ import {
   type PlanValue,
   type ReceiptValue,
   type ReconcileRequest,
+  type RoleRoutingValue,
   type SetLanguageResult,
+  type SetRoleRoutingResult,
   type StartResult,
   type StateValue,
   type StatusRequest,
@@ -83,6 +89,34 @@ function readLanguage(stableRoot: string): string | null {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
+  }
+}
+
+// Plugin-owned mutable state, same class as communication-language but read
+// by the activation planner instead of the role bundle:
+// <stableRoot>/state/role-routing.json picks the supervisor/lead provider
+// families (+ optional model/mode/thinking/feature fields) that
+// desiredProviderEntries/desiredProfiles generate from. Backward
+// compatibility decision (settings-driven-providers.md §5 Phase 1): an
+// absent file, unparseable bytes, or a schema/legacy-version mismatch all
+// mean "no routing" — activation then keeps the v1 all-twelve provider
+// generation exactly as before. The file is plugin-owned and rewritten
+// atomically by set-role-routing, so foreign or truncated content degrades
+// to the legacy path rather than blocking activation on a recoverable file.
+const ROUTING_FILE = join("state", "role-routing.json");
+function readRoleRouting(stableRoot: string): RoleRoutingValue | null {
+  let raw: string;
+  try {
+    raw = readFileSync(join(stableRoot, ROUTING_FILE), "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+  try {
+    const parsed = RoleRouting.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
   }
 }
 const MAX_CONFLICTS = 64;
@@ -957,6 +991,10 @@ export function createManager(deps: ManagerDeps): Manager {
         payloadSha256,
         runtimePath,
         daemonHome: ctx.canonicalHome,
+        // Settings-driven provider generation (Phase 1): read once at plan
+        // time inside the serialized operation; a null/legacy routing keeps
+        // the v1 all-twelve generation.
+        roleRouting: readRoleRouting(ctx.stableRoot),
         now: now(),
       });
       transition(ctx, r => {
@@ -2704,9 +2742,49 @@ export function createManager(deps: ManagerDeps): Manager {
     return { schemaVersion: 1, value: parsed.data.value };
   }
 
+  // Plugin-owned role routing — same class of operation as set-language:
+  // one file under slp-runtime/state, no journal, no mutex. Read returns
+  // null on absent/legacy content; write validates the strict schema then
+  // lands atomically (temp sibling + rename) so a crash never leaves a
+  // half-written routing for the next activation to read.
+  async function getRoleRouting(input: unknown): Promise<GetRoleRoutingResult> {
+    const parsed = GetRoleRoutingInput.safeParse(input);
+    if (!parsed.success) {
+      throw new OperationConflict(
+        "INVALID_REQUEST",
+        `invalid get-role-routing input: ${parsed.error.issues[0]?.message ?? "schema"}`,
+      );
+    }
+    const ctx = resolveHome(parsed.data.target);
+    return { schemaVersion: 1, routing: readRoleRouting(ctx.stableRoot) };
+  }
+
+  async function setRoleRouting(input: unknown): Promise<SetRoleRoutingResult> {
+    const parsed = SetRoleRoutingInput.safeParse(input);
+    if (!parsed.success) {
+      throw new OperationConflict(
+        "INVALID_REQUEST",
+        `invalid set-role-routing input: ${parsed.error.issues[0]?.message ?? "schema"}`,
+      );
+    }
+    const ctx = resolveHome(parsed.data.target);
+    const dir = join(ctx.stableRoot, "state");
+    const file = join(ctx.stableRoot, ROUTING_FILE);
+    mkdirSync(dir, { recursive: true });
+    const temp = `${file}.${uuid()}.tmp`;
+    try {
+      writeFileSync(temp, `${JSON.stringify(parsed.data.routing, null, 2)}\n`, { mode: 0o600 });
+      renameSync(temp, file);
+    } catch (error) {
+      rmSync(temp, { force: true });
+      throw error;
+    }
+    return { schemaVersion: 1, routing: parsed.data.routing };
+  }
+
   function close(): void {
     closed = true;
   }
 
-  return { activate, deactivate, reconcile, status, setLanguage, close };
+  return { activate, deactivate, reconcile, status, setLanguage, getRoleRouting, setRoleRouting, close };
 }

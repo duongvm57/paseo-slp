@@ -6,6 +6,7 @@ import type {
   ConflictValue,
   FamilyViewValue,
   OperationViewValue,
+  RoleRoutingValue,
   StartResult,
   StateValue,
   StatusResult,
@@ -281,6 +282,48 @@ export function activationKind(view: StatusResult | null): ActivationKind {
 }
 export const activationLabel = (view: StatusResult | null): string =>
   ({ activate: "Activate", reverify: "Re-verify binding", rebind: "Rebind" })[activationKind(view)];
+
+// ---------------------------------------------------------------------------
+// Role routing (Phase 1 settings-driven provider generation)
+// ---------------------------------------------------------------------------
+
+/** Stable identity for a flat featureValues record — the divergence check
+ *  must not trip on key order between the stored routing and live config. */
+const featureValuesKey = (value: Record<string, unknown> | null | undefined): string =>
+  value == null ? "null" : JSON.stringify(Object.keys(value).sort().map(key => [key, value[key]]));
+
+/** Does the stored routing diverge from the live binding's managed profiles?
+ *  The provider binding is the primary signal; a set routing field that
+ *  differs from the live profile value also counts. Absent optional fields
+ *  are not applied by generation, so they can never diverge. True means a
+ *  re-activation is required to make the binding match the routing — the
+ *  surface reports it but never auto-activates. */
+export function routingDiverges(
+  routing: RoleRoutingValue | null,
+  managedProfiles: StatusResult["managedProfiles"],
+): boolean {
+  if (routing === null) return false;
+  for (const role of ["supervisor", "lead"] as const) {
+    const choice = routing[role];
+    const live = managedProfiles.find(profile => profile.id === `slp-${role}`);
+    if (!live) continue;
+    if (live.provider !== `slp-${choice.family}-${role}`) return true;
+    if (choice.model !== undefined && live.model !== choice.model) return true;
+    if (choice.modeId !== undefined && live.modeId !== choice.modeId) return true;
+    if (choice.thinkingOptionId !== undefined && live.thinkingOptionId !== choice.thinkingOptionId) return true;
+    if (
+      choice.featureValues !== undefined &&
+      featureValuesKey(live.featureValues) !== featureValuesKey(choice.featureValues)
+    ) return true;
+  }
+  return false;
+}
+
+/** Family parsed out of a managed `slp-<family>-<role>` provider id, or null
+ *  for anything else — used to prefill routing pickers from live profiles. */
+export function familyFromProviderId(provider: string | null | undefined): string | null {
+  return /^slp-(codex|pi|devin|claude)-(?:supervisor|lead|peer)$/.exec(provider ?? "")?.[1] ?? null;
+}
 
 // The view patch a start response produces. Conflicts are surfaced whenever
 // they are present — accepted or not (an accepted reconcile inspect can still

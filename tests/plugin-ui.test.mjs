@@ -31,6 +31,8 @@ import {
   pollDelayAfterStatus,
   reconcileProblem,
   recoverPendingStart,
+  familyFromProviderId,
+  routingDiverges,
   startPatch,
   shortenSha,
   visibleConflicts,
@@ -350,6 +352,45 @@ test('sha shortening and status helpers handle nulls', () => {
   assert.equal(shortenSha(null), 'none');
   assert.equal(shortenSha(SHA), `${SHA.slice(0, 12)}…`);
   assert.equal(shortenSha('short'), 'short');
+});
+
+test('routingDiverges compares the stored routing against the live binding', () => {
+  const profiles = (supOver = {}, leadOver = {}) => [
+    { id: 'slp-supervisor', provider: 'slp-pi-supervisor', model: 'pi-model', modeId: null, thinkingOptionId: null, featureValues: null, ...supOver },
+    { id: 'slp-lead', provider: 'slp-devin-lead', model: null, modeId: 'bypass', thinkingOptionId: null, featureValues: { auto_accept: true }, ...leadOver },
+  ];
+  const routing = {
+    schemaVersion: 1,
+    supervisor: { family: 'pi', model: 'pi-model' },
+    lead: { family: 'devin', modeId: 'bypass', featureValues: { auto_accept: true } },
+  };
+
+  // No routing → never diverged (legacy generation).
+  assert.equal(routingDiverges(null, profiles()), false);
+  // Matching provider + set fields → no divergence.
+  assert.equal(routingDiverges(routing, profiles()), false);
+  // Feature-value key order is not divergence.
+  assert.equal(routingDiverges(routing, profiles({}, { featureValues: { auto_accept: true } })), false);
+  // A different bound provider, model, or feature value diverges.
+  assert.equal(routingDiverges(routing, profiles({ provider: 'slp-codex-supervisor' })), true);
+  assert.equal(routingDiverges(routing, profiles({ model: 'other-model' })), true);
+  assert.equal(routingDiverges(routing, profiles({}, { featureValues: { auto_accept: false } })), true);
+  assert.equal(routingDiverges(routing, profiles({}, { modeId: 'plan' })), true);
+  // Absent optional routing fields can never diverge — live values stay.
+  const sparse = { schemaVersion: 1, supervisor: { family: 'pi' }, lead: { family: 'devin' } };
+  assert.equal(routingDiverges(sparse, profiles({ model: 'anything' })), false);
+  // No live profiles yet → nothing to compare.
+  assert.equal(routingDiverges(routing, []), false);
+});
+
+test('familyFromProviderId parses managed provider ids for form prefill', () => {
+  assert.equal(familyFromProviderId('slp-pi-supervisor'), 'pi');
+  assert.equal(familyFromProviderId('slp-claude-peer'), 'claude');
+  assert.equal(familyFromProviderId('slp-devin-lead'), 'devin');
+  assert.equal(familyFromProviderId('codex'), null);
+  assert.equal(familyFromProviderId('slp-gpt-lead'), null);
+  assert.equal(familyFromProviderId('slp-pi'), null);
+  assert.equal(familyFromProviderId(null), null);
 });
 
 // --- disclosures --------------------------------------------------------------

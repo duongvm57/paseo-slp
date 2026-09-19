@@ -164,15 +164,13 @@ function assertReceiptRefinements(receipt: ReceiptValue): void {
     if (!projection) continue;
     assertProjectionShape(projection);
   }
-  // A live binding must own the complete projection: all twelve providers
-  // present and both profile slots — anything less is tampering, not drift.
+  // A live binding must own the complete projection — the exact twelve-id
+  // provider key set (assertProjectionShape already proved it) plus both
+  // profile slots. Settings-driven generation (Phase 1) legitimately records
+  // non-chosen combos as present:false inside that key set; what remains
+  // tampering is a missing profile slot or a malformed key set.
   if (receipt.binding !== null) {
     const owned = receipt.binding.owned;
-    for (const id of OWNED_PROVIDER_IDS) {
-      if (owned.providers[id]?.present !== true) {
-        throw new Error(`bound receipt lacks owned provider ${id}`);
-      }
-    }
     const slotIds = new Set(owned.profiles.map(slot => slot.value.id));
     for (const id of OWNED_PROFILE_IDS) {
       if (!slotIds.has(id)) {

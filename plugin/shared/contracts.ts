@@ -168,6 +168,48 @@ export const SetLanguageOutput = z.object({
   schemaVersion: z.literal(1),
   value: z.string().nullable(),
 }).strict();
+/** One role's settings-driven provider choice (settings-driven-providers.md
+ *  §5 Phase 1). `family` picks the managed `slp-<family>-<role>` provider the
+ *  role's profile binds to; absent optional fields are simply not applied to
+ *  the generated profile — the plugin invents no model/mode defaults. */
+export const RoleChoice = z.object({
+  family: Family,
+  model: z.string().min(1).optional(),
+  modeId: z.string().min(1).optional(),
+  thinkingOptionId: z.string().min(1).optional(),
+  featureValues: z.record(z.string(), z.unknown()).optional(),
+}).strict();
+/** Plugin-owned mutable state at slp-runtime/state/role-routing.json —
+ *  strict, so unknown keys are rejected rather than silently widening the
+ *  routing surface. Peers stay pool-driven and are not part of the schema. */
+export const RoleRouting = z.object({
+  schemaVersion: z.literal(1),
+  supervisor: RoleChoice,
+  lead: RoleChoice,
+}).strict();
+export const GetRoleRoutingInput = z.object({
+  schemaVersion: z.literal(1),
+  target: Target,
+}).strict();
+export const GetRoleRoutingOutput = z.object({
+  schemaVersion: z.literal(1),
+  /** The stored routing, or null when no routing file exists (activation
+   *  then keeps the v1 all-twelve provider generation). */
+  routing: RoleRouting.nullable(),
+}).strict();
+/** Plugin-owned state mutation, same shape as set-language: writes
+ *  slp-runtime/state/role-routing.json under the target's stable root. No
+ *  authority gate — it touches no config.json entry and takes effect at the
+ *  next activation, which regenerates providers/profiles from the choice. */
+export const SetRoleRoutingInput = z.object({
+  schemaVersion: z.literal(1),
+  target: Target,
+  routing: RoleRouting,
+}).strict();
+export const SetRoleRoutingOutput = z.object({
+  schemaVersion: z.literal(1),
+  routing: RoleRouting,
+}).strict();
 export const LocalTargetInput = z.object({
   schemaVersion: z.literal(1),
 }).strict();
@@ -241,6 +283,8 @@ export const status = defineRpc({ name: "status", input: StatusInput, output: St
 export const localTarget = defineRpc({ name: "local-target", input: LocalTargetInput, output: LocalTargetOutput });
 export const catalog = defineRpc({ name: "catalog", input: CatalogInput, output: CatalogOutput });
 export const setLanguage = defineRpc({ name: "set-language", input: SetLanguageInput, output: SetLanguageOutput });
+export const getRoleRouting = defineRpc({ name: "get-role-routing", input: GetRoleRoutingInput, output: GetRoleRoutingOutput });
+export const setRoleRouting = defineRpc({ name: "set-role-routing", input: SetRoleRoutingInput, output: SetRoleRoutingOutput });
 
 // ---------------------------------------------------------------------------
 // §7 receipt / operation-intent journal schemas (server-internal; the client
@@ -388,6 +432,12 @@ export type DeactivateRequest = z.infer<typeof DeactivateInput>;
 export type StatusRequest = z.infer<typeof StatusInput>;
 export type SetLanguageRequest = z.infer<typeof SetLanguageInput>;
 export type SetLanguageResult = z.infer<typeof SetLanguageOutput>;
+export type RoleChoiceValue = z.infer<typeof RoleChoice>;
+export type RoleRoutingValue = z.infer<typeof RoleRouting>;
+export type GetRoleRoutingRequest = z.infer<typeof GetRoleRoutingInput>;
+export type GetRoleRoutingResult = z.infer<typeof GetRoleRoutingOutput>;
+export type SetRoleRoutingRequest = z.infer<typeof SetRoleRoutingInput>;
+export type SetRoleRoutingResult = z.infer<typeof SetRoleRoutingOutput>;
 export type StartResult = z.infer<typeof StartOutput>;
 export type StatusResult = z.infer<typeof StatusOutput>;
 export type BindingViewValue = z.infer<typeof BindingView>;
@@ -595,6 +645,12 @@ export interface Manager {
    *  no mutex — it is one atomic file under slp-runtime/state that only the
    *  role bundle reads, at session entry. */
   setLanguage(input: SetLanguageRequest): Promise<SetLanguageResult>;
+  /** Read the plugin-owned role-routing file; null when unset or legacy. */
+  getRoleRouting(input: GetRoleRoutingRequest): Promise<GetRoleRoutingResult>;
+  /** Validate and atomically persist the role routing — one file under
+   *  slp-runtime/state that only the next activation consumes. No journal,
+   *  no mutex, no authority gate (same class of write as set-language). */
+  setRoleRouting(input: SetRoleRoutingRequest): Promise<SetRoleRoutingResult>;
   /** Stop accepting work and close owned resources. Does not deactivate SLP
    * or remove files; recovery stays journal-driven. */
   close(): void;
