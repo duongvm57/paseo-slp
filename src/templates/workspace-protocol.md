@@ -12,8 +12,10 @@ decided_at: ''
 
 # Workspace Protocol
 
-Lead reads this file before delegation. Supervisor reads it when assigned a
-protocol audit. Lead passes only task-relevant constraints to the Peer.
+Supervisor and Lead read this file when the assignment lands — before any
+reply or decision that depends on repository tactics, not only before
+delegation. Supervisor also reads it when assigned a protocol audit. Lead
+passes only task-relevant constraints to the Peer.
 
 This is a starting template of repository tactics. The Human's current assignment
 controls authority. Complete unknown fields from repository evidence and the
@@ -52,8 +54,8 @@ dependent work — it never defaults to Lead.
 | Class | Starting topology and evidence gate |
 |---|---|
 | Tiny / bounded familiar | One Engineer, focused proof and Lead artifact inspection. Lead may implement tiny tightly coupled work if assignment allows. Independent review optional unless material risk appears. |
-| Cross-module / lifecycle / migration / security | Read-only Architect investigates before implementation; one owner per write scope; independent Reviewer on stable candidate before Lead acceptance. |
-| Foundation / costly architecture lock-in | Independent design lenses or sealed council with distinct mandates; Lead records decision/counterargument/reversal conditions; Engineer then independent review. Human decides owner-only trade-offs. |
+| Cross-module / lifecycle / migration / security | Read-only Architect investigates before implementation; one owner per write scope; independent review gate — split-axis seats, never one merged seat — on the stable candidate before Lead acceptance. |
+| Foundation / costly architecture lock-in | Independent design lenses or sealed council with distinct mandates; Lead records decision/counterargument/reversal conditions; Engineer then the independent review gate. Human decides owner-only trade-offs. |
 | Large dependency in a different domain | Separate bounded lane or dependency Lead within authority; explicit contract, handback and integration owner. |
 
 For council, default to two distinct lenses, at most one challenge/response round
@@ -102,6 +104,10 @@ maintenance, cost limits and
 settlement boundaries. Provider changes for existing work require a new-session
 handoff; an eligible pool option does not itself grant replacement authority.
 Use paseo-slp-onboarding to update tactics and pool while preserving Human choices.
+Every seat joining the team is created through agent-scoped create_agent so the
+host records the parent link, report route and sidebar tree; prompting a
+standalone session can observe work it already owns but cannot carry a new
+delegation.
 
 ## Monitoring and heartbeat
 
@@ -123,6 +129,10 @@ integration/failure/cancellation/migration checks or Human visual/playtest/produ
 evaluation where needed. Coverage and mock-only checks cannot define success.
 Use a deterministic snapshot or exact commit with relevant working changes accounted
 for; record external proof separately. Review and verdict bind to the same candidate.
+Acceptance is not assignment close: keep accepted Peers idle after the accept
+sweep so rework keeps its context, and consider a batch archive when the
+assignment closes and rework has settled. A Human stop still takes effect
+immediately; idle retention never runs hidden work or delays required cleanup.
 
 ## Reopen, dependency, and blocked handling
 

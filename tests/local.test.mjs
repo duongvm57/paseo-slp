@@ -165,3 +165,35 @@ test('role bundle load paths are the contract: Peer never receives delegation po
   }
   assert.throws(() => roleBundle(installed, 'engineer'), /Unknown role/);
 });
+
+test('decision-doctrine lines reach the standalone bundles that need them and never reach Peer', t => {
+  const installed = join(fixture(t), 'release');
+  install(root, installed);
+  // The review-gate invariant and the create_agent parentage rule ride
+  // delegation.md (Supervisor + Lead); the re-read trigger and the
+  // protocol-read timing live in the role files. Peer must receive none.
+  const [supervisor, lead] = ['supervisor', 'lead'].map(role => roleBundle(installed, role, {}).instructions);
+  for (const instructions of [supervisor, lead]) {
+    assert.match(instructions, /does not license merging\s+the axes into one seat/, 'review-gate invariant');
+    assert.match(instructions, /cannot carry a new\s+delegation/, 'agent-scoped create_agent rule');
+  }
+  assert.match(lead, /re-read\s+the review-gate rules/);
+  assert.match(lead, /after resume or compaction/);
+  assert.ok(!/re-read\s+the review-gate rules/.test(supervisor), 'the re-read trigger is Lead-scoped');
+  assert.match(supervisor, /before replying to the Human/, 'B12 protocol-read timing');
+  assert.match(lead, /before your first reply/, 'B12 protocol-read timing');
+  const peer = roleBundle(installed, 'peer', {}).instructions;
+  assert.ok(!/does not license merging/.test(peer));
+  assert.ok(!/re-read\s+the review-gate rules/.test(peer));
+  assert.ok(!/cannot carry a new\s+delegation/.test(peer));
+  for (const ref of ['orchestration.md', 'review-gates.md']) {
+    assert.ok(!peer.includes(readFileSync(join(installed, 'src/references', ref), 'utf8')), `Peer must not load ${ref} bytes`);
+  }
+  // The shipped protocol template carries the same doctrine: read-on-landing,
+  // split-axis gate wording, idle retention and create_agent-only seats.
+  const template = readFileSync(join(installed, 'src/templates/workspace-protocol.md'), 'utf8');
+  assert.match(template, /when the assignment lands/);
+  assert.match(template, /split-axis seats, never one merged seat/);
+  assert.match(template, /keep accepted Peers idle/);
+  assert.match(template, /agent-scoped create_agent/);
+});

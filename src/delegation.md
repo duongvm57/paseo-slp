@@ -43,8 +43,12 @@ Peer runtime changes remain inside the project pool; quota fallback follows its 
    then the copied bundle's own `modeId`. When none is set, ask the Human;
    an agent must never silently inherit the caller's default. Record selected profile ID or
    catalog option ID/hash and exact bundle with the launch arguments.
-   Use agent-scoped Paseo create_agent; it has no profile parameter.
-   Pass the actual workspaceId, title and notifyOnFinish=true.
+   Use agent-scoped Paseo create_agent for every seat joining the team —
+   Supervisor→Lead and Lead→Peer alike; it has no profile parameter. Only
+   agent-scoped creation gives the host the parent link, report route and
+   sidebar tree the team relies on: prompting an existing standalone session
+   can observe work that session already owns but cannot carry a new
+   delegation. Pass the actual workspaceId, title and notifyOnFinish=true.
    Use titles `Supervisor — <task>`, `Lead — <task>` and
    `Peer — <Disposition> — <task>`; for example Engineer and Reviewer Peers
    share the task label but have distinct dispositions. Pass taskLabel and the
@@ -90,6 +94,11 @@ Peer runtime changes remain inside the project pool; quota fallback follows its 
    the implementer and the Lead's reasoning; follow references/orchestration.md
    for reuse of an existing independent Reviewer. CLI run, native subagents and
    context forks are not delegation substitutes.
+   A required review gate defaults to parallel seats on split axes (Spec and
+   Standards): a summary like "Engineer → Reviewer" does not license merging
+   the axes into one seat, and a task too small to require review is a separate
+   judgment from loosening a required gate. Required seats that cannot be
+   supplied make the gate BLOCKED, never permission to skip or merge it.
 4. Use references/monitoring.md to arrange event-driven waits, material reporting
    from Lead to Supervisor, and a heartbeat safety net when needed. On a
    finish/error/permission notification, read get_agent_status and

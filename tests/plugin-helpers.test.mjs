@@ -185,6 +185,27 @@ test('role instructions carry the spawn kit and policy locators at session entry
   assert.ok(!bare.instructions.includes('Policy locators —'));
 });
 
+test('managed bundles carry the review-gate invariant and Lead trigger; Peer carries neither', t => {
+  const dir = fixture(t), installed = join(dir, 'release');
+  install(root, installed);
+  const env = {
+    SLP_MANAGED_RUNTIME: '1', SLP_NODE_BIN: '/n/bin/node',
+    SLP_RUNTIME_ROOT: installed, SLP_DAEMON_HOME: '/h',
+  };
+  for (const role of ['supervisor', 'lead']) {
+    const instructions = roleBundle(installed, role, env).instructions;
+    assert.match(instructions, /does not license merging\s+the axes into one seat/, role);
+    assert.match(instructions, /cannot carry a new\s+delegation/, role);
+  }
+  assert.match(roleBundle(installed, 'lead', env).instructions, /re-read\s+the review-gate rules/);
+  assert.ok(!/re-read\s+the review-gate rules/.test(roleBundle(installed, 'supervisor', env).instructions));
+  const peer = roleBundle(installed, 'peer', env).instructions;
+  assert.ok(!/does not license merging/.test(peer));
+  assert.ok(!/re-read\s+the review-gate rules/.test(peer));
+  assert.ok(!/cannot carry a new\s+delegation/.test(peer));
+  assert.ok(!peer.includes(readFileSync(join(installed, 'src/references/orchestration.md'), 'utf8')));
+});
+
 // --- inventory: managed vs unmanaged ---------------------------------------
 
 test('managed inventory reads the exact home, never the CLI, and labels providers configured', t => {

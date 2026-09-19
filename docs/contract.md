@@ -15,7 +15,7 @@ Local installation/transport checks do not constitute workflow acceptance.
 | bin/devin-role.mjs, src/role-transport.mjs | Generic ACP adapter; prepend installed role instructions to the first session prompt of each session; re-arm on load/resume/fork. |
 | bin/claude-role.mjs, src/role-transport.mjs | Claude Agent SDK stream-json adapter; append installed role instructions to the initialize control request's system-prompt append field; all other frames pass through. |
 | src/common.md, src/roles/*.md | Authority and role behavior; no repository tactics or model IDs. |
-| src/delegation.md | Paseo profile discovery, agent-scoped delegation, notification and report retrieval. Only Supervisor/Lead load it. |
+| src/delegation.md | Paseo profile discovery, agent-scoped delegation, notification and report retrieval; inlines the required review-gate invariant and the agent-scoped create_agent rule for new seats. Only Supervisor/Lead load it. |
 | src/references/orchestration.md | Lead's conditional topology, independent review/council, dependency and integration procedure. |
 | src/references/monitoring.md | Supervisor/Lead event observation, heartbeat ownership and resource settlement. |
 | src/references/governance.md | Supervisor scope, causal notebook, authorized recovery and policy evolution. |
@@ -118,18 +118,26 @@ provider command, installed bytes, actual session instructions and host parentag
 Permissions and role boundaries remain distinct: policy is not tool isolation.
 
 Assignment supplies objective, repository/workspace, owned/excluded scope,
-authority, verification and handback. Lead reads the repository protocol and
-passes only relevant constraints to Peer. No global role is written to AGENTS.md.
+authority, verification and handback. Supervisor and Lead read the repository
+protocol when the assignment lands — before decisions that depend on its
+tactics, not only before delegation. Lead passes only relevant constraints to
+Peer. No global role is written to AGENTS.md.
 
 Common/role instructions and the Supervisor/Lead delegation procedure load at
 session entry. They point to conditional references under the installed src/
 directory. The recursive install unit includes all those references; the full
 operating guide stays a source document, not a prompt broadcast to every role.
+Load-bearing decision rules — the required review gate and agent-scoped seat
+creation — sit in that always-loaded layer, and Lead re-reads the conditional
+references at the decisions that apply them, including after resume or
+compaction.
 Protocol defaults select tactics; global roles no longer impose a single Engineer
 or prohibit heartbeat for every assignment. Assignment supplies Peer disposition,
 read/write authority and output; independent review uses sessions separate from
-implementation and exact candidates. Within one assignment, Lead normally reuses
-the Engineer for corrections and the independent Reviewer for re-review on the new
+implementation and exact candidates; a required gate is parallel seats on split
+axes — never one merged seat — and seats that cannot be supplied make it
+BLOCKED rather than skipped. Within one assignment, Lead normally reuses
+the Engineer for corrections and the same independent review seats for re-review on the new
 stable candidate. New independent seats and recovery remain explicit choices.
 Lead builds relevant project context from repository evidence and maintains a
 decision/ownership checkpoint across handbacks and resume; Peers receive only
@@ -173,7 +181,10 @@ fields apply to prepare-handoff through the shared plan builder.
 Catalog settings cannot be overlaid via route runtime/profile overrides. Explicit
 binding without profiles remains a separate Human-authorized offline/handoff path,
 not an ordinary missing-pool fallback. Helpers emit create arguments only; Paseo
-owns lifecycle and actual settings. Source selection is shared by prepare-handoff.
+owns lifecycle and actual settings. New seats are created through agent-scoped
+create_agent so the host records parentage, the report route and the sidebar
+tree; prompting a standalone session observes work it already owns and cannot
+carry a new delegation. Source selection is shared by prepare-handoff.
 
 init creates missing protocol, empty pool scaffold and Supervisor notebook file
 without overwriting existing files. Onboarding completes the project pool; empty init output is not ready for

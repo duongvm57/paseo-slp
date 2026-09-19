@@ -119,7 +119,10 @@ to the protocol; numerical examples in the guide are heuristics.
 
 At task completion, cancellation, handoff or expiry review, reconcile the owner map
 with the resource receipts: task descendants, pending permissions, terminals,
-workspace scripts, schedules/heartbeats and processes. Human stop halts further
+workspace scripts, schedules/heartbeats and processes. Artifact acceptance alone
+is not that boundary: an accepted Peer stays idle against rework until the
+assignment closes, then settles in one pass — idle retention neither runs
+hidden work nor delays a required cleanup. Human stop halts further
 work and follow-ups; cancel owned task agents as authorized by common policy, and
 stop the observer's own task-local wakes. Do not start a new cleanup agent after stop.
 

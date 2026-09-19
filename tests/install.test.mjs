@@ -97,7 +97,7 @@ test('workspace init creates only protocol, routing and notebook once and preser
   const protocol = join(dir, '.paseo-slp/workspace-protocol.md');
   const routing = join(dir, '.paseo-slp/slp-routing.json');
   const notebook = join(dir, '.paseo-slp/notebook.md');
-  assert.match(readFileSync(protocol, 'utf8'), /Lead reads this file/);
+  assert.match(readFileSync(protocol, 'utf8'), /Supervisor and Lead read this file when the assignment lands/);
   const seeded = readJson(routing).options;
   assert.deepEqual(seeded, readJson(join(root, 'src/templates/slp-routing.json')).options);
   assert.ok(seeded.length > 0 && seeded.every(o => o.enabled === false && o.availability === 'unknown'));
@@ -168,6 +168,11 @@ test('installed adapter injects every role over stdio while preserving host prom
     assert.ok(actual[3].params.collaborationMode.settings.developer_instructions.endsWith(instruction));
     assert.deepEqual(actual.slice(4), messages.slice(4));
     assert.equal(roleBundle(destination, role).orchestrates, role !== 'peer');
+    // The injected bytes carry the required review-gate invariant to the
+    // orchestrating roles and the re-read trigger to Lead alone; both reach
+    // the seat on thread/start and thread/resume (same instruction string).
+    assert.equal(/does not license merging\s+the axes into one seat/.test(instruction), role !== 'peer');
+    assert.equal(/re-read\s+the review-gate rules/.test(instruction), role === 'lead');
     assert.equal(execFileSync(process.execPath, [argv[0], role, '--version'], { env, encoding: 'utf8' }).trim(), 'probe-ok');
   }
 });

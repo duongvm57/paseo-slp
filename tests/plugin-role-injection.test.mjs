@@ -160,6 +160,23 @@ test('agent.create: slp-* provider without resolvable role fails closed', async 
   }
 });
 
+test('agent.create: injected bundle carries the review-gate invariant and Lead trigger, never to Peer', async t => {
+  const { injection } = makeInjection(t);
+  for (const id of HOOK_IDS) {
+    const role = id.split('-')[2];
+    const out = await injection.agentCreate(createReq(id));
+    const prompt = out.config.systemPrompt;
+    if (role === 'peer') {
+      assert.ok(!/does not license merging/.test(prompt), id);
+      assert.ok(!/re-read\s+the review-gate rules/.test(prompt), id);
+      assert.ok(!/cannot carry a new\s+delegation/.test(prompt), id);
+      continue;
+    }
+    assert.match(prompt, /does not license merging\s+the axes into one seat/, id);
+    assert.equal(/re-read\s+the review-gate rules/.test(prompt), role === 'lead', id);
+  }
+});
+
 test('agent.create: missing binding fails closed for hook ids, not for pass-through ids', async t => {
   const { injection } = makeInjection(t, { binding: null });
   for (const id of DEVIN_IDS) {

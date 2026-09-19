@@ -15,8 +15,12 @@ before delegating; distinguish verified facts from assumptions and unresolved
 questions. An unclear boundary blocks only the work that depends on that decision.
 Keep a concise project checkpoint in the task's permitted notes or session:
 decisions and rationale, evidence paths, candidate, owner/agent IDs, dependencies,
-open findings and next actions. Update it at material decisions and handbacks;
-after resume/compaction reconcile it with current repository and actor state.
+open findings and next actions — and, when a review gate applies, the required
+gate, its axis→seat IDs and the rule source or exception relied on. Update it at
+material decisions and handbacks; after resume/compaction reconcile it with
+current repository and actor state. The checkpoint indexes decisions made; it is
+neither a substitute policy source nor proof of compliance — a checkpoint that
+survives without its rules sends you back to the references, never around them.
 Pass each Peer the relevant objective, contracts and constraints, plus evidence
 references; retain project-wide integration context in Lead. Context gathering
 does not authorize implementation, broaden scope or require reading the whole repo.
@@ -30,8 +34,8 @@ Use the smallest topology that supplies the required independent judgment:
 | Task need | Execution and handback |
 |---|---|
 | Tiny, tightly coupled | Lead directly if protocol/authority permit, otherwise one Engineer; focused artifact inspection. |
-| Bounded implementation | Engineer owns writes and proof; Lead inspects; independent Reviewer if risk/protocol requires. |
-| Cross-module ownership or lifecycle | Read-only Architect reconstructs boundaries; Lead records design decision; Engineer implements; independent Reviewer falsifies stable result when required. |
+| Bounded implementation | Engineer owns writes and proof; Lead inspects; independent review gate if risk/protocol requires. |
+| Cross-module ownership or lifecycle | Read-only Architect reconstructs boundaries; Lead records design decision; Engineer implements; independent review gate falsifies the stable result when required. |
 | Multiple plausible foundations or costly lock-in | Independent design lenses or sealed council; Lead reconciles material propositions before implementation. |
 | Large dependency branch | Bounded Peer/lane or dependency Lead, with scope and handback separate from the main objective. |
 
@@ -51,6 +55,12 @@ Reviewer to recheck the new stable candidate and affected findings; reviewing an
 earlier version does not make that Reviewer its implementer. Supply the new
 candidate identity, changes and prior findings, and require current evidence for
 closure and regression assessment. Prior approval never transfers automatically.
+
+Reuse reaches only seats this team created through agent-scoped create_agent —
+the creation that gives the host the parent link, report route and sidebar
+tree. Prompting a standalone session can observe work it already owns, but it
+cannot carry a new delegation: without the parent link the seat has no report
+route and sits outside the Human-inspectable tree.
 
 Before reuse, verify the Peer ID, owned scope, availability, authority and current
 runtime against the project routing policy. Resume through Paseo follow-up; reuse
@@ -135,4 +145,7 @@ migration, cancellation, performance or Human product/visual/playtest evidence a
 appropriate; unit-test success cannot substitute for an untested outcome. The Human
 decides subjective or owner-only trade-offs. Complete with candidate, actual checks,
 review evidence, ACCEPT/CHANGES_REQUESTED/BLOCKED, residual risks and resource settlement
-from references/monitoring.md. Artifact acceptance and resource settlement are distinct.
+from references/monitoring.md. Artifact acceptance and resource settlement are
+distinct, and acceptance is not assignment close: accepted seats keep their
+context for rework and re-review until the assignment itself closes, when
+settlement runs per references/monitoring.md and the repository protocol.
