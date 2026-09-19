@@ -735,6 +735,47 @@ function runNode(args, options = {}) {
   return { child, done };
 }
 
+// Readiness handshake for the signal test: writes one protocol frame and
+// resolves once its echo comes back through the shim's stdout. The fake
+// binary's argv marker only proves the grandchild forked — the wrapper
+// installs its signal-forwarding handlers in the synchronous turn after
+// spawn(), so under parallel load the marker can appear while the shim still
+// has the default SIGTERM disposition and dies instead of forwarding. A
+// protocol echo can only come back after wrapper module evaluation finished,
+// and the handlers are registered before the readline loop — so one
+// round-trip proves the shim can actually receive a forwarded signal. Fails
+// fast if the child exits first; kills the child on timeout.
+async function waitForProtocolEcho(held, frame, timeoutMs = 15000) {
+  let buf = '';
+  let exited = false;
+  const onData = chunk => { buf += chunk; };
+  held.child.stdout.on('data', onData);
+  held.child.stdin.on('error', () => {});
+  held.child.once('exit', () => { exited = true; });
+  try {
+    held.child.stdin.write(frame);
+    const deadline = Date.now() + timeoutMs;
+    while (!buf.includes('\n')) {
+      if (exited) {
+        const result = await held.done;
+        throw new Error(
+          `shim exited before the protocol echo (code=${result.code} signal=${result.signal}): ${result.stderr.trim()}`);
+      }
+      if (Date.now() > deadline) throw new Error(`no protocol echo within ${timeoutMs}ms`);
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    return buf;
+  } catch (error) {
+    held.child.kill('SIGKILL');
+    // Reap the child, but an orphaned grandchild can hold the pipes open —
+    // don't let the reap extend the failure past a bounded grace.
+    await Promise.race([held.done, new Promise(resolve => setTimeout(resolve, 2000))]);
+    throw error;
+  } finally {
+    held.child.stdout.off('data', onData);
+  }
+}
+
 test('shim: missing args prints usage and exits nonzero', async () => {
   const { done } = runNode([join(root, 'bin', 'slp-shim.mjs')]);
   const result = await done;
@@ -874,15 +915,13 @@ test('shim: exit codes, signal forwarding and line backpressure hold', async t =
   assert.equal(exited.code, 3, 'native exit code forwards through wrapper and shim');
 
   // SIGTERM to the launcher forwards to the family process; the shim exits 143.
-  // Wait for the fake binary's argv marker instead of a fixed sleep.
-  const marker = join(f.dir, 'codex.argv');
-  rmSync(marker, { force: true });
-  const held = runShim(f, 'codex', 'peer', ['app-server', 'hold'], { stdin: false });
-  const deadline = Date.now() + 5000;
-  while (!existsSync(marker)) {
-    if (Date.now() > deadline) throw new Error('fake binary never wrote its argv marker');
-    await new Promise(resolve => setTimeout(resolve, 25));
-  }
+  // `cat` with stdin held open is the long-lived child; one protocol
+  // round-trip is the readiness handshake — the argv marker only proves the
+  // grandchild forked, not that the shim installed its signal handlers.
+  const held = runShim(f, 'codex', 'peer', ['app-server'], { stdin: false });
+  const probe = JSON.stringify({ method: 'readiness-probe' }) + '\n';
+  const echoed = await waitForProtocolEcho(held, probe);
+  assert.equal(echoed, probe, 'passthrough frame echoes back verbatim');
   held.child.kill('SIGTERM');
   const sig = await held.done;
   assert.equal(sig.code, 143);
