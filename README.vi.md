@@ -599,6 +599,8 @@ Spec implement:
 
 - [Plugin implementation spec](docs/spec/paseo-plugin-implementation.md)
 - [Plugin feasibility audit](docs/spec/paseo-plugin-feasibility.md)
+- [Settings-driven providers + hook injection](docs/spec/settings-driven-providers.md) —
+  sketch hướng post-v1
 
 Báo cáo và điều tra:
 

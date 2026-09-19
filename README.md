@@ -626,6 +626,8 @@ Implementation specification:
 
 - [Plugin implementation spec](docs/spec/paseo-plugin-implementation.md)
 - [Plugin feasibility audit](docs/spec/paseo-plugin-feasibility.md)
+- [Settings-driven providers + hook injection](docs/spec/settings-driven-providers.md) —
+  post-v1 direction sketch
 
 Reports and investigations:
 
