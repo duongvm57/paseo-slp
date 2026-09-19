@@ -65,8 +65,9 @@ Three separate layers carry three separate concerns:
 │     <candidateSha>/    immutable SLP payload (policy bytes,        │
 │                        shims, role wrappers, gate, transports,    │
 │                        helpers)                                  │
-│     launchers/<sha>/   devin launcher files (hook families run    │
-│                        the candidate's bin/slp-gate.mjs directly) │
+│     launchers/<sha>/   per-provider argv0 launchers — gate        │
+│                        launchers for codex/pi/claude, shim        │
+│                        launchers for devin                      │
 │     state/receipt.json what the plugin believes it owns           │
 │     state/communication-language                                   │
 │                            optional injected language (toggleable) │
@@ -118,9 +119,11 @@ agent.session_open before-hook overlays a non-empty
 SLP_SESSION_OPEN_GRANT onto the provider env
         │
         ▼
-provider entry command: node <candidate>/bin/slp-gate.mjs <argv>
+provider entry command: <launchers>/<sha>/slp-<family>-<role> <argv>
+        │  generated gate launcher exports the frozen SLP_FAMILY_BIN
+        │  and execs <candidate>/bin/slp-gate.mjs under the frozen Node —
         │  gate verifies the grant is live — fails closed in a hook gap —
-        ▼  then execs the real family binary (SLP_FAMILY_BIN)
+        ▼  then execs the real family binary
 provider session begins with SLP instructions already in its
 durable context
 
@@ -154,6 +157,14 @@ Devin keeps the wrapper transport because its ACP adapter drops
 via the two before-hooks, but never afterwards — no proxy, no monitoring
 daemon, no session interception. The gate is what makes a hook gap (plugin
 disabled or reloading) fail visibly instead of spawning an unroled seat.
+
+Fail-closed reaches further than the gap case: the hooks and the gate are
+active from the moment the plugin is installed, so any `slp-*` create is
+aborted while no binding exists — a plugin that is installed but never
+activated, or whose activation failed, rejects every `slp-*` spawn rather
+than producing an unroled seat. The `slp-*` providers only appear in the
+config once activation writes them, so in practice this only bites when a
+config outlives its binding (e.g. a restored or hand-edited config).
 
 ## The hidden channel
 

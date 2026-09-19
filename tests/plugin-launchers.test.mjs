@@ -411,20 +411,24 @@ const readEnv = path =>
     return [l.slice(0, i), l.slice(i + 1)];
   }));
 
-test('launchers: publish writes manifest + 3 devin quoted launchers, verify round-trips', async t => {
+test('launchers: publish writes manifest + 12 quoted launchers (9 gate + 3 shim), verify round-trips', async t => {
   const f = await fixtureRuntime(t);
   assert.equal(basename(f.set.directory), f.set.launchSetSha256);
   assert.equal(f.set.launchManifestSha256, f.set.launchSetSha256);
   const manifest = JSON.parse(readFileSync(f.manifestPath).toString('utf8'));
   assert.equal(manifest.schemaVersion, 1);
   // The manifest keeps the full four-family resolution record — the shipped
-  // devin shim validates the complete sets — but only devin gets launchers.
+  // devin shim validates the complete sets — and records which families are
+  // gate execs vs shim launchers.
   assert.deepEqual(manifest.families.sort(), [...FAMILIES].sort());
-  assert.deepEqual(manifest.launcherFamilies, ['devin']);
+  assert.deepEqual(manifest.launcherFamilies.sort(), [...FAMILIES].sort());
+  assert.deepEqual(manifest.gateFamilies.sort(), ['claude', 'codex', 'pi']);
   const names = readdirSync(f.set.directory).sort();
-  assert.equal(names.length, 4);
-  assert.deepEqual(f.set.files.map(file => basename(file.path)),
-    ROLES.map(role => `slp-devin-${role}`));
+  assert.equal(names.length, 13);
+  assert.deepEqual(
+    f.set.files.map(file => basename(file.path)).sort(),
+    FAMILIES.flatMap(family => ROLES.map(role => `slp-${family}-${role}`)).sort(),
+  );
   for (const file of f.set.files) assert.equal(file.mode, 0o755);
   const verified = await f.launchers.verify(f.set.directory);
   assert.equal(verified.launchSetSha256, f.set.launchSetSha256);
@@ -438,15 +442,27 @@ test('launchers: publish writes manifest + 3 devin quoted launchers, verify roun
     binaries: f.binaries,
   });
   assert.equal(again.launchSetSha256, f.set.launchSetSha256);
-  // Exact launcher bytes: NODE_OPTIONS unset for the shim's own node boot,
-  // fixed args single-quoted, -- separator, "$@" verbatim.
-  const launcher = readFileSync(join(f.set.directory, 'slp-devin-peer'), 'utf8');
-  const expected =
+  // Exact shim launcher bytes (devin): NODE_OPTIONS unset for the shim's own
+  // node boot, fixed args single-quoted, -- separator, "$@" verbatim.
+  const shimLauncher = readFileSync(join(f.set.directory, 'slp-devin-peer'), 'utf8');
+  const shimExpected =
     '#!/bin/sh\n' +
     'unset NODE_OPTIONS\n' +
     `exec ${sq(f.node.path)} ${sq(join(f.candidate, 'bin', 'slp-shim.mjs'))} ` +
     `${sq(f.manifestPath)} ${sq(f.set.launchManifestSha256)} 'devin' 'peer' -- "$@"\n`;
-  assert.equal(launcher, expected);
+  assert.equal(shimLauncher, shimExpected);
+  // Exact gate launcher bytes (hook families): the frozen SLP_FAMILY_BIN is
+  // exported so the env-free argv0 --version probe still reaches the real
+  // binary, then the candidate's gate runs under the frozen Node.
+  for (const family of ['codex', 'pi', 'claude']) {
+    const gate = readFileSync(join(f.set.directory, `slp-${family}-lead`), 'utf8');
+    const gateExpected =
+      '#!/bin/sh\n' +
+      'unset NODE_OPTIONS\n' +
+      `export SLP_FAMILY_BIN=${sq(f.binaries[family].path)}\n` +
+      `exec ${sq(f.node.path)} ${sq(join(f.candidate, 'bin', 'slp-gate.mjs'))} "$@"\n`;
+    assert.equal(gate, gateExpected, `gate launcher for ${family}`);
+  }
 });
 
 test('launchers: publish refuses symlink or non-directory staging paths', async t => {
@@ -656,6 +672,27 @@ test('launchers: POSIX single-quote escaping survives spaces and quotes end-to-e
     ...userArgs,
   ];
   assert.deepEqual(readArgv(argvCapture), expected);
+});
+
+test('gate launcher: env-free argv0 --version reaches the real family binary; non-version spawn fails closed', async t => {
+  // M1 regression coverage: the host probe invokes command[0] --version with
+  // provider env entirely absent — the launcher's baked SLP_FAMILY_BIN is
+  // what lets the gate answer through the real binary.
+  const f = await fixtureRuntime(t);
+  for (const family of ['codex', 'pi', 'claude']) {
+    const probe = spawnSync(join(f.set.directory, `slp-${family}-peer`), ['--version'], {
+      encoding: 'utf8',
+      env: { PATH: '/usr/bin:/bin' }, // no provider env at all
+    });
+    assert.equal(probe.status, 0, `${family} probe stderr: ${probe.stderr}`);
+    assert.equal(probe.stdout, `${family} 9.9.9-fake\n`, `${family} probe reports the family binary`);
+    const spawn_ = spawnSync(join(f.set.directory, `slp-${family}-peer`), ['chat'], {
+      encoding: 'utf8',
+      env: { PATH: '/usr/bin:/bin' },
+    });
+    assert.notEqual(spawn_.status, 0);
+    assert.match(spawn_.stderr, /managed entry launched without live SLP hook grant/);
+  }
 });
 
 // ---------------------------------------------------------------------------

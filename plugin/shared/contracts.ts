@@ -309,9 +309,11 @@ export const Profile = z.object({
 export const OwnedProvider = z.object({
   extends: z.enum(["codex", "pi", "acp", "claude"]),
   label: z.string(),
-  // argv of one or two absolute elements: [launcher] for the devin wrapper
-  // path, [node, gate] for hook-family thin aliases (Phase 2). Single-element
-  // receipts written before Phase 2 remain valid.
+  // argv of one or two absolute elements. Every generated entry is
+  // single-element — the launch-set launcher argv[0] (the host's argv0
+  // --version probe drops the tail); two-element commands were emitted only
+  // by the transitional [node, gate] thin-alias shape, and max(2) keeps
+  // receipts written by that build readable.
   command: z.array(AbsolutePath).min(1).max(2),
   env: z.record(z.string(), z.string()), enabled: z.boolean(),
 }).strict();

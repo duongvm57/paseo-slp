@@ -443,18 +443,21 @@ export function assertPersistedCompatible(rawJson: unknown): void {
 const ownedProviderId = (family: FamilyName, role: string) => `slp-${family}-${role}`;
 
 /** Hook-injected families (settings-driven-providers.md §6 Phase 2): their
- *  provider entries are sentinel-gated thin aliases, not launcher-backed
- *  wrappers. The alias keeps the `slp-*` provider identity (agent.provider
- *  stays `slp-codex-lead`, preserving managed-seat visibility) and its
- *  command runs the materialized candidate's bin/slp-gate.mjs under the
- *  binding's verified Node. The gate refuses any launch that arrives
- *  without the session-open hook's grant — a pure `extends`-only alias
- *  would silently spawn unroled during a hook gap (plugin disabled or
- *  reloading), so the sentinel is mandatory. Devin is absent from this set:
- *  the ACP adapter drops systemPrompt, so slp-devin-* keeps the existing
- *  shim+wrapper launcher transport. */
+ *  provider entries are sentinel-gated thin aliases — `slp-*` identity +
+ *  native `extends`, no shim, no wrapper. The alias keeps agent.provider as
+ *  `slp-codex-lead` (managed-seat visibility) and its argv[0] is the launch
+ *  set's gate launcher: a generated script that exports the frozen
+ *  SLP_FAMILY_BIN and execs the candidate's bin/slp-gate.mjs under the
+ *  binding's verified Node. argv[0] must be a generated per-entry file —
+ *  the host's bare `--version` probe drops provider env entirely, so a
+ *  candidate-level script could resolve neither Node nor the family
+ *  binary. The gate refuses any launch that arrives without the
+ *  session-open hook's grant — a pure `extends`-only alias would silently
+ *  spawn unroled during a hook gap (plugin disabled or reloading), so the
+ *  sentinel is mandatory. Devin is absent from this set: the ACP adapter
+ *  drops systemPrompt, so slp-devin-* keeps the existing shim+wrapper
+ *  launcher transport. */
 const HOOK_GATE_FAMILIES: ReadonlySet<FamilyName> = new Set(["codex", "pi", "claude"]);
-const GATE_RELATIVE_PATH = join("bin", "slp-gate.mjs");
 
 function desiredProviderEnv(
   family: FamilyName,
@@ -516,17 +519,23 @@ export function desiredProviderEntries(
     const binaryPath = binary.available ? binary.path : null;
     const id = ownedProviderId(family, role);
     if (HOOK_GATE_FAMILIES.has(family)) {
-      // Thin alias: slp-* identity + native extends, command pinned to the
-      // immutable candidate's sentinel gate under the binding's verified
-      // Node (stable retained path — never a plugin-checkout path). env
-      // carries the empty grant sentinel the session_open hook overlays
-      // plus the family binary the gate execs through to.
+      // Thin alias: slp-* identity + native extends, argv[0] is the launch
+      // set's gate launcher (frozen binary + gate exec, env-free-probe
+      // safe). env carries the same managed backstop the wrapper path
+      // freezes, plus the empty grant sentinel the session_open hook
+      // overlays and SLP_FAMILY_BIN — the launcher's baked export is the
+      // probe-time source, the env copy is the spawn-time source.
       entries[id] = {
         extends: PROVIDER_EXTENDS[family] as OwnedProviderValue["extends"],
         label: `${family} — ${ROLE_DISPLAY[role]} (SLP)`,
-        command: [resolution.node.path, join(runtimePath, GATE_RELATIVE_PATH)],
+        command: [launcherPathFor(launchSet, id)],
         env: {
-          SLP_SESSION_OPEN_GRANT: "",
+          ...desiredProviderEnv(family, {
+            runtimePath,
+            nodePath: resolution.node.path,
+            binaryPath,
+            daemonHome,
+          }),
           SLP_FAMILY_BIN: binaryPath ?? "",
         },
         enabled: binary.available,
@@ -552,7 +561,10 @@ export function desiredProviderEntries(
 /** The two owned saved profiles for a fresh binding (§6, src conventions).
  *  Human-supplied preferences are merged verbatim — the plugin invents no
  *  model, mode, or feature defaults of its own. `family` picks the managed
- *  provider for that role; `null` and absent fields are simply not written.
+ *  provider for that role; absent fields are simply not written, and a
+ *  `null` pref field is an explicit clear — it deletes the field even when
+ *  the routing supplied it (same semantics as the rebind path's
+ *  applyProfilePrefs).
  *
  *  Precedence under a stored routing (Phase 1): the routing choice supplies
  *  the provider (`slp-<routing.family>-<role>`) plus whichever of model,
@@ -571,12 +583,18 @@ export function desiredProfiles(
   const fields = (role: "supervisor" | "lead") => {
     const { family: _family, ...prefRest } = prefs?.[role] ?? {};
     const { family: _routingFamily, ...routingRest } = routing?.[role] ?? {};
-    return {
-      ...routingRest,
-      ...Object.fromEntries(
-        Object.entries(prefRest).filter(([, value]) => value !== null && value !== undefined),
-      ),
-    } as Pick<ProfileValue, "model" | "modeId" | "thinkingOptionId" | "featureValues">;
+    // Same explicit-edit semantics as the rebind path (applyProfilePrefs):
+    // absent pref fields let the routing value stand, a pref value writes,
+    // and `null` clears — including clearing a field the routing supplied.
+    // (Before this was asymmetric: fresh-path `null` was filtered out, so
+    // the routing value silently won where rebind would have deleted.)
+    const merged: Record<string, unknown> = { ...routingRest };
+    for (const [key, value] of Object.entries(prefRest)) {
+      if (value === undefined) continue;
+      if (value === null) delete merged[key];
+      else merged[key] = value;
+    }
+    return merged as Pick<ProfileValue, "model" | "modeId" | "thinkingOptionId" | "featureValues">;
   };
   return [
     {

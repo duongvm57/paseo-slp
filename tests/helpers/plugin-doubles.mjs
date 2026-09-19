@@ -447,9 +447,9 @@ export function makeMaterializer(payload, hooks = {}) {
 const LAUNCHER_MODE = 0o755;
 
 export function makeLaunchers(hooks = {}) {
-  // Phase 2 mirrors the real builder: only the devin wrapper family still
-  // gets generated launchers; hook families run the sentinel gate instead.
-  const launcherIds = () => ROLES.map(r => `slp-devin-${r}`).sort();
+  // Mirrors the real builder: all twelve owned ids get a launch-set file —
+  // devin shim launchers plus the Phase-2 hook-family gate launchers.
+  const launcherIds = () => OWNED_IDS.slice().sort();
   const launcherBytes = (req, id) =>
     `#!/bin/sh\nexec "${req.node.path}" "${req.candidate.runtimePath}/bin/slp-shim.mjs" "${id}"\n`;
   const manifestBytes = req => JSON.stringify({

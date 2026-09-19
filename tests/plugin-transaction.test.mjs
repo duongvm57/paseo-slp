@@ -91,25 +91,25 @@ test('happy activate: INACTIVE → ACTIVE, providers/profiles/injection written,
     const roleLabel = id.split('-')[2][0].toUpperCase() + id.split('-')[2].slice(1);
     assert.equal(entry.enabled, true);
     assert.equal(entry.env.SLP_SESSION_OPEN_GRANT, '');
+    // Every entry's argv[0] is a real launch-set launcher — devin's runs the
+    // shim+wrapper, hook families' run the sentinel gate. All commands are
+    // single-element (the host's argv0 --version probe drops the tail).
+    assert.equal(entry.command.length, 1);
+    assert.ok(entry.command[0].includes(`${home}/slp-runtime/launchers/`), `command for ${id}`);
+    assert.equal(entry.env.SLP_MANAGED_RUNTIME, '1');
+    assert.equal(entry.env.PASEO_HOME, home);
+    assert.ok(entry.env.SLP_NODE_BIN, `SLP_NODE_BIN for ${id}`);
     if (family === 'devin') {
-      // Devin keeps the shim+wrapper transport: single-element launcher
-      // command plus the full managed env.
       assert.equal(entry.label, `SLP Devin ${roleLabel}`);
-      assert.equal(entry.command.length, 1);
-      assert.ok(entry.command[0].includes(`${home}/slp-runtime/launchers/`), `command for ${id}`);
-      assert.equal(entry.env.SLP_MANAGED_RUNTIME, '1');
-      assert.equal(entry.env.PASEO_HOME, home);
       assert.equal(entry.env.SLP_DEVIN_BIN, binaries.devin);
       continue;
     }
-    // Hook families are sentinel-gated thin aliases: [node, gate] command
-    // under the materialized candidate plus the two-key gate env.
+    // Hook families are sentinel-gated thin aliases: same launcher shape,
+    // managed env backstop, plus the family binary the gate execs through.
     assert.equal(entry.label, `${family} — ${roleLabel} (SLP)`);
-    assert.equal(entry.command.length, 2);
-    assert.equal(entry.command[0], process.execPath, `gate node for ${id}`);
-    assert.equal(entry.command[1], join(home, 'slp-runtime', deps.payload.candidate.sha256, 'bin', 'slp-gate.mjs'));
     assert.equal(entry.env.SLP_FAMILY_BIN, binaries[family]);
-    assert.equal(entry.env.SLP_MANAGED_RUNTIME, undefined, 'thin aliases carry no managed env');
+    assert.equal(entry.env[`SLP_${family.toUpperCase()}_BIN`], binaries[family]);
+    assert.equal(entry.env.SLP_RUNTIME_ROOT, join(home, 'slp-runtime', deps.payload.candidate.sha256));
   }
   const profileIds = config.daemon.agentProfiles.map(p => p.id);
   assert.ok(profileIds.includes('slp-supervisor'));
@@ -576,13 +576,10 @@ test('rebind with a new candidate keeps old runtime + launch set retained', asyn
   assert.ok(existsSync(join(home, 'slp-runtime', doneAct.binding.candidateSha256)));
   assert.ok(existsSync(join(home, 'slp-runtime', 'launchers', oldLaunchSet)));
   const config = readConfigJson(home);
-  // The devin wrapper entry still carries the launch-set path; hook-family
-  // aliases point at the new candidate's gate instead.
+  // Every entry's argv[0] is a launcher in the new binding's launch set —
+  // devin's runs the shim, hook families' run the gate.
   assert.ok(config.agents.providers['slp-devin-lead'].command[0].includes(done2.binding.launchSetSha256));
-  assert.equal(
-    config.agents.providers['slp-codex-lead'].command[1],
-    join(home, 'slp-runtime', done2.binding.candidateSha256, 'bin', 'slp-gate.mjs'),
-  );
+  assert.ok(config.agents.providers['slp-codex-lead'].command[0].includes(done2.binding.launchSetSha256));
 });
 
 test('original baseline survives multiple rebinds — every candidate + launch set retained', async t => {

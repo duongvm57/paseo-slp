@@ -344,14 +344,23 @@ Crash cleanup may remove only verified unpublished staging associated with a jou
 > **Phase 2 amendment** ([settings-driven-providers.md](settings-driven-providers.md)
 > §6): this section describes the v1 Option-A shape, which `slp-devin-*`
 > still uses verbatim. For codex/pi/claude the provider entry is now a
-> sentinel-gated thin alias — `command: [node, <candidate>/bin/slp-gate.mjs]`
-> with `extends` kept and env `{SLP_SESSION_OPEN_GRANT: "", SLP_FAMILY_BIN}`
-> — so hook-family entries have a two-element argv and no launcher file.
-> Launch sets therefore publish only the three devin launchers (new
-> manifests carry `launcherFamilies:["devin"]`; manifests without the field
-> replay the legacy twelve-launcher plan). The argv0-probe rationale below
-> still holds: the gate answers a bare `--version` through the real family
-> binary without requiring the grant.
+> sentinel-gated thin alias — `extends` kept, env carrying the managed
+> backstop plus `SLP_SESSION_OPEN_GRANT: ""` and `SLP_FAMILY_BIN` — whose
+> `command` is a single-element argv0 launcher like every other entry.
+> Launch sets therefore publish all twelve launchers again, but the nine
+> hook-family launchers are trivial gate launchers (`#!/bin/sh`, export the
+> frozen `SLP_FAMILY_BIN`, `exec` the verified Node on
+> `<candidate>/bin/slp-gate.mjs "$@"`) instead of shim dispatchers; new
+> manifests carry `launcherFamilies` (all twelve) plus `gateFamilies` (the
+> nine) so verify replays the right plan per file, and manifests without
+> the fields replay the legacy all-shim plan. An earlier cut of this phase
+> put `[node, <candidate>/bin/slp-gate.mjs]` in `command` directly —
+> rejected on review because the argv0 probe drops the tail (it would
+> measure Node, and the env-free probe cannot see `SLP_NODE_BIN` either, so
+> a shell wrapper reading env vars fails the same way). The argv0-probe
+> rationale below is exactly why the launcher indirection is mandatory:
+> the gate answers a bare `--version` through the real family binary
+> without requiring the grant.
 
 **DECISION: give each family/role its own real executable `argv[0]`.** Rationale: Paseo's Codex probe invokes only `command[0] --version`, dropping the command tail and provider runtime environment; today's Node-first command reports Node's version. Sources: `S/agent/providers/diagnostic-utils.js:108–120`; `S/agent/providers/codex-app-server-agent.js:5547–5578`; `src/paseo-install.mjs:39`; [audit](paseo-plugin-feasibility.md):694–695.
 

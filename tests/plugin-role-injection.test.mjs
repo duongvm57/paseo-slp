@@ -343,14 +343,15 @@ test('gate: unresolved SLP_FAMILY_BIN fails clearly in both modes', async t => {
 // Thin-alias provider entries (desiredProviderEntries)
 // ---------------------------------------------------------------------------
 
-test('thin aliases: hook families get [node, gate] + gate env; devin keeps the launcher shape', t => {
+test('thin aliases: every entry gets a single-element launcher argv0; hook env adds SLP_FAMILY_BIN', t => {
   const f = fixtureCandidate(t);
+  const setDir = join(f.stableRoot, 'launchers', 'a'.repeat(64));
   const launchSet = {
     launchSetSha256: 'a'.repeat(64),
     launchManifestSha256: 'a'.repeat(64),
-    directory: join(f.stableRoot, 'launchers', 'a'.repeat(64)),
-    files: ROLES.map(role => ({
-      path: join(f.stableRoot, 'launchers', 'a'.repeat(64), `slp-devin-${role}`),
+    directory: setDir,
+    files: OWNED_IDS.map(id => ({
+      path: join(setDir, id),
       sha256: 'b'.repeat(64),
       mode: 0o755,
     })),
@@ -365,23 +366,26 @@ test('thin aliases: hook families get [node, gate] + gate env; devin keeps the l
     const family = id.split('-')[1];
     const entry = entries[id];
     const roleDisplay = id.split('-')[2][0].toUpperCase() + id.split('-')[2].slice(1);
+    // Uniform argv[0]: every entry points at its launch-set launcher so the
+    // env-free host --version probe reaches a real executable.
+    assert.deepEqual(entry.command, [join(setDir, id)]);
+    assert.equal(entry.enabled, true);
+    assert.equal(entry.env.SLP_SESSION_OPEN_GRANT, '');
+    assert.equal(entry.env.SLP_MANAGED_RUNTIME, '1');
+    assert.equal(entry.env.SLP_NODE_BIN, '/opt/node/bin/node');
+    assert.equal(entry.env.SLP_RUNTIME_ROOT, f.candidate);
+    assert.equal(entry.env.SLP_DAEMON_HOME, f.home);
+    assert.equal(entry.env.PASEO_HOME, f.home);
+    assert.equal(entry.env[`SLP_${family.toUpperCase()}_BIN`], `/opt/bin/${family}`);
     if (family === 'devin') {
-      assert.equal(entry.command.length, 1);
-      assert.ok(entry.command[0].endsWith(`/launchers/${'a'.repeat(64)}/${id}`));
-      assert.equal(entry.env[`SLP_${family.toUpperCase()}_BIN`], `/opt/bin/${family}`);
-      assert.equal(entry.env.SLP_MANAGED_RUNTIME, '1');
       assert.equal(entry.extends, 'acp');
       assert.equal(entry.label, `SLP Devin ${roleDisplay}`);
+      assert.equal(entry.env.SLP_FAMILY_BIN, undefined);
       continue;
     }
-    assert.deepEqual(entry.command, ['/opt/node/bin/node', join(f.candidate, 'bin', 'slp-gate.mjs')]);
-    assert.deepEqual(entry.env, {
-      SLP_SESSION_OPEN_GRANT: '',
-      SLP_FAMILY_BIN: `/opt/bin/${family}`,
-    });
     assert.equal(entry.extends, family);
     assert.equal(entry.label, `${family} — ${roleDisplay} (SLP)`);
-    assert.equal(entry.enabled, true);
+    assert.equal(entry.env.SLP_FAMILY_BIN, `/opt/bin/${family}`);
   }
   // An unavailable hook-family binary disables the alias; the gate env keeps
   // the sentinel but an empty binary reference.

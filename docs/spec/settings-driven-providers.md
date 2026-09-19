@@ -157,19 +157,32 @@ As built on `feat/slp-paseo-plugin`:
     every open reason (create/resume/refresh/import).
 - Thin aliases diverge from the "no command" sketch: a pure `extends` alias
   cannot fail closed (Phase 0 sentinel probe), so each hook-family entry
-  keeps its `slp-*` identity + native `extends` and runs
-  `command: [node, <candidate>/bin/slp-gate.mjs]` with env
-  `{SLP_SESSION_OPEN_GRANT: "", SLP_FAMILY_BIN: <resolved binary>}`. The
+  keeps its `slp-*` identity + native `extends` and runs a generated
+  gate launcher as its single-element `command`, with env carrying the
+  managed backstop (`SLP_MANAGED_RUNTIME`, `SLP_NODE_BIN`,
+  `SLP_RUNTIME_ROOT`, `SLP_DAEMON_HOME`, `PASEO_HOME`, the family's
+  `SLP_*_BIN`) plus `SLP_SESSION_OPEN_GRANT: ""` and
+  `SLP_FAMILY_BIN: <resolved binary>`. The gate launcher is a trivial
+  `#!/bin/sh` exec script that bakes the verified Node path and exports
+  the frozen `SLP_FAMILY_BIN`, then `exec`s
+  `<candidate>/bin/slp-gate.mjs "$@"` — required because the host's
+  availability probe runs `command[0] --version` with the command tail
+  *and* provider env dropped (`resolveBinaryVersion`,
+  `diagnostic-utils.js`), so argv0 must be a self-contained executable;
+  a two-element `[node, gate]` command would measure Node's version, and
+  a wrapper reading env vars cannot resolve them during the probe. The
   gate (`bin/slp-gate.mjs`, shipped in the embedded payload) refuses any
   launch whose grant stayed empty — the exact hook-gap case — and forwards
   argv/stdio/exit-status to the family binary otherwise. The bare
   `--version` probe answers through the real binary in every grant state
   (host availability probes run outside any session open).
-- Launch sets now publish only the three devin launchers; the launch
-  manifest still records all four family resolutions for shim validation,
-  and new manifests carry `launcherFamilies:["devin"]` so verify stays
-  self-describing (pre-Phase-2 manifests replay the legacy 12-launcher
-  plan).
+- Launch sets publish all twelve launchers: the nine hook-family gate
+  launchers plus the three devin shim dispatchers. The launch manifest
+  still records all four family resolutions for shim validation, and new
+  manifests carry `launcherFamilies` (all four families) plus
+  `gateFamilies` (codex/pi/claude) so verify replays the right script per
+  file (pre-Phase-2 manifests without the fields replay the legacy
+  all-shim 12-launcher plan).
 - Byte-parity test between hook-rendered and wrapper-rendered bundles
   across all twelve owned ids (tests/plugin-role-injection.test.mjs).
 - Devin wrapper path untouched.
@@ -181,7 +194,17 @@ As built on `feat/slp-paseo-plugin`:
 - Reconcile/inspect understands both entry kinds (alias vs shim+env).
 - Status surfaces mechanism per family only for diagnostics — the user
   contract stays uniform.
-- Recovery semantics for agents spawned in a hook gap.
+- Recovery semantics for agents spawned in a hook gap. The deferred
+  failure mode: if the `agent.create` hook is down but the launch itself
+  somehow proceeds past the gate (e.g. a spawn path that bypasses the
+  sentinel), the seat is created without role bytes — and nothing marks
+  it. A later resume/reload of that agent re-opens the session through
+  `agent.session_open`, which only supplies the grant; the role-injection
+  hook does not re-fire on resume, and the gate cannot tell that the
+  seat's durable context is missing its role. Such an agent resumes
+  permanently unroled. Phase 3 must decide how to detect and handle these
+  gap-spawned seats (e.g. marking creates with a durable role marker the
+  gate or reconcile can check on resume).
 - Drift/receipt/journal entries record which mechanism each entry uses.
 
 ## 8. Explicit non-changes

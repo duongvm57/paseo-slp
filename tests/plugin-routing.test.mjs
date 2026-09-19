@@ -219,6 +219,46 @@ test('explicit profiles input overrides routing; a family override generates its
   assert.equal(providers['slp-devin-lead'], undefined, 'the routing-chosen lead family is no longer generated');
 });
 
+test('profiles null clears a routing-supplied field on BOTH fresh and rebind paths', async t => {
+  // L2 parity: `null` is an explicit clear everywhere — on the fresh
+  // desiredProfiles path it must delete the routing-supplied field, not let
+  // the routing value win; the rebind path has always deleted live fields.
+  const home = makeHome(t);
+  const binaries = makeBinaries(t);
+  const daemon = await makeDaemon(t, home);
+  const deps = makeDeps({ execOpts: { binaries } });
+  const manager = createManager(deps);
+
+  // Fresh path: routing supplies model, profiles input clears it with null.
+  await setRouting(manager, home, { family: 'pi', model: 'routing-model' }, { family: 'devin', model: 'lead-model' });
+  const act = await manager.activate(
+    activateInput(home, deps.payload, randomUUID(), {
+      profiles: { supervisor: { model: null } },
+    }),
+    daemon,
+  );
+  const done = await waitTerminal(manager, home, act.operation.operationId, daemon);
+  assert.equal(done.state, 'ACTIVE');
+  let profiles = readConfigJson(home).daemon.agentProfiles;
+  const supervisor = profiles.find(p => p.id === 'slp-supervisor');
+  assert.equal(supervisor.provider, 'slp-pi-supervisor');
+  assert.equal('model' in supervisor, false, 'null clears the routing-supplied field on fresh activation');
+
+  // Rebind path: same input now clears the lead model the routing wrote.
+  const second = await manager.activate(
+    activateInput(home, deps.payload, randomUUID(), {
+      profiles: { lead: { model: null } },
+    }),
+    daemon,
+  );
+  const done2 = await waitTerminal(manager, home, second.operation.operationId, daemon);
+  assert.equal(done2.operation.outcome, 'succeeded');
+  profiles = readConfigJson(home).daemon.agentProfiles;
+  const lead = profiles.find(p => p.id === 'slp-lead');
+  assert.equal(lead.provider, 'slp-devin-lead');
+  assert.equal('model' in lead, false, 'null clears the routing-supplied field on rebind');
+});
+
 test('routing that selects an unavailable family fails closed at plan time', async t => {
   const home = makeHome(t);
   const binaries = makeBinaries(t, ['codex', 'pi', 'devin']); // claude unresolved

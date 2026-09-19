@@ -1,20 +1,24 @@
 // §6: immutable launch-set generation and publication.
 //
 // A launch set lives at <stable-root>/launchers/<launch-set-sha256>/ and holds
-// launch.json plus executable POSIX launchers — since Phase 2 (settings-
-// driven-providers.md §6) exactly the three devin wrapper launchers, one per
-// role. Hook families (codex/pi/claude) launch through the sentinel-gated
-// thin-alias command pointing at the candidate's bin/slp-gate.mjs, so they
-// no longer get generated launchers; the manifest keeps the full four-family
-// resolution record because the shipped devin shim validates the complete
-// family/role sets before entering the wrapper (verifyLaunchManifest stays
-// generic — that is the documented choice). `launchSetSha256` is the sha256
-// of the canonical launch.json bytes; the manifest carries no self-
-// reference, so the set hash and the manifest hash coincide (the receipt
-// records the same value as launchManifestSha256). Launcher bytes are a pure
-// function of the manifest plus the set directory, so equal inputs
-// reproduce an identical set and an existing verified directory is reused
-// rather than rewritten.
+// launch.json plus executable POSIX launchers — one real argv[0] per provider
+// entry, in two kinds since Phase 2 (settings-driven-providers.md §6):
+// devin keeps the v1 shim+wrapper launcher; hook families (codex/pi/claude)
+// get a trivial gate launcher that exports the frozen SLP_FAMILY_BIN and
+// execs the candidate's bin/slp-gate.mjs. Every argv[0] must answer the
+// host's bare `--version` probe — which runs with provider env entirely
+// absent — so a single shared candidate-level gate script cannot work (no
+// node path, no family binary); per-entry generated files are the only
+// shape that carries the frozen resolution into the probe. The manifest
+// keeps the full four-family resolution record because the shipped devin
+// shim validates the complete family/role sets before entering the wrapper
+// (verifyLaunchManifest stays generic — that is the documented choice).
+// `launchSetSha256` is the sha256 of the canonical launch.json bytes; the
+// manifest carries no self-reference, so the set hash and the manifest hash
+// coincide (the receipt records the same value as launchManifestSha256).
+// Launcher bytes are a pure function of the manifest plus the set
+// directory, so equal inputs reproduce an identical set and an existing
+// verified directory is reused rather than rewritten.
 //
 // Publication follows §5: build in memory, stage under .staging/<op-id>,
 // verify staged bytes/modes from disk, fsync, rename into place, re-verify.
@@ -52,10 +56,12 @@ export const MANIFEST_MODE = 0o644;
 const PRIVATE_DIR_MODE = 0o700;
 const MANIFEST_NAME = "launch.json";
 const SHIM_RELATIVE_PATH = join("bin", "slp-shim.mjs");
+const GATE_RELATIVE_PATH = join("bin", "slp-gate.mjs");
 
-/** Phase 2: families that still get generated wrapper launchers. Hook
- *  families run the sentinel gate instead (see the file header). */
-export const LAUNCHER_FAMILIES: readonly FamilyName[] = ["devin"];
+/** Phase 2: families whose launchers exec the sentinel gate instead of the
+ *  shim+wrapper (see the file header). Devin is absent — its ACP adapter
+ *  drops systemPrompt, so slp-devin-* keeps the full shim path. */
+export const GATE_FAMILIES: readonly FamilyName[] = ["codex", "pi", "claude"];
 
 interface LaunchManifest {
   schemaVersion: 1;
@@ -65,13 +71,19 @@ interface LaunchManifest {
   binaries: Record<FamilyName, BinaryResolution>;
   families: FamilyName[];
   roles: Role[];
-  /** The subset of `families` whose role launchers this set contains —
-   *  `["devin"]` since Phase 2. Absent on legacy manifests, which replan as
-   *  the v1 twelve-launcher layout so pre-Phase-2 sets still verify under
-   *  this builder. The field also makes new manifests digest-different from
-   *  a legacy manifest with identical inputs, so the two layouts can never
-   *  collide on a directory name. */
+  /** The subset of `families` whose role launchers this set contains.
+   *  Absent on legacy manifests, which replan as the v1 all-shim
+   *  twelve-launcher layout so pre-Phase-2 sets still verify under this
+   *  builder; `["devin"]` replays the transitional devin-only layout.
+   *  The field also makes new manifests digest-different from a legacy
+   *  manifest with identical inputs, so layouts never collide on a
+   *  directory name. */
   launcherFamilies?: FamilyName[];
+  /** The subset of `launcherFamilies` whose launchers exec the sentinel
+   *  gate rather than the shim+wrapper. Absent means every launcher is
+   *  shim-style (the v1 and devin-only layouts). Must be a subset of
+   *  `launcherFamilies`. */
+  gateFamilies?: FamilyName[];
 }
 
 const sha256 = (bytes: string | Buffer): string =>
@@ -107,7 +119,8 @@ function buildManifest(request: LaunchSetRequest): LaunchManifest {
     binaries,
     families: [...FAMILIES],
     roles: [...ROLES],
-    launcherFamilies: [...LAUNCHER_FAMILIES],
+    launcherFamilies: [...FAMILIES],
+    gateFamilies: [...GATE_FAMILIES],
   };
 }
 
@@ -133,6 +146,26 @@ function launcherScript(
   );
 }
 
+/** Phase-2 gate launcher (settings-driven-providers.md §6): a real argv[0]
+ *  that exports the frozen family binary and execs the candidate's sentinel
+ *  gate under the frozen Node — nothing else is baked because the gate's
+ *  only jobs are the grant check and the exec-through. `unset NODE_OPTIONS`
+ *  protects the gate's own node boot, same as the shim launcher. The
+ *  bare `--version` probe drops provider env entirely, so the binary the
+ *  gate answers through must come from these baked bytes, never from env. */
+function gateLauncherScript(
+  node: { path: string },
+  gatePath: string,
+  binaryPath: string,
+): string {
+  return (
+    "#!/bin/sh\n" +
+    "unset NODE_OPTIONS\n" +
+    `export SLP_FAMILY_BIN=${quote(binaryPath)}\n` +
+    `exec ${quote(node.path)} ${quote(gatePath)} "$@"\n`
+  );
+}
+
 interface PlannedFile {
   name: string;
   bytes: Buffer;
@@ -141,22 +174,30 @@ interface PlannedFile {
 
 /** The set members, deterministic from the manifest and set directory:
  *  launch.json plus the launchers the manifest records — `launcherFamilies`
- *  on Phase-2 manifests, all four families on legacy ones. */
+ *  picks which families get files (absent = all four, the legacy layout),
+ *  `gateFamilies` picks which of those are gate execs rather than shim
+ *  launchers (absent = all shim). */
 function planFiles(manifest: LaunchManifest, directory: string): PlannedFile[] {
   const manifestPath = join(directory, MANIFEST_NAME);
   const digest = sha256(manifestBytes(manifest));
   const shimPath = join(manifest.candidate.path, SHIM_RELATIVE_PATH);
+  const gatePath = join(manifest.candidate.path, GATE_RELATIVE_PATH);
+  const gate = new Set(manifest.gateFamilies ?? []);
   const files: PlannedFile[] = [
     { name: MANIFEST_NAME, bytes: manifestBytes(manifest), mode: MANIFEST_MODE },
   ];
   for (const family of manifest.launcherFamilies ?? manifest.families) {
     for (const role of manifest.roles) {
+      const bytes = gate.has(family)
+        ? gateLauncherScript(
+            manifest.node,
+            gatePath,
+            manifest.binaries[family]?.path ?? "",
+          )
+        : launcherScript(manifestPath, digest, manifest.node, shimPath, family, role);
       files.push({
         name: launcherName(family, role),
-        bytes: Buffer.from(
-          launcherScript(manifestPath, digest, manifest.node, shimPath, family, role),
-          "utf8",
-        ),
+        bytes: Buffer.from(bytes, "utf8"),
         mode: LAUNCHER_MODE,
       });
     }
@@ -222,6 +263,15 @@ function parseManifest(bytes: Buffer): LaunchManifest {
       !m.launcherFamilies.every(f => (FAMILIES as readonly string[]).includes(f)))
   ) {
     fail("launcherFamilies is malformed");
+  }
+  if (m.gateFamilies !== undefined) {
+    const launchers = m.launcherFamilies ?? FAMILIES;
+    if (
+      !Array.isArray(m.gateFamilies) ||
+      !m.gateFamilies.every(f => launchers.includes(f as FamilyName))
+    ) {
+      fail("gateFamilies is malformed or outside launcherFamilies");
+    }
   }
   return m as LaunchManifest;
 }
