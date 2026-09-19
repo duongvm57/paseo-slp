@@ -53,21 +53,26 @@ Three separate layers carry three separate concerns:
 │     agents.providers:                                            │
 │       slp-claude-supervisor  slp-codex-supervisor                │
 │       slp-pi-supervisor      slp-devin-supervisor   ─┐           │
-│       slp-claude-lead        slp-codex-lead          │ 12 entries │
-│       slp-pi-lead            slp-devin-lead          │ (4 families │
-│       slp-claude-peer        slp-codex-peer          │  × 3 roles) │
-│       slp-pi-peer            slp-devin-peer         ─┘           │
+│       slp-claude-lead        slp-codex-lead          │ up to 12  │
+│       slp-pi-lead            slp-devin-lead          │ entries — │
+│       slp-claude-peer        slp-codex-peer          │ settings- │
+│       slp-pi-peer            slp-devin-peer         ─┘ driven    │
 │     agentProfiles:                                               │
 │       slp-supervisor → one slp-*-supervisor provider             │
 │       slp-lead       → one slp-*-lead provider                   │
 │                                                                  │
 │   slp-runtime/                         ← plugin-managed          │
 │     <candidateSha>/    immutable SLP payload (policy bytes,        │
-│                        shims, role wrappers, transports, helpers) │
-│     launchers/<sha>/   per-provider launcher files                │
+│                        shims, role wrappers, gate, transports,    │
+│                        helpers)                                  │
+│     launchers/<sha>/   devin launcher files (hook families run    │
+│                        the candidate's bin/slp-gate.mjs directly) │
 │     state/receipt.json what the plugin believes it owns           │
 │     state/communication-language                                   │
 │                            optional injected language (toggleable) │
+│     state/role-routing.json                                      │
+│                            optional supervisor/lead family+model  │
+│                            picks (settings-driven generation)     │
 │                                                                  │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -75,8 +80,10 @@ Three separate layers carry three separate concerns:
 The plugin is a **manager**, not an agent feature. It exposes a small set
 of administrative operations (`status`, `activate`, `reconcile`,
 `deactivate`, `local-target`, `catalog`) that a human drives from the SLP
-sidebar. Agents never see these. Activation writes the 12 provider entries
-and 2 profiles into `config.json` atomically through `config.patch`,
+sidebar. Agents never see these. Activation writes the provider entries
+(up to twelve — all twelve without routing; the chosen supervisor/lead
+combos plus all four peers when `role-routing.json` is set) and 2 profiles
+into `config.json` atomically through `config.patch`,
 materializes the SLP payload into an immutable `slp-runtime/<sha>` tree,
 and records a receipt. Nothing changes on the daemon until a human
 explicitly activates.
@@ -92,13 +99,38 @@ Everything above is the **control plane**: it runs when a human clicks,
 and it only ever touches `config.json` + `slp-runtime/`.
 
 The **runtime plane** is what those config entries do afterwards, every
-time an agent is created:
+time an agent is created. Since Phase 2 there are two transports — both
+render the same `roleBundle()` bytes from the same candidate:
 
 ```
+hook families (codex / pi / claude) — thin alias + hooks
+
 human or agent calls create_agent(profile/provider, prompt)
         │
         ▼
-Paseo resolves the slp-* provider entry
+agent.create before-hook (plugin) reads the binding, resolves the role
+from the slp-* provider id (or the slp_role feature marker), renders
+roleBundle() from the materialized candidate and writes
+config.systemPrompt — role bytes first, any pre-existing prompt appended
+        │
+        ▼
+agent.session_open before-hook overlays a non-empty
+SLP_SESSION_OPEN_GRANT onto the provider env
+        │
+        ▼
+provider entry command: node <candidate>/bin/slp-gate.mjs <argv>
+        │  gate verifies the grant is live — fails closed in a hook gap —
+        ▼  then execs the real family binary (SLP_FAMILY_BIN)
+provider session begins with SLP instructions already in its
+durable context
+
+
+devin — shim + role wrapper (unchanged)
+
+human or agent calls create_agent(profile/provider, prompt)
+        │
+        ▼
+Paseo resolves the slp-devin-* provider entry
         │
         ▼
 launcher process starts  ── env: SLP_MANAGED_RUNTIME, SLP_NODE_BIN,
@@ -109,15 +141,19 @@ slp-shim verifies the runtime payload (manifest digest + identity)
         ▼
 role wrapper renders the role bundle and rewrites the session/new
 request — this is the injection — then starts the real provider
-transport (ACP / CLI)
+transport (ACP)
         │
         ▼
-provider session (claude / codex / pi / devin) begins with SLP
+provider session (devin) begins with SLP
 instructions already in its durable context
 ```
 
-From then on the seat is an ordinary Paseo agent. The plugin is not in the
-loop — no proxy, no monitoring daemon, no session interception.
+Devin keeps the wrapper transport because its ACP adapter drops
+`systemPrompt` outright — the hook path cannot reach it (Phase 0 probe,
+2026-09-19). For hook families the plugin is in the loop at session entry
+via the two before-hooks, but never afterwards — no proxy, no monitoring
+daemon, no session interception. The gate is what makes a hook gap (plugin
+disabled or reloading) fail visibly instead of spawning an unroled seat.
 
 ## The hidden channel
 
@@ -127,10 +163,12 @@ in the UI:
 1. **`initialPrompt` — visible.** Whatever the spawner passes to
    `create_agent`: the human's typed text for profile-pick spawns, or the
    planner's assignment block for `prepare`-rendered spawns.
-2. **Session-entry injection — hidden.** Bytes the role wrapper appends to
-   the provider's durable instruction channel while `session/new` is being
-   built. The seat sees it; the human does not — it never appears in the
-   agent tab, the conversation view, or `initialPrompt`.
+2. **Session-entry injection — hidden.** Bytes appended to the provider's
+   durable instruction channel while the session is being built — by the
+   `agent.create` hook's `systemPrompt` write for codex/pi/claude, or by
+   the role wrapper's `session/new` rewrite for devin. The seat sees it;
+   the human does not — it never appears in the agent tab, the
+   conversation view, or `initialPrompt`.
 
 ```
 what the human sees              what the seat's context contains
@@ -144,8 +182,9 @@ what the human sees              what the seat's context contains
                                  │ spawn kit (MCP signatures)       │
                                  │ policy locators (path + sha256)  │
                                  └──────────────────────────────────┘
-                                    ^ injected by the role wrapper at
-                                      session entry — invisible in UI
+                                    ^ injected at session entry — hook
+                                      systemPrompt or role wrapper —
+                                      invisible in UI
 ```
 
 For the Devin (ACP) transport this lands in `appendSystemPrompt`; each

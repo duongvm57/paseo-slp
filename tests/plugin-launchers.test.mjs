@@ -411,16 +411,20 @@ const readEnv = path =>
     return [l.slice(0, i), l.slice(i + 1)];
   }));
 
-test('launchers: publish writes manifest + 12 quoted launchers, verify round-trips', async t => {
+test('launchers: publish writes manifest + 3 devin quoted launchers, verify round-trips', async t => {
   const f = await fixtureRuntime(t);
   assert.equal(basename(f.set.directory), f.set.launchSetSha256);
   assert.equal(f.set.launchManifestSha256, f.set.launchSetSha256);
-  const manifestBytes = readFileSync(f.manifestPath);
-  assert.equal(JSON.parse(manifestBytes.toString('utf8')).schemaVersion, 1);
+  const manifest = JSON.parse(readFileSync(f.manifestPath).toString('utf8'));
+  assert.equal(manifest.schemaVersion, 1);
+  // The manifest keeps the full four-family resolution record — the shipped
+  // devin shim validates the complete sets — but only devin gets launchers.
+  assert.deepEqual(manifest.families.sort(), [...FAMILIES].sort());
+  assert.deepEqual(manifest.launcherFamilies, ['devin']);
   const names = readdirSync(f.set.directory).sort();
-  assert.equal(names.length, 13);
+  assert.equal(names.length, 4);
   assert.deepEqual(f.set.files.map(file => basename(file.path)),
-    FAMILIES.flatMap(family => ROLES.map(role => `slp-${family}-${role}`)));
+    ROLES.map(role => `slp-devin-${role}`));
   for (const file of f.set.files) assert.equal(file.mode, 0o755);
   const verified = await f.launchers.verify(f.set.directory);
   assert.equal(verified.launchSetSha256, f.set.launchSetSha256);
@@ -436,12 +440,12 @@ test('launchers: publish writes manifest + 12 quoted launchers, verify round-tri
   assert.equal(again.launchSetSha256, f.set.launchSetSha256);
   // Exact launcher bytes: NODE_OPTIONS unset for the shim's own node boot,
   // fixed args single-quoted, -- separator, "$@" verbatim.
-  const launcher = readFileSync(join(f.set.directory, 'slp-codex-peer'), 'utf8');
+  const launcher = readFileSync(join(f.set.directory, 'slp-devin-peer'), 'utf8');
   const expected =
     '#!/bin/sh\n' +
     'unset NODE_OPTIONS\n' +
     `exec ${sq(f.node.path)} ${sq(join(f.candidate, 'bin', 'slp-shim.mjs'))} ` +
-    `${sq(f.manifestPath)} ${sq(f.set.launchManifestSha256)} 'codex' 'peer' -- "$@"\n`;
+    `${sq(f.manifestPath)} ${sq(f.set.launchManifestSha256)} 'devin' 'peer' -- "$@"\n`;
   assert.equal(launcher, expected);
 });
 
@@ -483,7 +487,7 @@ test('launchers: publish refuses symlink or non-directory staging paths', async 
 
 test('launchers: verify rejects tampering, extras and mode drift', async t => {
   const f = await fixtureRuntime(t);
-  const one = join(f.set.directory, 'slp-pi-lead');
+  const one = join(f.set.directory, 'slp-devin-lead');
   appendFileSync(one, '# tampered\n');
   await assert.rejects(f.launchers.verify(f.set.directory), error => {
     assert.equal(error.code, 'RUNTIME_INTEGRITY');
@@ -504,7 +508,7 @@ test('launchers: verify rejects symlink members and special mode bits', async t 
   // A member replaced by a symlink — even to byte-identical content outside
   // the immutable directory — is not a regular file and must be rejected.
   const f = await fixtureRuntime(t);
-  const member = join(f.set.directory, 'slp-codex-peer');
+  const member = join(f.set.directory, 'slp-devin-peer');
   const bytes = readFileSync(member);
   const outside = join(f.dir, 'launcher-copy');
   writeFileSync(outside, bytes, { mode: 0o755 });
@@ -516,7 +520,7 @@ test('launchers: verify rejects symlink members and special mode bits', async t 
   });
   // Special bits (setuid here) must not be masked away: 04755 != 0755.
   const f2 = await fixtureRuntime(t);
-  chmodSync(join(f2.set.directory, 'slp-pi-supervisor'), 0o4755);
+  chmodSync(join(f2.set.directory, 'slp-devin-supervisor'), 0o4755);
   await assert.rejects(f2.launchers.verify(f2.set.directory), error => {
     assert.equal(error.code, 'RUNTIME_INTEGRITY');
     return true;
@@ -636,7 +640,7 @@ test('launchers: POSIX single-quote escaping survives spaces and quotes end-to-e
     binaries: Object.fromEntries(FAMILIES.map(family => [family, UNAVAILABLE])),
   });
   const userArgs = ['two words', "it's", '--', ''];
-  const result = spawnSync(join(set.directory, 'slp-pi-peer'), userArgs, {
+  const result = spawnSync(join(set.directory, 'slp-devin-peer'), userArgs, {
     encoding: 'utf8',
     env: { PATH: '/usr/bin:/bin', NODE_OPTIONS: '--require /nonexistent/evil.cjs' },
   });
@@ -646,7 +650,7 @@ test('launchers: POSIX single-quote escaping survives spaces and quotes end-to-e
     join(candidate, 'bin', 'slp-shim.mjs'),
     join(set.directory, 'launch.json'),
     set.launchManifestSha256,
-    'pi',
+    'devin',
     'peer',
     '--',
     ...userArgs,
@@ -701,12 +705,12 @@ test('shim: argv0 --version answers the real provider version with no provider e
   assert.equal(result.stdout, 'codex 9.9.9-fake\n');
   assert.ok(!result.stdout.includes(process.versions.node), 'no Node-version false positive');
   // The launcher executable alone reaches the same path (Paseo's argv0 probe).
-  const viaLauncher = spawnSync(join(f.set.directory, 'slp-codex-peer'), ['--version'], {
+  const viaLauncher = spawnSync(join(f.set.directory, 'slp-devin-peer'), ['--version'], {
     env: { PATH: '/usr/bin:/bin' },
     encoding: 'utf8',
   });
   assert.equal(viaLauncher.status, 0);
-  assert.equal(viaLauncher.stdout, 'codex 9.9.9-fake\n');
+  assert.equal(viaLauncher.stdout, 'devin 9.9.9-fake\n');
 });
 
 test('shim: frozen env comes from the manifest; grant/PASEO_AGENT_ID cannot select a binding', async t => {

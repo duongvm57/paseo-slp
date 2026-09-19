@@ -1,9 +1,11 @@
 # Settings-driven role providers and hook injection — post-v1 direction
 
 Status: Phase 0 probes **ran on the live daemon 2026-09-19** — all gates
-passed (results below). Phase 1 and Phase 2 implementation in progress under
-the Lead assignment on branch `feat/slp-paseo-plugin`. Not part of the Option
-A v1 contract ([paseo-plugin-implementation.md](paseo-plugin-implementation.md)).
+passed (results below). Phase 1 (settings-driven generation, `f3465cc`) and
+Phase 2 (hook injection + sentinel-gated thin aliases) are implemented on
+branch `feat/slp-paseo-plugin`. Phase 3 (mixed-artifact operations) remains
+open. Not part of the Option A v1 contract
+([paseo-plugin-implementation.md](paseo-plugin-implementation.md)).
 Builds on the B0/B2 hook-seam findings in
 [paseo-plugin-feasibility.md](paseo-plugin-feasibility.md).
 
@@ -134,16 +136,45 @@ Valuable even if the hook path dies.
 - Surface: role cards with pickers; migration path rebinds existing v1
   installs through one re-activation.
 
-## 6. Phase 2 — hook injection (conditional on S3)
+## 6. Phase 2 — hook injection (implemented)
 
-- Register `agent.create` hook: read `config.provider`/marker → role →
-  `roleBundle()` → `systemPrompt`.
-- Hook families become thin `extends` aliases — no command, no shim, no
-  launch-set entry.
-- Sentinel so a launch during a hook gap fails visibly instead of
-  spawning without a role contract.
-- Byte-parity test between hook-rendered and wrapper-rendered bundles.
+As built on `feat/slp-paseo-plugin`:
+
+- `plugin/index.server.ts` registers two `server.before` hooks, implemented
+  in `plugin/server/role-injection.ts`:
+  - `agent.create` resolves the role from an owned
+    `slp-(codex|pi|claude)-(supervisor|lead|peer)` provider id (or the
+    `featureValues.slp_role` marker on an un-suffixed `slp-*` id), reads the
+    active binding from the journal receipt, dynamically imports the
+    materialized candidate's `src/role-bundle.mjs` (cached per candidate
+    sha), and writes `config.systemPrompt` — role bundle first, a
+    pre-existing prompt appended after it. Foreign providers and
+    `slp-devin-*` pass through untouched; an `slp-*` provider whose role,
+    binding or candidate cannot be resolved aborts the create (fail-closed).
+    `config.provider` is never rewritten.
+  - `agent.session_open` overlays a non-empty per-open
+    `SLP_SESSION_OPEN_GRANT` onto the provider env for hook-family ids —
+    every open reason (create/resume/refresh/import).
+- Thin aliases diverge from the "no command" sketch: a pure `extends` alias
+  cannot fail closed (Phase 0 sentinel probe), so each hook-family entry
+  keeps its `slp-*` identity + native `extends` and runs
+  `command: [node, <candidate>/bin/slp-gate.mjs]` with env
+  `{SLP_SESSION_OPEN_GRANT: "", SLP_FAMILY_BIN: <resolved binary>}`. The
+  gate (`bin/slp-gate.mjs`, shipped in the embedded payload) refuses any
+  launch whose grant stayed empty — the exact hook-gap case — and forwards
+  argv/stdio/exit-status to the family binary otherwise. The bare
+  `--version` probe answers through the real binary in every grant state
+  (host availability probes run outside any session open).
+- Launch sets now publish only the three devin launchers; the launch
+  manifest still records all four family resolutions for shim validation,
+  and new manifests carry `launcherFamilies:["devin"]` so verify stays
+  self-describing (pre-Phase-2 manifests replay the legacy 12-launcher
+  plan).
+- Byte-parity test between hook-rendered and wrapper-rendered bundles
+  across all twelve owned ids (tests/plugin-role-injection.test.mjs).
 - Devin wrapper path untouched.
+- Live-daemon smoke remains pending — unit/parity coverage plus the Phase 0
+  live evidence stand in per the assignment.
 
 ## 7. Phase 3 — mixed-artifact operations
 

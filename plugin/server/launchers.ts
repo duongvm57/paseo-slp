@@ -1,13 +1,20 @@
 // §6: immutable launch-set generation and publication.
 //
 // A launch set lives at <stable-root>/launchers/<launch-set-sha256>/ and holds
-// launch.json plus 12 executable POSIX launchers (4 families x 3 roles), one
-// real argv[0] per provider entry. `launchSetSha256` is the sha256 of the
-// canonical launch.json bytes; the manifest carries no self-reference, so the
-// set hash and the manifest hash coincide (the receipt records the same value
-// as launchManifestSha256). Launcher bytes are a pure function of the manifest
-// plus the set directory, so equal inputs reproduce an identical set and an
-// existing verified directory is reused rather than rewritten.
+// launch.json plus executable POSIX launchers — since Phase 2 (settings-
+// driven-providers.md §6) exactly the three devin wrapper launchers, one per
+// role. Hook families (codex/pi/claude) launch through the sentinel-gated
+// thin-alias command pointing at the candidate's bin/slp-gate.mjs, so they
+// no longer get generated launchers; the manifest keeps the full four-family
+// resolution record because the shipped devin shim validates the complete
+// family/role sets before entering the wrapper (verifyLaunchManifest stays
+// generic — that is the documented choice). `launchSetSha256` is the sha256
+// of the canonical launch.json bytes; the manifest carries no self-
+// reference, so the set hash and the manifest hash coincide (the receipt
+// records the same value as launchManifestSha256). Launcher bytes are a pure
+// function of the manifest plus the set directory, so equal inputs
+// reproduce an identical set and an existing verified directory is reused
+// rather than rewritten.
 //
 // Publication follows §5: build in memory, stage under .staging/<op-id>,
 // verify staged bytes/modes from disk, fsync, rename into place, re-verify.
@@ -46,6 +53,10 @@ const PRIVATE_DIR_MODE = 0o700;
 const MANIFEST_NAME = "launch.json";
 const SHIM_RELATIVE_PATH = join("bin", "slp-shim.mjs");
 
+/** Phase 2: families that still get generated wrapper launchers. Hook
+ *  families run the sentinel gate instead (see the file header). */
+export const LAUNCHER_FAMILIES: readonly FamilyName[] = ["devin"];
+
 interface LaunchManifest {
   schemaVersion: 1;
   daemonHome: string;
@@ -54,6 +65,13 @@ interface LaunchManifest {
   binaries: Record<FamilyName, BinaryResolution>;
   families: FamilyName[];
   roles: Role[];
+  /** The subset of `families` whose role launchers this set contains —
+   *  `["devin"]` since Phase 2. Absent on legacy manifests, which replan as
+   *  the v1 twelve-launcher layout so pre-Phase-2 sets still verify under
+   *  this builder. The field also makes new manifests digest-different from
+   *  a legacy manifest with identical inputs, so the two layouts can never
+   *  collide on a directory name. */
+  launcherFamilies?: FamilyName[];
 }
 
 const sha256 = (bytes: string | Buffer): string =>
@@ -89,6 +107,7 @@ function buildManifest(request: LaunchSetRequest): LaunchManifest {
     binaries,
     families: [...FAMILIES],
     roles: [...ROLES],
+    launcherFamilies: [...LAUNCHER_FAMILIES],
   };
 }
 
@@ -120,7 +139,9 @@ interface PlannedFile {
   mode: number;
 }
 
-/** The 13 set members, deterministic from the manifest and set directory. */
+/** The set members, deterministic from the manifest and set directory:
+ *  launch.json plus the launchers the manifest records — `launcherFamilies`
+ *  on Phase-2 manifests, all four families on legacy ones. */
 function planFiles(manifest: LaunchManifest, directory: string): PlannedFile[] {
   const manifestPath = join(directory, MANIFEST_NAME);
   const digest = sha256(manifestBytes(manifest));
@@ -128,7 +149,7 @@ function planFiles(manifest: LaunchManifest, directory: string): PlannedFile[] {
   const files: PlannedFile[] = [
     { name: MANIFEST_NAME, bytes: manifestBytes(manifest), mode: MANIFEST_MODE },
   ];
-  for (const family of manifest.families) {
+  for (const family of manifest.launcherFamilies ?? manifest.families) {
     for (const role of manifest.roles) {
       files.push({
         name: launcherName(family, role),
@@ -194,6 +215,13 @@ function parseManifest(bytes: Buffer): LaunchManifest {
     !ROLES.every(r => (m.roles as string[]).includes(r))
   ) {
     fail("families/roles sets are malformed");
+  }
+  if (
+    m.launcherFamilies !== undefined &&
+    (!Array.isArray(m.launcherFamilies) ||
+      !m.launcherFamilies.every(f => (FAMILIES as readonly string[]).includes(f)))
+  ) {
+    fail("launcherFamilies is malformed");
   }
   return m as LaunchManifest;
 }

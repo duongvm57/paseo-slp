@@ -599,7 +599,7 @@ test('inspect verifies a retained launch set sharing the active runtime path', a
 
   // Delete one launcher of the retained (inactive) set: inspect must report
   // RUNTIME_INTEGRITY, not ACTIVE with no conflicts.
-  rmSync(join(home, 'slp-runtime', 'launchers', oldSet, 'slp-codex-lead'));
+  rmSync(join(home, 'slp-runtime', 'launchers', oldSet, 'slp-devin-lead'));
   const inspectId = randomUUID();
   const inspect = await manager2.reconcile(reconcileInput(home, inspectId, 'inspect'), daemon);
   assert.equal(inspect.accepted, true);

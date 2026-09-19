@@ -8,6 +8,7 @@
 // before any mutation — the file is never "fixed" by stripping.
 
 import { z } from "zod";
+import { join } from "node:path";
 import {
   AgentProfileSchema,
   AgentSkillSelectionSchema,
@@ -441,6 +442,20 @@ export function assertPersistedCompatible(rawJson: unknown): void {
 
 const ownedProviderId = (family: FamilyName, role: string) => `slp-${family}-${role}`;
 
+/** Hook-injected families (settings-driven-providers.md §6 Phase 2): their
+ *  provider entries are sentinel-gated thin aliases, not launcher-backed
+ *  wrappers. The alias keeps the `slp-*` provider identity (agent.provider
+ *  stays `slp-codex-lead`, preserving managed-seat visibility) and its
+ *  command runs the materialized candidate's bin/slp-gate.mjs under the
+ *  binding's verified Node. The gate refuses any launch that arrives
+ *  without the session-open hook's grant — a pure `extends`-only alias
+ *  would silently spawn unroled during a hook gap (plugin disabled or
+ *  reloading), so the sentinel is mandatory. Devin is absent from this set:
+ *  the ACP adapter drops systemPrompt, so slp-devin-* keeps the existing
+ *  shim+wrapper launcher transport. */
+const HOOK_GATE_FAMILIES: ReadonlySet<FamilyName> = new Set(["codex", "pi", "claude"]);
+const GATE_RELATIVE_PATH = join("bin", "slp-gate.mjs");
+
 function desiredProviderEnv(
   family: FamilyName,
   args: { runtimePath: string; nodePath: string; binaryPath: string | null; daemonHome: string },
@@ -500,6 +515,24 @@ export function desiredProviderEntries(
     const binary = resolution.binaries[family];
     const binaryPath = binary.available ? binary.path : null;
     const id = ownedProviderId(family, role);
+    if (HOOK_GATE_FAMILIES.has(family)) {
+      // Thin alias: slp-* identity + native extends, command pinned to the
+      // immutable candidate's sentinel gate under the binding's verified
+      // Node (stable retained path — never a plugin-checkout path). env
+      // carries the empty grant sentinel the session_open hook overlays
+      // plus the family binary the gate execs through to.
+      entries[id] = {
+        extends: PROVIDER_EXTENDS[family] as OwnedProviderValue["extends"],
+        label: `${family} — ${ROLE_DISPLAY[role]} (SLP)`,
+        command: [resolution.node.path, join(runtimePath, GATE_RELATIVE_PATH)],
+        env: {
+          SLP_SESSION_OPEN_GRANT: "",
+          SLP_FAMILY_BIN: binaryPath ?? "",
+        },
+        enabled: binary.available,
+      };
+      continue;
+    }
     entries[id] = {
       extends: PROVIDER_EXTENDS[family] as OwnedProviderValue["extends"],
       label: `SLP ${FAMILY_DISPLAY[family]} ${ROLE_DISPLAY[role]}`,

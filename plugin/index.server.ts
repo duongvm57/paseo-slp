@@ -4,6 +4,7 @@
 // mutex, state transitions and connected SDK calls.
 import type { PluginServerContribution } from "@getpaseo/plugin/server";
 import { homedir } from "node:os";
+import { realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { activate, reconcile, deactivate, status, localTarget, catalog, setLanguage, getRoleRouting, setRoleRouting } from "./shared/contracts.ts";
 import type { CatalogRequest, FamilyName, Manager } from "./shared/contracts.ts";
@@ -12,6 +13,8 @@ import { createMaterializer } from "./server/materializer.ts";
 import { embeddedPayload } from "./server/generated/runtime-payload.ts";
 import { createExecutableResolver } from "./server/executables.ts";
 import { createLauncherBuilder } from "./server/launchers.ts";
+import { createJournal } from "./server/journal.ts";
+import { createRoleInjection } from "./server/role-injection.ts";
 // Host note: this must stay a hoisted function declaration, not a const —
 // the daemon compiler's Hermes interop eagerly copies export values before
 // module bodies run, so `export default const` evaluates to undefined.
@@ -31,7 +34,40 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   server.handle(setLanguage, input => manager.setLanguage(input));
   server.handle(getRoleRouting, input => manager.getRoleRouting(input));
   server.handle(setRoleRouting, input => manager.setRoleRouting(input));
-  return () => manager.close();
+  // Phase 2 (settings-driven-providers.md §6): the hook-family thin aliases
+  // need the two halves the sentinel gate cannot supply — role-bundle
+  // injection at agent.create and the session-open grant overlay. Both hooks
+  // read the binding lazily per call, so a later activation or rebind is
+  // picked up without re-registering; failures propagate to the host, which
+  // is what makes the managed path fail closed during a hook gap.
+  const journal = createJournal();
+  const injection = createRoleInjection({ readActiveBinding: () => readActiveBinding(journal) });
+  const offAgentCreate = server.before("agent.create", injection.agentCreate);
+  const offSessionOpen = server.before("agent.session_open", injection.sessionOpen);
+  return () => {
+    offAgentCreate();
+    offSessionOpen();
+    manager.close();
+  };
+}
+
+// The hooks resolve the live binding from the journal receipt under this
+// daemon's own <home>/slp-runtime — the same canonical home resolution the
+// manager uses (realpath before the stable-root join). null when no
+// receipt/binding exists; journal integrity failures propagate (fail closed
+// for managed providers, never a silently unroled spawn).
+function readActiveBinding(journal: ReturnType<typeof createJournal>) {
+  const { daemonHome } = detectDaemonHome();
+  const stableRoot = join(realpathSync(daemonHome), "slp-runtime");
+  const receipt = journal.read(stableRoot);
+  if (receipt === null || receipt.binding === null) return null;
+  const binding = receipt.binding;
+  return {
+    candidateSha256: binding.candidateSha256,
+    runtimePath: binding.runtimePath,
+    nodePath: binding.node.path,
+    daemonHome: receipt.target.daemonHome,
+  };
 }
 
 // The plugin child inherits the daemon's environment: PASEO_HOME when the

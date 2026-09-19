@@ -341,6 +341,18 @@ Crash cleanup may remove only verified unpublished staging associated with a jou
 
 ## 6. Executable shims and Node/binary resolution
 
+> **Phase 2 amendment** ([settings-driven-providers.md](settings-driven-providers.md)
+> §6): this section describes the v1 Option-A shape, which `slp-devin-*`
+> still uses verbatim. For codex/pi/claude the provider entry is now a
+> sentinel-gated thin alias — `command: [node, <candidate>/bin/slp-gate.mjs]`
+> with `extends` kept and env `{SLP_SESSION_OPEN_GRANT: "", SLP_FAMILY_BIN}`
+> — so hook-family entries have a two-element argv and no launcher file.
+> Launch sets therefore publish only the three devin launchers (new
+> manifests carry `launcherFamilies:["devin"]`; manifests without the field
+> replay the legacy twelve-launcher plan). The argv0-probe rationale below
+> still holds: the gate answers a bare `--version` through the real family
+> binary without requiring the grant.
+
 **DECISION: give each family/role its own real executable `argv[0]`.** Rationale: Paseo's Codex probe invokes only `command[0] --version`, dropping the command tail and provider runtime environment; today's Node-first command reports Node's version. Sources: `S/agent/providers/diagnostic-utils.js:108–120`; `S/agent/providers/codex-app-server-agent.js:5547–5578`; `src/paseo-install.mjs:39`; [audit](paseo-plugin-feasibility.md):694–695.
 
 Each command is exactly one element:

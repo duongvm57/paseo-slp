@@ -88,15 +88,28 @@ test('happy activate: INACTIVE → ACTIVE, providers/profiles/injection written,
   for (const id of OWNED_IDS) {
     const family = id.split('-')[1];
     const entry = providers[id];
-    const familyLabel = { codex: 'Codex', pi: 'Pi', devin: 'Devin', claude: 'Claude Code' }[family];
     const roleLabel = id.split('-')[2][0].toUpperCase() + id.split('-')[2].slice(1);
-    assert.equal(entry.label, `SLP ${familyLabel} ${roleLabel}`);
     assert.equal(entry.enabled, true);
-    assert.equal(entry.command.length, 1);
-    assert.ok(entry.command[0].includes(`${home}/slp-runtime/launchers/`), `command for ${id}`);
-    assert.equal(entry.env.SLP_MANAGED_RUNTIME, '1');
-    assert.equal(entry.env.PASEO_HOME, home);
-    assert.equal(entry.env[`SLP_${family.toUpperCase()}_BIN`], binaries[family]);
+    assert.equal(entry.env.SLP_SESSION_OPEN_GRANT, '');
+    if (family === 'devin') {
+      // Devin keeps the shim+wrapper transport: single-element launcher
+      // command plus the full managed env.
+      assert.equal(entry.label, `SLP Devin ${roleLabel}`);
+      assert.equal(entry.command.length, 1);
+      assert.ok(entry.command[0].includes(`${home}/slp-runtime/launchers/`), `command for ${id}`);
+      assert.equal(entry.env.SLP_MANAGED_RUNTIME, '1');
+      assert.equal(entry.env.PASEO_HOME, home);
+      assert.equal(entry.env.SLP_DEVIN_BIN, binaries.devin);
+      continue;
+    }
+    // Hook families are sentinel-gated thin aliases: [node, gate] command
+    // under the materialized candidate plus the two-key gate env.
+    assert.equal(entry.label, `${family} — ${roleLabel} (SLP)`);
+    assert.equal(entry.command.length, 2);
+    assert.equal(entry.command[0], process.execPath, `gate node for ${id}`);
+    assert.equal(entry.command[1], join(home, 'slp-runtime', deps.payload.candidate.sha256, 'bin', 'slp-gate.mjs'));
+    assert.equal(entry.env.SLP_FAMILY_BIN, binaries[family]);
+    assert.equal(entry.env.SLP_MANAGED_RUNTIME, undefined, 'thin aliases carry no managed env');
   }
   const profileIds = config.daemon.agentProfiles.map(p => p.id);
   assert.ok(profileIds.includes('slp-supervisor'));
@@ -563,7 +576,13 @@ test('rebind with a new candidate keeps old runtime + launch set retained', asyn
   assert.ok(existsSync(join(home, 'slp-runtime', doneAct.binding.candidateSha256)));
   assert.ok(existsSync(join(home, 'slp-runtime', 'launchers', oldLaunchSet)));
   const config = readConfigJson(home);
-  assert.ok(config.agents.providers['slp-codex-lead'].command[0].includes(done2.binding.launchSetSha256));
+  // The devin wrapper entry still carries the launch-set path; hook-family
+  // aliases point at the new candidate's gate instead.
+  assert.ok(config.agents.providers['slp-devin-lead'].command[0].includes(done2.binding.launchSetSha256));
+  assert.equal(
+    config.agents.providers['slp-codex-lead'].command[1],
+    join(home, 'slp-runtime', done2.binding.candidateSha256, 'bin', 'slp-gate.mjs'),
+  );
 });
 
 test('original baseline survives multiple rebinds — every candidate + launch set retained', async t => {
@@ -592,9 +611,9 @@ test('original baseline survives multiple rebinds — every candidate + launch s
   assert.deepEqual(retainedSha, bindings.map(b => b.candidateSha256));
   assert.equal(receipt.binding.candidateSha256, bindings[2].candidateSha256);
   assert.equal(receipt.retained.length, 3);
-  // The newest binding's launchers point at the newest launch set.
+  // The newest binding's devin launchers point at the newest launch set.
   const config = readConfigJson(home);
-  assert.ok(config.agents.providers['slp-codex-lead'].command[0].includes(bindings[2].launchSetSha256));
+  assert.ok(config.agents.providers['slp-devin-lead'].command[0].includes(bindings[2].launchSetSha256));
 });
 
 test('rebind preserves human-edited profile preferences', async t => {
@@ -996,7 +1015,7 @@ test('explicit binaries override resolution and land in provider env', async t =
   const done = await waitTerminal(manager, home, act.operation.operationId, daemon);
   assert.equal(done.state, 'ACTIVE');
   const config = readConfigJson(home);
-  assert.equal(config.agents.providers['slp-claude-peer'].env.SLP_CLAUDE_BIN, binaries.claude);
+  assert.equal(config.agents.providers['slp-claude-peer'].env.SLP_FAMILY_BIN, binaries.claude);
   assert.equal(config.agents.providers['slp-codex-peer'].enabled, false);
 });
 

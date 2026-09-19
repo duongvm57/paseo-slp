@@ -447,7 +447,9 @@ export function makeMaterializer(payload, hooks = {}) {
 const LAUNCHER_MODE = 0o755;
 
 export function makeLaunchers(hooks = {}) {
-  const launcherIds = () => OWNED_IDS.slice().sort();
+  // Phase 2 mirrors the real builder: only the devin wrapper family still
+  // gets generated launchers; hook families run the sentinel gate instead.
+  const launcherIds = () => ROLES.map(r => `slp-devin-${r}`).sort();
   const launcherBytes = (req, id) =>
     `#!/bin/sh\nexec "${req.node.path}" "${req.candidate.runtimePath}/bin/slp-shim.mjs" "${id}"\n`;
   const manifestBytes = req => JSON.stringify({

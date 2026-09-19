@@ -1,0 +1,423 @@
+// tests/plugin-role-injection.test.mjs — Phase 2 hook + gate coverage
+// (settings-driven-providers.md §6): agent.create role resolution across all
+// twelve owned ids plus the slp_role marker, pass-through for foreign/devin
+// providers, fail-closed binding/candidate behavior, systemPrompt
+// composition, session_open grant emission, the bin/slp-gate.mjs sentinel as
+// a real subprocess, thin-alias provider entries, and byte-parity between
+// the hook-injected bundle and the devin wrapper's bundle.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { spawn, spawnSync } from 'node:child_process';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { join } from 'node:path';
+import { createRoleInjection } from '../plugin/server/role-injection.ts';
+import { desiredProviderEntries } from '../plugin/server/config-transaction.ts';
+import { identity, install } from '../src/package.mjs';
+import { roleBundle } from '../src/role-bundle.mjs';
+
+const root = fileURLToPath(new URL('..', import.meta.url));
+const GATE = join(root, 'bin', 'slp-gate.mjs');
+const HOOK_FAMILIES = ['codex', 'pi', 'claude'];
+const ALL_FAMILIES = [...HOOK_FAMILIES, 'devin'];
+const ROLES = ['supervisor', 'lead', 'peer'];
+const HOOK_IDS = HOOK_FAMILIES.flatMap(f => ROLES.map(r => `slp-${f}-${r}`));
+const DEVIN_IDS = ROLES.map(r => `slp-devin-${r}`);
+const OWNED_IDS = [...HOOK_IDS, ...DEVIN_IDS].sort();
+
+function tmp(t, prefix = 'roleinj-') {
+  mkdirSync(join(root, '.local-checks'), { recursive: true });
+  const dir = mkdtempSync(join(root, '.local-checks/', prefix));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  return dir;
+}
+
+// A real materialized candidate (same layout the stable root publishes) so
+// the hook's dynamic import loads the candidate's own role-bundle.mjs.
+function fixtureCandidate(t) {
+  const dir = tmp(t);
+  const home = join(dir, 'home');
+  const stableRoot = join(home, 'slp-runtime');
+  mkdirSync(join(stableRoot, 'state'), { recursive: true });
+  const sha = identity(root).sha256;
+  const candidate = join(stableRoot, sha);
+  install(root, candidate);
+  return { dir, home, stableRoot, sha, candidate };
+}
+
+const bindingFor = f => ({
+  candidateSha256: f.sha,
+  runtimePath: f.candidate,
+  nodePath: process.execPath,
+  daemonHome: f.home,
+});
+
+const managedEnv = f => ({
+  SLP_MANAGED_RUNTIME: '1',
+  SLP_NODE_BIN: process.execPath,
+  SLP_RUNTIME_ROOT: f.candidate,
+  SLP_DAEMON_HOME: f.home,
+});
+
+const createReq = (provider, configExtra = {}) => ({
+  request: {
+    config: { provider, cwd: '/work', ...configExtra },
+  },
+});
+
+const openReq = (provider, extra = {}) => ({
+  request: {
+    agentId: 'agent-1',
+    workspaceId: 'wks-1',
+    provider,
+    cwd: '/work',
+    reason: 'create',
+    purpose: 'interactive',
+    env: { SLP_SESSION_OPEN_GRANT: '', SLP_FAMILY_BIN: '/bin/x' },
+    ...extra,
+  },
+});
+
+function makeInjection(t, overrides = {}) {
+  const f = overrides.fixture ?? fixtureCandidate(t);
+  const binding = overrides.binding === undefined ? bindingFor(f) : overrides.binding;
+  return {
+    fixture: f,
+    injection: createRoleInjection({
+      readActiveBinding: () => binding,
+      ...overrides.deps,
+    }),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// agent.create — role resolution and injection
+// ---------------------------------------------------------------------------
+
+test('agent.create: all nine hook-family ids inject; all three devin ids pass through', async t => {
+  const { injection } = makeInjection(t);
+  for (const id of OWNED_IDS) {
+    const out = await injection.agentCreate(createReq(id));
+    if (DEVIN_IDS.includes(id)) {
+      assert.equal(out, undefined, `${id} must pass through untouched`);
+      continue;
+    }
+    assert.ok(out?.config?.systemPrompt?.startsWith('SLP role='), `${id} must get role bytes`);
+    assert.equal(out.config.provider, id, 'provider identity is never rewritten');
+    assert.equal(out.config.cwd, '/work');
+  }
+});
+
+test('agent.create: role suffix selects the correct bundle for every hook id', async t => {
+  const { injection, fixture } = makeInjection(t);
+  for (const family of HOOK_FAMILIES) {
+    for (const role of ROLES) {
+      const out = await injection.agentCreate(createReq(`slp-${family}-${role}`));
+      const expected = roleBundle(fixture.candidate, role, managedEnv(fixture)).instructions;
+      assert.equal(out.config.systemPrompt, expected, `slp-${family}-${role}`);
+    }
+  }
+});
+
+test('agent.create: foreign providers and bare family ids pass through', async t => {
+  const { injection } = makeInjection(t);
+  for (const provider of ['codex', 'pi', 'claude', 'devin', 'custom-tool', 'copilot']) {
+    const out = await injection.agentCreate(createReq(provider));
+    assert.equal(out, undefined, `${provider} must pass through`);
+  }
+});
+
+test('agent.create: slp_role feature marker resolves the role on an un-suffixed slp-* id', async t => {
+  const { injection, fixture } = makeInjection(t);
+  for (const role of ROLES) {
+    const out = await injection.agentCreate(
+      createReq('slp-codex', { featureValues: { slp_role: role } }),
+    );
+    const expected = roleBundle(fixture.candidate, role, managedEnv(fixture)).instructions;
+    assert.equal(out.config.systemPrompt, expected, `marker slp_role=${role}`);
+  }
+});
+
+test('agent.create: slp-* provider without resolvable role fails closed', async t => {
+  const { injection } = makeInjection(t);
+  for (const [provider, featureValues] of [
+    ['slp-codex', undefined],
+    ['slp-custom-thing', undefined],
+    ['slp-codex', { slp_role: 'bogus' }],
+    ['slp-codex', { slp_role: 42 }],
+  ]) {
+    await assert.rejects(
+      injection.agentCreate(createReq(provider, { featureValues })),
+      /cannot resolve a role/,
+      `${provider} must abort the create`,
+    );
+  }
+});
+
+test('agent.create: missing binding fails closed for hook ids, not for pass-through ids', async t => {
+  const { injection } = makeInjection(t, { binding: null });
+  for (const id of DEVIN_IDS) {
+    assert.equal(await injection.agentCreate(createReq(id)), undefined);
+  }
+  assert.equal(await injection.agentCreate(createReq('codex')), undefined);
+  await assert.rejects(
+    injection.agentCreate(createReq('slp-codex-lead')),
+    /no active binding/,
+  );
+});
+
+test('agent.create: candidate import failure aborts; eviction allows a later retry', async t => {
+  const f = fixtureCandidate(t);
+  let calls = 0;
+  const injection = createRoleInjection({
+    readActiveBinding: () => bindingFor(f),
+    importModule: specifier => {
+      calls += 1;
+      if (calls === 1) return Promise.reject(new Error('staged import failure'));
+      return import(specifier);
+    },
+  });
+  await assert.rejects(injection.agentCreate(createReq('slp-pi-peer')), /staged import failure/);
+  const out = await injection.agentCreate(createReq('slp-pi-peer'));
+  assert.ok(out.config.systemPrompt.startsWith('SLP role=peer'), 'retry re-imports and succeeds');
+  assert.equal(calls, 2);
+});
+
+test('agent.create: the imported module is cached per candidate sha', async t => {
+  const f = fixtureCandidate(t);
+  let calls = 0;
+  const injection = createRoleInjection({
+    readActiveBinding: () => bindingFor(f),
+    importModule: specifier => {
+      calls += 1;
+      return import(specifier);
+    },
+  });
+  await injection.agentCreate(createReq('slp-codex-peer'));
+  await injection.agentCreate(createReq('slp-claude-lead'));
+  assert.equal(calls, 1, 'one dynamic import per candidate');
+});
+
+test('agent.create: pre-set systemPrompt is appended after the role bundle', async t => {
+  const { injection, fixture } = makeInjection(t);
+  const out = await injection.agentCreate(
+    createReq('slp-claude-supervisor', { systemPrompt: 'existing host instructions' }),
+  );
+  const expected = roleBundle(fixture.candidate, 'supervisor', managedEnv(fixture)).instructions;
+  assert.ok(out.config.systemPrompt.startsWith(expected), 'role authority leads');
+  assert.ok(out.config.systemPrompt.endsWith('existing host instructions'));
+  assert.ok(out.config.systemPrompt.length > expected.length);
+});
+
+// ---------------------------------------------------------------------------
+// agent.session_open — grant overlay
+// ---------------------------------------------------------------------------
+
+test('session_open: every hook id gets a fresh non-empty grant; others pass through', async t => {
+  const { injection } = makeInjection(t);
+  const seen = new Set();
+  for (const reason of ['create', 'resume', 'refresh', 'import']) {
+    for (const id of OWNED_IDS) {
+      const out = injection.sessionOpen(openReq(id, { reason }));
+      if (DEVIN_IDS.includes(id)) {
+        assert.equal(out, undefined, `${id} (${reason}) must pass through`);
+        continue;
+      }
+      const grant = out.env.SLP_SESSION_OPEN_GRANT;
+      assert.ok(typeof grant === 'string' && grant.length > 0, `${id} (${reason}) needs a grant`);
+      seen.add(grant);
+      // Non-env fields are returned unchanged; the sentinel is overlaid, the
+      // rest of the env is preserved.
+      assert.equal(out.env.SLP_FAMILY_BIN, '/bin/x');
+      assert.equal(out.provider, id);
+      assert.equal(out.reason, reason);
+      assert.equal(out.agentId, 'agent-1');
+    }
+  }
+  assert.equal(seen.size, 36, 'every open gets a distinct grant token');
+  for (const provider of ['codex', 'custom-tool', 'slp-devin-peer']) {
+    assert.equal(injection.sessionOpen(openReq(provider)), undefined);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// bin/slp-gate.mjs — sentinel gate as a real subprocess
+// ---------------------------------------------------------------------------
+
+function writeProbeBinary(t, name = 'family-bin') {
+  const dir = tmp(t, 'gate-bin-');
+  const path = join(dir, name);
+  const argvCapture = join(dir, 'argv');
+  const envCapture = join(dir, 'env');
+  writeFileSync(path, `#!/bin/sh
+printf '%s\\0' "$@" > '${argvCapture}'
+{
+  printenv SLP_SESSION_OPEN_GRANT || printf '<unset>'
+  printenv NODE_OPTIONS || printf '<unset>'
+} > '${envCapture}'
+if [ "$1" = "--version" ]; then printf 'family 1.0-fake\\n'; exit 0; fi
+for a in "$@"; do if [ "$a" = "exit3" ]; then exit 3; fi; done
+cat
+`);
+  chmodSync(path, 0o755);
+  return { path, argvCapture, envCapture };
+}
+
+const readArgv = path =>
+  readFileSync(path, 'utf8').split('\0').filter(s => s.length > 0);
+
+function runGate(args, env) {
+  const child = spawn(process.execPath, [GATE, ...args], {
+    env: { PATH: '/usr/bin:/bin', ...env },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const stdout = [];
+  const stderr = [];
+  child.stdout.on('data', c => stdout.push(c));
+  child.stderr.on('data', c => stderr.push(c));
+  child.stdin.end();
+  return new Promise(resolve =>
+    child.on('close', code =>
+      resolve({ code, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') })));
+}
+
+test('gate: absent or empty grant fails closed with the required stderr', async t => {
+  const probe = writeProbeBinary(t);
+  for (const env of [
+    { SLP_FAMILY_BIN: probe.path },
+    { SLP_FAMILY_BIN: probe.path, SLP_SESSION_OPEN_GRANT: '' },
+  ]) {
+    const result = spawnSync(process.execPath, [GATE, 'chat'], { env: { PATH: '/usr/bin:/bin', ...env }, encoding: 'utf8' });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /managed entry launched without live SLP hook grant/);
+  }
+});
+
+test('gate: live grant forwards argv, strips control env, and passes exit codes through', async t => {
+  const probe = writeProbeBinary(t);
+  const env = { SLP_FAMILY_BIN: probe.path, SLP_SESSION_OPEN_GRANT: 'grant-token-1', NODE_OPTIONS: '--enable-source-maps' };
+  const ok = await runGate(['chat', '--flag', 'two words'], env);
+  assert.equal(ok.code, 0, ok.stderr);
+  assert.deepEqual(readArgv(probe.argvCapture), ['chat', '--flag', 'two words']);
+  assert.equal(
+    readFileSync(probe.envCapture, 'utf8'),
+    '<unset><unset>',
+    'grant and NODE_OPTIONS never reach the family process',
+  );
+  const exit3 = await runGate(['exit3'], env);
+  assert.equal(exit3.code, 3);
+});
+
+test('gate: bare --version proxies the real binary in every grant state', async t => {
+  const probe = writeProbeBinary(t);
+  const noGrant = spawnSync(process.execPath, [GATE, '--version'], {
+    env: { PATH: '/usr/bin:/bin', SLP_FAMILY_BIN: probe.path },
+    encoding: 'utf8',
+  });
+  assert.equal(noGrant.status, 0);
+  assert.equal(noGrant.stdout, 'family 1.0-fake\n');
+  const granted = spawnSync(process.execPath, [GATE, '--version'], {
+    env: { PATH: '/usr/bin:/bin', SLP_FAMILY_BIN: probe.path, SLP_SESSION_OPEN_GRANT: 'g' },
+    encoding: 'utf8',
+  });
+  assert.equal(granted.status, 0);
+  assert.equal(granted.stdout, 'family 1.0-fake\n');
+});
+
+test('gate: unresolved SLP_FAMILY_BIN fails clearly in both modes', async t => {
+  const chat = spawnSync(process.execPath, [GATE, 'chat'], {
+    env: { PATH: '/usr/bin:/bin', SLP_SESSION_OPEN_GRANT: 'g', SLP_FAMILY_BIN: '' },
+    encoding: 'utf8',
+  });
+  assert.notEqual(chat.status, 0);
+  assert.match(chat.stderr, /SLP_FAMILY_BIN/);
+  const version = spawnSync(process.execPath, [GATE, '--version'], {
+    env: { PATH: '/usr/bin:/bin' },
+    encoding: 'utf8',
+  });
+  assert.notEqual(version.status, 0);
+  assert.match(version.stderr, /SLP_FAMILY_BIN/);
+});
+
+// ---------------------------------------------------------------------------
+// Thin-alias provider entries (desiredProviderEntries)
+// ---------------------------------------------------------------------------
+
+test('thin aliases: hook families get [node, gate] + gate env; devin keeps the launcher shape', t => {
+  const f = fixtureCandidate(t);
+  const launchSet = {
+    launchSetSha256: 'a'.repeat(64),
+    launchManifestSha256: 'a'.repeat(64),
+    directory: join(f.stableRoot, 'launchers', 'a'.repeat(64)),
+    files: ROLES.map(role => ({
+      path: join(f.stableRoot, 'launchers', 'a'.repeat(64), `slp-devin-${role}`),
+      sha256: 'b'.repeat(64),
+      mode: 0o755,
+    })),
+  };
+  const binaries = Object.fromEntries(
+    ALL_FAMILIES.map(family => [family, { available: true, path: `/opt/bin/${family}`, version: '1.0' }]),
+  );
+  const resolution = { node: { path: '/opt/node/bin/node', version: '24.0.0' }, binaries };
+  const entries = desiredProviderEntries(launchSet, resolution, f.candidate, f.home, null);
+  assert.equal(Object.keys(entries).length, 12);
+  for (const id of OWNED_IDS) {
+    const family = id.split('-')[1];
+    const entry = entries[id];
+    const roleDisplay = id.split('-')[2][0].toUpperCase() + id.split('-')[2].slice(1);
+    if (family === 'devin') {
+      assert.equal(entry.command.length, 1);
+      assert.ok(entry.command[0].endsWith(`/launchers/${'a'.repeat(64)}/${id}`));
+      assert.equal(entry.env[`SLP_${family.toUpperCase()}_BIN`], `/opt/bin/${family}`);
+      assert.equal(entry.env.SLP_MANAGED_RUNTIME, '1');
+      assert.equal(entry.extends, 'acp');
+      assert.equal(entry.label, `SLP Devin ${roleDisplay}`);
+      continue;
+    }
+    assert.deepEqual(entry.command, ['/opt/node/bin/node', join(f.candidate, 'bin', 'slp-gate.mjs')]);
+    assert.deepEqual(entry.env, {
+      SLP_SESSION_OPEN_GRANT: '',
+      SLP_FAMILY_BIN: `/opt/bin/${family}`,
+    });
+    assert.equal(entry.extends, family);
+    assert.equal(entry.label, `${family} — ${roleDisplay} (SLP)`);
+    assert.equal(entry.enabled, true);
+  }
+  // An unavailable hook-family binary disables the alias; the gate env keeps
+  // the sentinel but an empty binary reference.
+  const unavailable = {
+    ...resolution,
+    binaries: { ...binaries, pi: { available: false, path: null, version: null } },
+  };
+  const degraded = desiredProviderEntries(launchSet, unavailable, f.candidate, f.home, null);
+  assert.equal(degraded['slp-pi-peer'].enabled, false);
+  assert.equal(degraded['slp-pi-peer'].env.SLP_FAMILY_BIN, '');
+});
+
+// ---------------------------------------------------------------------------
+// Parity: hook-injected bytes === devin-wrapper-injected bytes, all 12 roles
+// ---------------------------------------------------------------------------
+
+test('parity: hook systemPrompt and devin wrapper inject the identical bundle for every role', async t => {
+  const f = fixtureCandidate(t);
+  const injection = createRoleInjection({ readActiveBinding: () => bindingFor(f) });
+  // The candidate's own role-bundle module, loaded the same way the devin
+  // wrapper loads it (static import inside the candidate tree — here via
+  // dynamic import of the materialized file, the hook's own mechanism).
+  const wrapperModule = await import(pathToFileURL(join(f.candidate, 'src', 'role-bundle.mjs')).href);
+  for (const id of OWNED_IDS) {
+    const role = id.split('-')[2];
+    // (b) what the devin wrapper path injects: roleInstructions(root, role)
+    // under the frozen managed env — identical to roleBundle().instructions.
+    const wrapperBytes = wrapperModule.roleBundle(f.candidate, role, managedEnv(f)).instructions;
+    if (DEVIN_IDS.includes(id)) {
+      // The devin path is the wrapper itself — nothing to compare, just
+      // assert its own render is what the parity contract defines.
+      assert.ok(wrapperBytes.startsWith(`SLP role=${role}`));
+      continue;
+    }
+    // (a) what the agent.create hook writes into config.systemPrompt.
+    const out = await injection.agentCreate(createReq(id));
+    assert.equal(out.config.systemPrompt, wrapperBytes, `${id}: hook bytes !== wrapper bytes`);
+  }
+});

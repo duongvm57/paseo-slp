@@ -1,0 +1,80 @@
+#!/usr/bin/env node
+// SLP managed-entry sentinel gate (settings-driven-providers.md §6 Phase 2).
+// Lives inside the immutable candidate payload at bin/slp-gate.mjs and is the
+// provider `command` for every hook-family slp-* thin alias:
+//
+//   <node> bin/slp-gate.mjs <native-args...>
+//
+// The agent.session_open hook overlays a non-empty SLP_SESSION_OPEN_GRANT onto
+// the provider env for managed session opens only. Every other path that
+// reaches this command — a plugin reload gap, a disabled plugin, a stale
+// entry after removal — sees the empty sentinel from the provider entry (or
+// nothing at all) and must fail closed rather than spawn an unroled native
+// session. A pure `extends`-only alias cannot do that, so the gate is the
+// sentinel; the slp-* provider identity (agent.provider) stays unchanged.
+//
+// One exception: the bare `--version` probe. Host availability/version probes
+// run argv + '--version' outside any session open, so the grant is never
+// present; the gate answers through the real family binary in every grant
+// state, exactly like the shim's probe path.
+import { spawn } from 'node:child_process';
+import { isAbsolute } from 'node:path';
+
+// Same list as the installed host's RUNTIME_CONTROL_ENV_KEYS
+// (server/server/paseo-env.js), plus NODE_OPTIONS — identical to slp-shim.mjs.
+// SLP_SESSION_OPEN_GRANT is also stripped: it has served its purpose at this
+// boundary and must never propagate into a nested session's environment.
+const STRIPPED_ENV_KEYS = [
+  'PASEO_NODE_ENV',
+  'PASEO_DESKTOP_MANAGED',
+  'PASEO_SUPERVISED',
+  'ELECTRON_RUN_AS_NODE',
+  'ELECTRON_NO_ATTACH_CONSOLE',
+  'ESBUILD_BINARY_PATH',
+  'NODE_OPTIONS',
+  'SLP_SESSION_OPEN_GRANT',
+];
+
+const fail = message => {
+  console.error(`slp-gate: ${message}`);
+  process.exitCode = 1;
+};
+
+// Transparent passthrough: inherited stdio, signal forwarding, exit status.
+function passthrough(binary, argv) {
+  const env = { ...process.env };
+  for (const key of STRIPPED_ENV_KEYS) delete env[key];
+  const child = spawn(binary, argv, { stdio: 'inherit', env });
+  child.on('error', error => fail(`cannot exec ${binary}: ${error.message}`));
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => child.kill(signal));
+  child.on('exit', (code, signal) => {
+    process.exitCode = code ?? (signal === 'SIGINT' ? 130 : 143);
+  });
+}
+
+function resolvedBinary() {
+  const binary = process.env.SLP_FAMILY_BIN;
+  if (typeof binary !== 'string' || !isAbsolute(binary)) {
+    fail('SLP_FAMILY_BIN is not a resolved absolute path');
+    return null;
+  }
+  return binary;
+}
+
+function main() {
+  const args = process.argv.slice(2);
+  if (args.length === 1 && args[0] === '--version') {
+    const binary = resolvedBinary();
+    if (binary === null) return;
+    return passthrough(binary, args);
+  }
+  const grant = process.env.SLP_SESSION_OPEN_GRANT;
+  if (typeof grant !== 'string' || grant === '') {
+    return fail('managed entry launched without live SLP hook grant');
+  }
+  const binary = resolvedBinary();
+  if (binary === null) return;
+  return passthrough(binary, args);
+}
+
+main();

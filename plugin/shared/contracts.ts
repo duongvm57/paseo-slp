@@ -308,7 +308,11 @@ export const Profile = z.object({
 }).catchall(Json);
 export const OwnedProvider = z.object({
   extends: z.enum(["codex", "pi", "acp", "claude"]),
-  label: z.string(), command: z.tuple([AbsolutePath]),
+  label: z.string(),
+  // argv of one or two absolute elements: [launcher] for the devin wrapper
+  // path, [node, gate] for hook-family thin aliases (Phase 2). Single-element
+  // receipts written before Phase 2 remain valid.
+  command: z.array(AbsolutePath).min(1).max(2),
   env: z.record(z.string(), z.string()), enabled: z.boolean(),
 }).strict();
 export const OwnedProfileSlot = z.object({
@@ -343,7 +347,10 @@ export const Binding = z.object({
   runtimePath: AbsolutePath,
   launchSetSha256: Sha,
   launchManifestSha256: Sha,
-  launcherFiles: z.array(LauncherFile).length(12),
+  // Legacy bindings record all twelve launchers; Phase 2 bindings record
+  // only the devin wrapper launchers (hook families run the sentinel gate
+  // straight from the candidate, no generated launcher). Both validate.
+  launcherFiles: z.array(LauncherFile).min(1),
   node: z.object({ path: AbsolutePath, version: z.string().min(1) }).strict(),
   binaries: z.object({ codex: Binary, pi: Binary, devin: Binary, claude: Binary }).strict(),
   baseline: z.enum(["fresh", "adopted-observed"]),
@@ -600,14 +607,15 @@ export interface LaunchSet {
   launchManifestSha256: Sha256;
   /** <stableRoot>/launchers/<launchSetSha256> */
   directory: string;
-  /** All 12 role launcher files, with recorded sha256/mode. */
+  /** The generated launcher files (Phase 2: the three devin wrapper
+   *  launchers), with recorded sha256/mode. */
   files: LauncherFileValue[];
 }
 export interface LauncherBuilder {
-  /** Build launch.json deterministically, stage the 12 POSIX launchers, verify
+  /** Build launch.json deterministically, stage the POSIX launchers, verify
    * bytes/modes, publish by rename. Throws OperationConflict on failure. */
   publish(request: LaunchSetRequest): Promise<LaunchSet>;
-  /** Re-verify a published launch set: manifest digest, all 12 launcher
+  /** Re-verify a published launch set: manifest digest, every launcher
    * bytes/modes. Throws OperationConflict(RUNTIME_INTEGRITY) on deviation. */
   verify(directory: string): Promise<LaunchSet>;
 }

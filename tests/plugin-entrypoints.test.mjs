@@ -113,7 +113,7 @@ export const createLauncherBuilder = () => ({
   return file;
 }
 
-test('contribute() registers the nine RPCs and returns a callable cleanup', async t => {
+test('contribute() registers the nine RPCs plus the two before-hooks, cleanup unregisters', async t => {
   const stubFile = writeLaneStubs(t);
   const stubUrl = pathToFileURL(stubFile).href;
   const hooks = registerHooks({
@@ -137,9 +137,15 @@ test('contribute() registers the nine RPCs and returns a callable cleanup', asyn
   assert.equal(typeof contribute, 'function');
 
   const registrations = [];
+  const beforeHooks = [];
+  const unregistered = [];
   const server = {
     handle(contract, handler) {
       registrations.push({ name: contract.name, handler });
+    },
+    before(name, handler) {
+      beforeHooks.push({ name, handler });
+      return () => unregistered.push(name);
     },
   };
   const cleanup = contribute(server);
@@ -160,8 +166,16 @@ test('contribute() registers the nine RPCs and returns a callable cleanup', asyn
   for (const { handler } of registrations) {
     assert.equal(typeof handler, 'function');
   }
+  assert.deepEqual(
+    beforeHooks.map(h => h.name).sort(),
+    ['agent.create', 'agent.session_open'],
+  );
+  for (const { handler } of beforeHooks) {
+    assert.equal(typeof handler, 'function');
+  }
   assert.equal(typeof cleanup, 'function');
   assert.doesNotThrow(() => cleanup());
+  assert.deepEqual(unregistered.sort(), ['agent.create', 'agent.session_open']);
   assert.doesNotThrow(() => cleanup(), 'cleanup must be idempotent');
 });
 
