@@ -1,10 +1,33 @@
 # Settings-driven role providers and hook injection — post-v1 direction
 
-Status: design sketch, gated on the Phase 0 probes below. Not scheduled and
-not part of the Option A v1 contract
-([paseo-plugin-implementation.md](paseo-plugin-implementation.md)). Builds on
-the B0/B2 hook-seam findings in
+Status: Phase 0 probes **ran on the live daemon 2026-09-19** — all gates
+passed (results below). Phase 1 and Phase 2 implementation in progress under
+the Lead assignment on branch `feat/slp-paseo-plugin`. Not part of the Option
+A v1 contract ([paseo-plugin-implementation.md](paseo-plugin-implementation.md)).
+Builds on the B0/B2 hook-seam findings in
 [paseo-plugin-feasibility.md](paseo-plugin-feasibility.md).
+
+## Phase 0 probe results (2026-09-19, daemon home ~/.paseo, Paseo 0.8.0)
+
+Probe vehicle: one throwaway directory plugin `slp-probe`
+(`.local-checks/slp-probe/`), registering `agent.create` + `agent.session_open`
+before-hooks that dump hook-visible payloads to JSONL and inject a sentinel
+`systemPrompt` on agents titled `slp-probe-*`. Removed after the probes; the
+managed `paseo-slp` entries were never touched.
+
+| Probe | Result | Evidence |
+|---|---|---|
+| S3 hook inject | **PASS** — all three hook families | Hook-set `config.systemPrompt` reached real seats: codex `f51582fe` echoed the sentinel at create and again on turn 2; pi `7abb3fe8` and claude `69d9288c` echoed at create. Turn-level persistence verified on codex; a process-level `session/load` resume was not exercised (limitation). |
+| Config marker | **PASS** | `settings.features {slp_role:"probe-peer"}` arrived intact in hook-visible `config.featureValues` — arbitrary keys survive `create_agent` → `agent.create`. Hook-visible config keys observed: `cwd, featureValues, modeId, model, provider, thinkingOptionId, title` (+`systemPrompt`, `providerOptions`, `mcpServers`, `internal` when set). No `profileId`, `initialPrompt`, `labels`, or `env` (spawn env). |
+| Model enumeration | **PASS** | `providers.listModels` live: codex=5, pi=473, claude=15 — the shipped `catalog` RPC already wraps this; a model picker inside the SLP UI is viable. |
+| Sentinel | **PASS** — primitives proven, guard required | `agent.session_open` env reaches the provider process env (`SLP_PROBE_GRANT` visible in the codex seat's shell and on an `slp-codex-peer` seat alongside provider-entry env `SLP_MANAGED_RUNTIME`); hook env overlays provider env (`createProviderEnvSpec` applies `runtimeSettings.env` then launch overlays). With the plugin **disabled**, a spawn fired no hooks and started unroled — fail-open confirmed, so a sentinel guard (grant-check gate or marker command + hook `config.provider` rewrite — both viable per `lifecycle/index.js` which only forbids `cwd` changes) is mandatory for thin aliases. |
+| Devin reconfirm | **PASS (as expected)** | Live negative control: the devin seat answered `NO-SENTINEL` although the hook set `systemPrompt` — the 0.8.0 ACP adapter still drops it (`acp-agent.js` `session/new` sends only `{cwd, mcpServers}`). Devin keeps the wrapper. |
+
+Consequences: Phase 2 hook injection is **green-lit** for codex/pi/claude; the
+config-marker pass makes the 4-provider variant (role via `featureValues`
+marker, e.g. `slp_role`) implementable, with 12 thin aliases as fallback;
+fail-closed during a hook gap requires a sentinel guard on every hook-family
+entry; the devin path is unchanged.
 
 ## 1. Goal
 
