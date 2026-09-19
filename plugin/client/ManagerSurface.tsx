@@ -750,10 +750,11 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
           if (!cancelled) setCatalogs(current => ({ ...current, [family]: result }));
         } catch {
           if (!cancelled) {
-            setCatalogs(current => ({
-              ...current,
-              [family]: { schemaVersion: 1, models: [], modes: [], error: "Catalog query failed" },
-            }));
+            const failed: CatalogResult = {
+              schemaVersion: 1, models: [], modes: [], features: [],
+              error: "Catalog query failed",
+            };
+            setCatalogs(current => ({ ...current, [family]: failed }));
           }
         }
       }
@@ -1434,7 +1435,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
       >
         <View style={styles.field}>
           <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Reconcile action</Text>
-          <ChipSelect
+          <ChipSelect<ReconcileAction>
             colors={colors}
             value={reconcileAction}
             options={[
