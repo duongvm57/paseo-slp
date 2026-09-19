@@ -1,14 +1,17 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import { roles } from './profiles.mjs';
+import { roles, orchestrates } from './profiles.mjs';
+import { files, hash } from './package.mjs';
+import { spawnKit } from './spawn-kit.mjs';
 
 // A Role bundle is the exact policy bytes a role receives at session entry.
 // This module owns the load-path contract that docs/guide-coverage.md documents:
 // which policy files reach which role, and in what order. Both transport
 // adapters and the create_agent planner read it from here.
 
-// Supervisor and Lead orchestrate; Peer owns one bounded outcome and never spawns.
-export const orchestrates = role => role !== 'peer';
+// orchestrates lives in profiles.mjs so spawn-kit.mjs can read it without a
+// role-bundle -> spawn-kit -> role-bundle cycle; re-exported to keep the API.
+export { orchestrates };
 
 export function bundleParts(role) {
   if (!roles.includes(role)) throw new Error('Unknown role');
@@ -51,7 +54,54 @@ function managedHelpers(cli, home) {
     `  init/materialize/snapshot/prepare/prepare-handoff/verify are repo-scoped: they take explicit paths and never touch a daemon home.\n`;
 }
 
-export function roleBundle(root, role, env = process.env) {
+// The declared locator set a role's carrier ships: fixed policy surface plus
+// every references file, each stat'ed under root — present files report byte
+// size + sha256, absent ones a missing marker. Entries sort by absolute path
+// so the list carries no bundle/load-order hint. launch.mjs orientation()
+// renders the same list into the plan's manifest; a root without
+// src/references (a broken or foreign runtime root) yields only missing
+// markers instead of throwing — the seat still gets its instructions.
+export function policyLocators(root, role) {
+  let references = [];
+  try { references = files(root, 'src/references'); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const declared = ['docs/contract.md', 'src/common.md', `src/roles/${role}.md`,
+    ...(orchestrates(role) ? ['src/delegation.md'] : []),
+    ...references];
+  return declared.map(path => {
+    const absolute = join(root, path);
+    let stat;
+    try { stat = statSync(absolute); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+    if (!stat?.isFile()) return { path: absolute, missing: true };
+    const bytes = readFileSync(absolute);
+    return { path: absolute, bytes: bytes.length, sha256: hash(bytes) };
+  }).sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+}
+
+// The carrier is the self-contained block that actually reaches the spawned
+// seat. prepare appends it to create.initialPrompt (the only field
+// create_agent transmits); role-bundle appends it to session-entry
+// instructions so seats launched through a provider profile receive the same
+// payload. Same text both ways — absolute policy locators (missing markers
+// included) and the approximate kit signatures, no file contents inlined. The
+// caption names when the locator values were measured: plan-time wording for
+// the prepare path, load-time wording for session entry.
+export function carrierBlock(kit, locators, caption) {
+  const lines = locators.map(entry => entry.missing
+    ? `- ${entry.path} — declared but not shipped in this install`
+    : `- ${entry.path} — ${entry.bytes} bytes, sha256 ${entry.sha256}`);
+  return `\nSpawn kit — role-scoped Paseo MCP signatures (${kit.note}):\n`
+    + kit.tools.map(tool => `- ${tool}`).join('\n')
+    + `\nPolicy locators — ${caption}:\n`
+    + lines.join('\n') + '\n';
+}
+
+// Session-entry locators are measured when the bundle renders, not at plan
+// time, so the caption must not borrow the prepare path's wording.
+const sessionLocatorCaption = 'absolute paths; size/sha256 were measured when these role instructions loaded; verify the file found is the one measured';
+
+export function roleBundle(root, role, env = process.env, options = {}) {
   const parts = bundleParts(role);
   const read = path => readFileSync(join(root, 'src', path), 'utf8');
   const managed = managedRuntime(env);
@@ -68,8 +118,11 @@ export function roleBundle(root, role, env = process.env) {
     (orchestrates(role) ? `For repo setup/update, use ${join(policyRoot, 'skills/paseo-slp-onboarding/SKILL.md')}.\n` : '') +
     `Installed policy directory: ${policyDir}\nSnapshot command: ${cli} snapshot <repository>\n` +
     (managed ? managedHelpers(cli, managed.daemonHome) : '') +
-    `Use the current authorized Human or delegated assignment and its Paseo workspace. Notifications and heartbeat prompts do not replace that assignment.\n`;
+    `Use the current authorized Human or delegated assignment and its Paseo workspace. Notifications and heartbeat prompts do not replace that assignment.\n` +
+    // Callers that append the carrier themselves (launch.mjs prompt()) opt out
+    // here so the block never appears twice in one prompt.
+    (options.carrier === false ? '' : carrierBlock(spawnKit(role), policyLocators(policyRoot, role), sessionLocatorCaption));
   return { role, parts, orchestrates: orchestrates(role), instructions };
 }
 
-export const roleInstructions = (root, role, env = process.env) => roleBundle(root, role, env).instructions;
+export const roleInstructions = (root, role, env = process.env, options) => roleBundle(root, role, env, options).instructions;

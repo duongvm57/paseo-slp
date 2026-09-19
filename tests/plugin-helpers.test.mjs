@@ -10,7 +10,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { install, json } from '../src/package.mjs';
+import { install, json, hash } from '../src/package.mjs';
 import { roleBundle } from '../src/role-bundle.mjs';
 import { verifyProvider } from '../src/binding.mjs';
 
@@ -121,6 +121,42 @@ test('managed bundle fails closed on a missing or relative launch env var', t =>
   const off = roleBundle(installed, 'lead', { ...base, SLP_MANAGED_RUNTIME: '0' });
   assert.ok(!off.instructions.includes('--paseo-home'));
   assert.ok(off.instructions.includes(`node '${join(installed, 'bin/slp.mjs')}'`));
+});
+
+test('role instructions carry the spawn kit and policy locators at session entry', t => {
+  const dir = fixture(t), installed = join(dir, 'release');
+  install(root, installed);
+  // Unmanaged render: locators resolve under the installation itself.
+  const lead = roleBundle(installed, 'lead', {});
+  assert.match(lead.instructions, /\nSpawn kit — role-scoped Paseo MCP signatures \(approximate; verify against live mcp_list_tools\):\n/);
+  assert.ok(lead.instructions.includes('- create_agent(title: string'));
+  // Declared policy absent from the install keeps its missing marker.
+  assert.ok(lead.instructions.includes(`- ${join(installed, 'docs/contract.md')} — declared but not shipped in this install`));
+  const common = readFileSync(join(installed, 'src/common.md'));
+  assert.ok(lead.instructions.includes(`- ${join(installed, 'src/common.md')} — ${common.length} bytes, sha256 ${hash(common)}`));
+  // Session-entry caption: measured at load, never plan-time/prepare wording.
+  assert.match(lead.instructions, /Policy locators — absolute paths; size\/sha256 were measured when these role instructions loaded/);
+  assert.ok(!/plan-time|prepare checked/.test(lead.instructions));
+  // Locators sort by absolute path — the list carries no bundle-order hint.
+  const locatorPaths = lead.instructions.split('\n')
+    .filter(line => line.startsWith(`- ${installed}/`))
+    .map(line => line.slice(2).split(' — ')[0]);
+  assert.deepEqual(locatorPaths, [...locatorPaths].sort());
+  // Managed render derives locators from SLP_RUNTIME_ROOT, not the checkout.
+  const managed = roleBundle(installed, 'peer', {
+    SLP_MANAGED_RUNTIME: '1', SLP_NODE_BIN: '/n/bin/node',
+    SLP_RUNTIME_ROOT: installed, SLP_DAEMON_HOME: '/h',
+  });
+  // The Peer kit is exactly its two tools — never orchestrating signatures.
+  assert.ok(managed.instructions.includes('- send_agent_prompt(agentId: string'));
+  assert.ok(managed.instructions.includes('- get_agent_status(agentId: string)'));
+  assert.ok(!managed.instructions.includes('- create_agent('));
+  assert.ok(!managed.instructions.includes(`- ${join(installed, 'src/delegation.md')}`));
+  assert.ok(managed.instructions.includes(`- ${join(installed, 'src/roles/peer.md')} — `));
+  // Opt-out: prompt() appends the carrier itself, so the inline copy skips it.
+  const bare = roleBundle(installed, 'lead', {}, { carrier: false });
+  assert.ok(!bare.instructions.includes('Spawn kit —'));
+  assert.ok(!bare.instructions.includes('Policy locators —'));
 });
 
 // --- inventory: managed vs unmanaged ---------------------------------------

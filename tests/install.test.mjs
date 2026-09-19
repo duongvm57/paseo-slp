@@ -22,6 +22,17 @@ function fixture(t) {
 // Tests cross the same host-config seam as production instead of forging config.json.
 function config(home, value) { writeConfig(configFile(home), value); }
 
+// Managed sessions export SLP_*/PASEO_* launch vars (SLP_MANAGED_RUNTIME,
+// SLP_DAEMON_HOME, ...); a child inheriting them resolves the real daemon home
+// instead of the test fixture. Strip them all, then apply the test's values.
+const unmanagedEnv = extra => {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) {
+    if (key.startsWith('SLP_') || key.startsWith('PASEO_')) delete env[key];
+  }
+  return { ...env, ...extra };
+};
+
 test('integrated install previews, preserves preferences and unrelated config, and rolls back only owned entries', t => {
   const { home, destination } = fixture(t);
   const before = { version: 1, privateSetting: 'not-in-receipt', agents: { providers: {
@@ -303,7 +314,7 @@ test('a standalone install updates in place and never drops extra files', t => {
 
 test('bare --paseo-home and SLP_HOME resolve the documented defaults', t => {
   const { home, destination } = fixture(t);
-  const env = { ...process.env, PASEO_HOME: home, SLP_HOME: destination };
+  const env = unmanagedEnv({ PASEO_HOME: home, SLP_HOME: destination });
   const result = JSON.parse(execFileSync(process.execPath,
     [join(root, 'bin/slp.mjs'), 'install', '--paseo-home', '--apply'], { env, encoding: 'utf8', timeout: 5000 }));
   assert.equal(result.destination, destination);

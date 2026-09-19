@@ -1,5 +1,4 @@
-import { roles } from './profiles.mjs';
-import { orchestrates } from './role-bundle.mjs';
+import { roles, orchestrates } from './profiles.mjs';
 
 // The spawn-kit is the package-owned approximation of the Paseo MCP surface a
 // role actually needs, so a spawning-capable seat does not re-derive tool

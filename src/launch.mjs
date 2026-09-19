@@ -1,10 +1,10 @@
 import { join, isAbsolute, basename } from 'node:path';
-import { statSync, accessSync, readFileSync, constants } from 'node:fs';
+import { statSync, accessSync, constants } from 'node:fs';
 import { savedProfileBinding, roleProvider, roles } from './profiles.mjs';
-import { verifyInstall, snapshot, readJson, files, hash } from './package.mjs';
+import { verifyInstall, snapshot, readJson } from './package.mjs';
 import { catalogBinding } from './routing.mjs';
 import { bindingCheck, dispositionPattern } from './binding.mjs';
-import { roleInstructions, orchestrates } from './role-bundle.mjs';
+import { roleInstructions, orchestrates, policyLocators, carrierBlock } from './role-bundle.mjs';
 import { spawnKit } from './spawn-kit.mjs';
 
 // Every Binding source normalises to { binding, routing? } right here, so nothing
@@ -44,8 +44,10 @@ export function resolveBinding(role, request, disposition) {
 
 export function prompt(root, role, assignment, binding) {
   bindingCheck(binding);
+  // Stock providers carry role instructions inside the prompt; the carrier is
+  // appended by plan(), so the inline copy opts out to avoid a duplicate block.
   const instructions = binding.provider === roleProvider(role, binding.provider)
-    ? roleInstructions(root, role) : `SLP role=${role}\n`;
+    ? roleInstructions(root, role, process.env, { carrier: false }) : `SLP role=${role}\n`;
   return `${instructions}\nLaunch binding: ${JSON.stringify(binding)}\nAssignment:\n${assignment}\n`;
 }
 
@@ -114,38 +116,21 @@ function assignmentFile(path) {
 // premise errors). A declared file absent from the installed package is still
 // listed, marked missing, so the seat learns it is not shipped.
 function orientation(root, role, routing) {
-  const declared = ['docs/contract.md', 'src/common.md', `src/roles/${role}.md`,
-    ...(orchestrates(role) ? ['src/delegation.md'] : []),
-    ...files(root, 'src/references')];
   return {
     installedRoot: root,
     catalogSha256: routing?.catalogSha256 ?? null,
-    policyBytes: declared.map(path => {
-      const absolute = join(root, path);
-      let stat;
-      try { stat = statSync(absolute); }
-      catch (error) { if (error.code !== 'ENOENT') throw error; }
-      if (!stat?.isFile()) return { path: absolute, missing: true };
-      const bytes = readFileSync(absolute);
-      return { path: absolute, bytes: bytes.length, sha256: hash(bytes) };
-    }).sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
+    policyBytes: policyLocators(root, role),
   };
 }
 
 // The carrier is the self-contained block that actually reaches the spawned
 // seat: create_agent transmits only create.initialPrompt, so plan-level
-// spawnKit/orientation alone would never arrive. It repeats the same data in
-// compact text — absolute policy locators (missing markers included) and the
-// approximate kit signatures — with no file contents inlined.
-function carrierBlock(kit, manifest) {
-  const locators = manifest.policyBytes.map(entry => entry.missing
-    ? `- ${entry.path} — declared but not shipped in this install`
-    : `- ${entry.path} — ${entry.bytes} bytes, sha256 ${entry.sha256}`);
-  return `\nSpawn kit — role-scoped Paseo MCP signatures (${kit.note}):\n`
-    + kit.tools.map(tool => `- ${tool}`).join('\n')
-    + '\nPolicy locators — absolute paths; size/sha256 are plan-time values for verifying the file found is the one prepare checked:\n'
-    + locators.join('\n') + '\n';
-}
+// spawnKit/orientation alone would never arrive. carrierBlock() (shared with
+// role-bundle) repeats the same data in compact text — absolute policy
+// locators (missing markers included) and the approximate kit signatures —
+// with no file contents inlined. This caption is pinned by contract: the
+// values are plan-time, measured where prepare ran.
+const planLocatorCaption = 'absolute paths; size/sha256 are plan-time values for verifying the file found is the one prepare checked';
 
 function agentTitle(role, disposition, request, packet) {
   const label = request.taskLabel ?? (basename(request.repository) || 'Task');
@@ -191,7 +176,7 @@ function plan(root, request, packet) {
       notifyOnFinish: true,
       provider: `${binding.provider}/${binding.model}`,
       workspaceId: request.workspaceId,
-      initialPrompt: prompt(root, role, assignment, binding) + carrierBlock(kit, manifest) + (packet ? handoffNotice(role, packet) : ''),
+      initialPrompt: prompt(root, role, assignment, binding) + carrierBlock(kit, manifest.policyBytes, planLocatorCaption) + (packet ? handoffNotice(role, packet) : ''),
       settings: {
         ...(binding.modeId ? { modeId: binding.modeId } : {}),
         ...(binding.thinkingOptionId ? { thinkingOptionId: binding.thinkingOptionId } : {}),
