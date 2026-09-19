@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'nod
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { install, json, hash } from '../src/package.mjs';
-import { launchPlan, handoffPlan } from '../src/launch.mjs';
+import { launchPlan, handoffPlan, launchCheck, requestSchema } from '../src/launch.mjs';
 import { readCatalog } from '../src/routing.mjs';
 import { spawnKit } from '../src/spawn-kit.mjs';
 
@@ -171,6 +171,90 @@ test('orientation carries mechanical locators only', t => {
   assert.ok(peerPaths.includes(join(installed, 'src/roles/peer.md')));
   assert.ok(!peerPaths.includes(join(installed, 'src/delegation.md')));
   assert.equal(peer.orientation.policyBytes.length, 8);
+});
+
+test('launchCheck names every failing stage and separates profile completeness from live provider verification', t => {
+  const { dir, installed } = fixture(t);
+  const profiles = [{ id: 'slp-lead', provider: 'slp-codex-lead', model: 'gpt-5.6-luna', modeId: 'full-access' }];
+  const goodProviders = [{ id: 'slp-codex-lead', enabled: true, status: 'available', extends: 'codex' }];
+  const byName = report => Object.fromEntries(report.checks.map(check => [check.name, check]));
+  // All-green: profile resolves and the provider is live-verified.
+  const ok = launchCheck(installed, { ...request, repository: dir, role: 'lead', profiles, providers: goodProviders });
+  assert.equal(ok.ok, true);
+  assert.equal(byName(ok).provider.detail, 'live-verified: slp-codex-lead');
+  assert.equal(byName(ok).plan.ok, true);
+  // Missing profile: binding names it; provider stays undetermined-but-required.
+  const missing = launchCheck(installed, { ...request, repository: dir, role: 'lead', profiles: [], providers: goodProviders });
+  assert.equal(missing.ok, false);
+  assert.match(byName(missing).binding.error, /Missing Paseo profile slp-lead/);
+  assert.equal(byName(missing).provider.ok, false);
+  // Profile complete but provider only configured: the provider check, not the
+  // binding check alone, is what fails on live-evidence grounds.
+  const configured = launchCheck(installed, { ...request, repository: dir, role: 'lead', profiles,
+    providers: [{ id: 'slp-codex-lead', enabled: true, provenance: 'configured' }] });
+  assert.equal(configured.ok, false);
+  assert.match(byName(configured).provider.error, /configured inventory is not live evidence/);
+  // Profile without a model fails completeness while the provider still verifies.
+  const noModel = launchCheck(installed, { ...request, repository: dir, role: 'lead',
+    profiles: [{ id: 'slp-lead', provider: 'slp-codex-lead' }], providers: goodProviders });
+  assert.match(byName(noModel).binding.error, /configure a model/);
+  assert.equal(byName(noModel).provider.ok, true);
+  // A missing mode is a warning, not a failure.
+  const noMode = launchCheck(installed, { ...request, repository: dir, role: 'lead',
+    profiles: [{ id: 'slp-lead', provider: 'slp-codex-lead', model: 'gpt-5.6-luna' }], providers: goodProviders });
+  assert.equal(noMode.ok, true);
+  assert.deepEqual(noMode.warnings, ['no modeId in binding — spawn inherits caller default']);
+  // Stale catalog hash is reported before create on the Peer path, while the
+  // wrapper's live state is still reported separately.
+  const peer = launchCheck(installed, { ...request, repository: dir, role: 'peer', providers,
+    route: { ...catalogFixture(dir), catalogSha256: 'stale' } });
+  assert.equal(peer.ok, false);
+  assert.match(byName(peer).binding.error, /Routing catalog changed/);
+  assert.equal(byName(peer).provider.detail, 'live-verified: slp-devin-peer');
+  // Explicit binding without inventory: provider verification is advisory, not
+  // a failure — the planner keeps the prompt carrier either way.
+  const explicit = launchCheck(installed, { ...request, repository: dir, role: 'lead', binding: piBinding });
+  assert.equal(explicit.ok, true);
+  assert.match(byName(explicit).provider.detail, /not live-verified|no provider to verify/);
+  // Handoff mode adds the settlement-evidence stage.
+  const handoff = { previousAgentId: 'a', reason: 'r', authority: 'Human', state: 'settled',
+    previousOwner: { settled: true, evidence: 'receipt' }, resources: [] };
+  const hand = launchCheck(installed, { ...request, role: 'lead', binding: piBinding, handoff }, { handoff: true });
+  assert.equal(byName(hand).handoff.ok, true);
+  const unsettled = launchCheck(installed, { ...request, role: 'lead', binding: piBinding,
+    handoff: { ...handoff, previousOwner: { settled: false, evidence: '' } } }, { handoff: true });
+  assert.equal(unsettled.ok, false);
+  assert.match(byName(unsettled).handoff.error, /settlement evidence/);
+  // A non-object request reports one clean failure instead of a TypeError.
+  assert.equal(launchCheck(installed, null).checks[0].error, 'Request must be a JSON object');
+});
+
+test('requestSchema describes the planner contract and its examples plan once placeholders are filled', t => {
+  const { dir, installed } = fixture(t);
+  const schema = requestSchema();
+  for (const role of ['supervisor', 'lead', 'peer']) assert.ok(schema.examples[role], `example for ${role}`);
+  assert.match(schema.description, /descriptive only/);
+  for (const role of ['supervisor', 'lead']) {
+    const example = structuredClone(schema.examples[role]);
+    example.repository = dir;
+    example.workspaceId = 'wks-test';
+    example.assignment = 'x';
+    example.profiles[0].model = 'gpt-5.6-luna';
+    example.profiles[0].modeId = 'full-access';
+    assert.equal(launchPlan(installed, example).role, role);
+  }
+  const peer = structuredClone(schema.examples.peer);
+  peer.repository = dir;
+  peer.workspaceId = 'wks-test';
+  peer.assignment = 'x';
+  peer.disposition = 'engineer';
+  peer.providers = providers;
+  peer.route = catalogFixture(dir);
+  assert.equal(launchPlan(installed, peer).role, 'peer');
+  // The handoff schema is the same base plus settlement requirements.
+  const handoffSchema = requestSchema(true);
+  assert.equal(handoffSchema.base.repository, schema.base.repository);
+  assert.equal(handoffSchema.handoff.previousOwner.settled, 'required true');
 });
 
 test('handoff plans carry modeId, spawnKit and orientation alongside the packet', t => {

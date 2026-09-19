@@ -111,6 +111,58 @@ test('offline CLI prepares from a staged install with no Paseo executable or dae
   assert.equal(existsSync(join(dir, 'not-created')), false);
 });
 
+test('prepare --emit create prints the create record verbatim and --check gates on failures', t => {
+  const dir = fixture(t), installed = join(dir, 'release');
+  install(root, installed);
+  const request = join(dir, 'request.json');
+  writeFileSync(request, json({ workspaceId: 'wks-x', repository: root, assignment: 'emit check', binding }));
+  const env = { PATH: '' };
+  const cli = join(installed, 'bin/slp.mjs');
+  // --emit create is byte-identical to the plan's create member — no trimming
+  // or recomposing of initialPrompt, title, settings or workspaceId.
+  const emitted = JSON.parse(execFileSync(process.execPath, [cli, 'prepare', request, '--emit', 'create'], { env, encoding: 'utf8' }));
+  const full = JSON.parse(execFileSync(process.execPath, [cli, 'prepare', request], { env, encoding: 'utf8' }));
+  assert.deepEqual(emitted, full.create);
+  assert.equal(emitted.provider, 'codex/gpt-5.6-luna');
+  assert.ok(emitted.initialPrompt.includes('SLP role=supervisor'));
+  // --check on a valid request exits 0 with per-stage results.
+  const ok = JSON.parse(execFileSync(process.execPath, [cli, 'prepare', request, '--check'], { env, encoding: 'utf8' }));
+  assert.equal(ok.ok, true);
+  assert.ok(ok.checks.every(check => check.ok));
+  // Missing model: exit 1 and the failing stage is named, before any create.
+  writeFileSync(request, json({ workspaceId: 'wks-x', repository: root, assignment: 'x', binding: { provider: 'codex' } }));
+  const bad = spawnSync(process.execPath, [cli, 'prepare', request, '--check'], { env, encoding: 'utf8' });
+  assert.equal(bad.status, 1);
+  const report = JSON.parse(bad.stdout);
+  assert.equal(report.ok, false);
+  assert.match(report.checks.find(check => check.name === 'settings').error, /model/);
+  // prepare-handoff shares both modes; --check exits 1 on failing stages.
+  const handoffRun = spawnSync(process.execPath, [cli, 'prepare-handoff', request, '--check'], { env, encoding: 'utf8' });
+  assert.equal(handoffRun.status, 1);
+  const handoffReport = JSON.parse(handoffRun.stdout);
+  assert.equal(handoffReport.ok, false);
+  assert.equal(handoffReport.checks.find(check => check.name === 'handoff').ok, false);
+  // Modes are mutually exclusive.
+  const clash = spawnSync(process.execPath, [cli, 'prepare', request, '--check', '--emit', 'create'], { env, encoding: 'utf8' });
+  assert.equal(clash.status, 1);
+  assert.match(clash.stderr, /separate modes/);
+});
+
+test('prepare --schema prints the request contract without a request file, receipt or daemon', () => {
+  const env = { PATH: '' };
+  // Runs straight from the source checkout — no installed.json needed.
+  const schema = JSON.parse(execFileSync(process.execPath, [join(root, 'bin/slp.mjs'), 'prepare', '--schema'], { env, encoding: 'utf8' }));
+  for (const role of ['supervisor', 'lead', 'peer']) assert.ok(schema.examples[role]);
+  assert.ok(schema.bindingSources['catalog routing — required for peer']);
+  const handoff = JSON.parse(execFileSync(process.execPath, [join(root, 'bin/slp.mjs'), 'prepare-handoff', '--schema'], { env, encoding: 'utf8' }));
+  assert.ok(handoff.handoff.resources);
+  assert.equal(handoff.base.repository, schema.base.repository);
+  // --schema takes no request file.
+  const bad = spawnSync(process.execPath, [join(root, 'bin/slp.mjs'), 'prepare', 'x.json', '--schema'], { env, encoding: 'utf8' });
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /takes no request file/);
+});
+
 test('CLI reports a missing target instead of a raw path error', () => {
   const cli = join(root, 'bin/slp.mjs');
   for (const command of ['prepare', 'prepare-handoff', 'snapshot', 'verify', 'routes', 'init']) {
