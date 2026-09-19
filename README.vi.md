@@ -140,8 +140,9 @@ Cài đặt làm một lần; mỗi task chỉ lặp bước 4–5.
 
 1. Cài và kích hoạt plugin (ở trên).
 2. Tuỳ chọn, một lần: trên màn SLP, card **Communication language** đặt
-   ngôn ngữ mà mọi seat được quản lý dùng cho report, handback và trả lời
-   bạn. Bật toggle, nhập ví dụ `English`, Apply — giá trị nằm trong
+   ngôn ngữ cho team artifacts — report, handback, brief giữa các agent và
+   notebook. Reply trực tiếp tới bạn vẫn theo ngôn ngữ hội thoại hiện tại
+   của bạn. Bật toggle, nhập ví dụ `English`, Apply — giá trị nằm trong
    state của plugin, được inject vào mỗi session mới, không cần
    re-activation. Để tắt thì mỗi model tự theo ngôn ngữ của prompt; không
    có gì được inject.

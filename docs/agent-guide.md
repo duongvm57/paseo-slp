@@ -57,8 +57,9 @@ shapes.
 2. For a list meant to work: walk the seeded seats together — which
    discovered `slp-*-peer` provider/model/settings fill each seat, which
    seats to drop or add, their `priority`, and the `quotaFallback` policy.
-3. Communication language — used for reports, assignments, handbacks between
-   agents, replies to the Human, and the causal notebook.
+3. Communication language — used for team artifacts: reports, assignments,
+   handbacks between agents, and the causal notebook. Direct conversational
+   replies to the Human mirror the Human's current language instead.
 4. Where the Supervisor notebook lives and how to retrieve it.
 
 Present the options you actually discovered. Never invent model IDs,

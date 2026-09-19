@@ -145,8 +145,10 @@ Setup is one-time; per task only steps 4–5 repeat.
 
 1. Install and activate the plugin (above).
 2. Optional, once: on the SLP surface, the **Communication language** card
-   sets the language every managed seat uses for reports, handbacks and
-   replies to you. Toggle on, enter e.g. `English`, Apply — the value
+   sets the language managed seats use for team artifacts — reports,
+   handbacks, briefs between agents and the notebook. Direct replies to you
+   still mirror your current conversation language. Toggle on, enter e.g.
+   `English`, Apply — the value
    lives in plugin state, is injected into each new session, and needs no
    re-activation. Leave it off and each model follows the prompt's own
    language; nothing is injected.
