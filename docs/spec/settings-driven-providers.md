@@ -176,11 +176,20 @@ As built on `feat/slp-paseo-plugin`:
   `diagnostic-utils.js`), so argv0 must be a self-contained executable;
   a two-element `[node, gate]` command would measure Node's version, and
   a wrapper reading env vars cannot resolve them during the probe. The
-  gate (`bin/slp-gate.mjs`, shipped in the embedded payload) refuses any
-  launch whose grant stayed empty — the exact hook-gap case — and forwards
-  argv/stdio/exit-status to the family binary otherwise. The bare
-  `--version` probe answers through the real binary in every grant state
-  (host availability probes run outside any session open).
+  gate (`bin/slp-gate.mjs`, shipped in the embedded payload) distinguishes
+  launches by `PASEO_AGENT_ID`, which the daemon stamps into
+  `launchContext.env` on real session opens (create/resume/refresh/import)
+  and nothing else (`agent-manager.js` `buildLaunchContext`). Only a
+  session spawn requires the grant: a `PASEO_AGENT_ID` launch whose grant
+  stayed empty — the exact hook-gap case — fails closed; launches without
+  it pass through, because the host runs the same provider binary + argv
+  for capability snapshots and model enumeration outside any session, and
+  refusing those leaves the provider permanently unready (first live-smoke
+  finding, 2026-09-19: snapshot probes through `provider-snapshot-manager`
+  died on the gate and `resolveCreateConfig` rejected every hook-family
+  create). The bare `--version` probe answers through the real binary in
+  every grant state (host availability probes run outside any session
+  open).
 - Launch sets publish all twelve launchers: the nine hook-family gate
   launchers plus the three devin shim dispatchers. The launch manifest
   still records all four family resolutions for shim validation, and new

@@ -376,21 +376,36 @@ function runGate(args, env) {
       resolve({ code, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') })));
 }
 
-test('gate: absent or empty grant fails closed with the required stderr', async t => {
+test('gate: session spawn without a live grant fails closed with the required stderr', async t => {
   const probe = writeProbeBinary(t);
   for (const env of [
-    { SLP_FAMILY_BIN: probe.path },
-    { SLP_FAMILY_BIN: probe.path, SLP_SESSION_OPEN_GRANT: '' },
+    { SLP_FAMILY_BIN: probe.path, PASEO_AGENT_ID: 'agent-1' },
+    { SLP_FAMILY_BIN: probe.path, PASEO_AGENT_ID: 'agent-1', SLP_SESSION_OPEN_GRANT: '' },
   ]) {
     const result = spawnSync(process.execPath, [GATE, 'chat'], { env: { PATH: '/usr/bin:/bin', ...env }, encoding: 'utf8' });
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /managed entry launched without live SLP hook grant/);
+    assert.match(result.stderr, /managed session launched without live SLP hook grant/);
   }
+});
+
+test('gate: non-session launches pass through without a grant', async t => {
+  const probe = writeProbeBinary(t);
+  // Capability snapshots and model enumeration run the same binary + argv as
+  // a session spawn but carry no PASEO_AGENT_ID — they are not seats and must
+  // not be refused, or the provider can never report ready.
+  const ok = await runGate(['chat', '--flag'], { SLP_FAMILY_BIN: probe.path });
+  assert.equal(ok.code, 0, ok.stderr);
+  assert.deepEqual(readArgv(probe.argvCapture), ['chat', '--flag']);
 });
 
 test('gate: live grant forwards argv, strips control env, and passes exit codes through', async t => {
   const probe = writeProbeBinary(t);
-  const env = { SLP_FAMILY_BIN: probe.path, SLP_SESSION_OPEN_GRANT: 'grant-token-1', NODE_OPTIONS: '--enable-source-maps' };
+  const env = {
+    SLP_FAMILY_BIN: probe.path,
+    PASEO_AGENT_ID: 'agent-1',
+    SLP_SESSION_OPEN_GRANT: 'grant-token-1',
+    NODE_OPTIONS: '--enable-source-maps',
+  };
   const ok = await runGate(['chat', '--flag', 'two words'], env);
   assert.equal(ok.code, 0, ok.stderr);
   assert.deepEqual(readArgv(probe.argvCapture), ['chat', '--flag', 'two words']);

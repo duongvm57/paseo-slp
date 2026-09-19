@@ -674,10 +674,13 @@ test('launchers: POSIX single-quote escaping survives spaces and quotes end-to-e
   assert.deepEqual(readArgv(argvCapture), expected);
 });
 
-test('gate launcher: env-free argv0 --version reaches the real family binary; non-version spawn fails closed', async t => {
+test('gate launcher: env-free argv0 --version reaches the real family binary; grantless session spawn fails closed', async t => {
   // M1 regression coverage: the host probe invokes command[0] --version with
   // provider env entirely absent — the launcher's baked SLP_FAMILY_BIN is
-  // what lets the gate answer through the real binary.
+  // what lets the gate answer through the real binary. A capability probe
+  // launching the same argv without PASEO_AGENT_ID is a non-session launch
+  // and passes through; only a daemon-stamped session spawn requires the
+  // grant.
   const f = await fixtureRuntime(t);
   for (const family of ['codex', 'pi', 'claude']) {
     const probe = spawnSync(join(f.set.directory, `slp-${family}-peer`), ['--version'], {
@@ -686,12 +689,17 @@ test('gate launcher: env-free argv0 --version reaches the real family binary; no
     });
     assert.equal(probe.status, 0, `${family} probe stderr: ${probe.stderr}`);
     assert.equal(probe.stdout, `${family} 9.9.9-fake\n`, `${family} probe reports the family binary`);
-    const spawn_ = spawnSync(join(f.set.directory, `slp-${family}-peer`), ['chat'], {
+    const capability = spawnSync(join(f.set.directory, `slp-${family}-peer`), ['chat'], {
       encoding: 'utf8',
       env: { PATH: '/usr/bin:/bin' },
     });
+    assert.equal(capability.status, 0, `${family} non-session launch passes through: ${capability.stderr}`);
+    const spawn_ = spawnSync(join(f.set.directory, `slp-${family}-peer`), ['chat'], {
+      encoding: 'utf8',
+      env: { PATH: '/usr/bin:/bin', PASEO_AGENT_ID: 'agent-1' },
+    });
     assert.notEqual(spawn_.status, 0);
-    assert.match(spawn_.stderr, /managed entry launched without live SLP hook grant/);
+    assert.match(spawn_.stderr, /managed session launched without live SLP hook grant/);
   }
 });
 
