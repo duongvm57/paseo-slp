@@ -7,105 +7,181 @@
 
 <p align="center">An independent Supervisor–Lead–Peer role pack for Paseo.</p>
 
-Install once, pick **SLP Supervisor** in Paseo and hand it an objective. Role
-instructions load automatically; the Supervisor observes an existing Lead or
-creates one per assignment, and the Lead delegates to Peers through Paseo. You
-can keep chatting in the existing Supervisor session — no need to re-enter the
-role prompt.
+Install the plugin, activate it on your daemon, pick **SLP Supervisor** in
+Paseo and hand it an objective. Role instructions load automatically; the
+Supervisor observes an existing Lead or creates one per assignment, and the
+Lead delegates to Peers through Paseo. You can keep chatting in the existing
+Supervisor session — no need to re-enter the role prompt.
+
+In addition to the prompt you type, each seat receives its role contract,
+delegation rules, spawn kit, sha256 policy locators and managed runtime
+helpers — injected at session entry and not shown in the agent tab.
+Details in [Plugin architecture](docs/architecture.md).
 
 ## Requirements
 
-- Node >=22, the Paseo CLI/daemon, and the Codex/Pi CLIs matching the
-  providers you want to use.
-- Each provider's credentials on the daemon host.
+- Paseo `>=0.8.0 <0.9.0` with `pluginsEnabled: true` in the daemon's
+  `config.json`.
+- Node >=22 on the daemon host (the plugin resolves a stable ordinary Node —
+  not the Electron binary — at activation).
+- The Codex/Pi/Devin/Claude CLIs matching the provider families you want to
+  use, plus each family's credentials on the daemon host.
 - Pi needs repeatable `--append-system-prompt` support (the tested Pi build
   has it).
-- The installer integrates into an existing Paseo; it does not download or
-  replace Paseo/Codex.
+- The daemon's effective `mcp.enabled` must be `true` for activation.
 
 ## Installation
 
-```bash
-npm run install:slp
-# or: ./install.sh
-```
-
-Without a local clone, straight from GitHub:
+The pack ships as a Paseo plugin. Install it on the daemon that runs the
+work:
 
 ```bash
-npx --yes --package github:duongvm57/paseo-slp -- paseo-slp install --paseo-home --apply --reload
+# From a Git source — the plugin lives in the repo's plugin/ subdirectory:
+paseo plugin install <git-source>:plugin --ref <ref>
+
+# From a local checkout (development):
+paseo plugin install /absolute/path/to/paseo-slp/plugin
 ```
 
-Every `slp.mjs` command below works through npx the same way — except the
-commands that operate on the installed copy (`init`, `materialize`,
-`monitor`, `uninstall`): run those from the installation itself so the
-version stays identical to what the providers reference.
+`<git-source>` is anything `git clone` accepts — e.g. the GitHub repo URL or
+`file:///absolute/path/to/paseo-slp` for a local clone. The daemon checks out
+the ref into a managed directory under `$PASEO_HOME/plugins/paseo-slp/<id>/`
+and runs the manifest's `build` step (`npm install` inside `plugin/`) before
+loading it. Verify with `paseo plugin ls` — the plugin should reach
+`running`.
 
-This installs the Markdown policies and CLI into the platform data
-directory — `$XDG_DATA_HOME/paseo-slp` (`~/.local/share/paseo-slp`),
-`~/Library/Application Support/paseo-slp` on macOS, `%LOCALAPPDATA%\paseo-slp`
-on Windows — adds the twelve providers `slp-codex-{supervisor,lead,peer}`,
-`slp-pi-{supervisor,lead,peer}`, `slp-devin-{supervisor,lead,peer}` and
-`slp-claude-{supervisor,lead,peer}`, plus
-two saved profiles **SLP Supervisor** and **SLP Lead** to
-`$PASEO_HOME/config.json` (default `~/.paseo`), enables MCP injection and
-reloads.
+Installing registers the plugin; it does not change your agent
+configuration yet. Activation is a separate, explicit step (below). The
+pre-plugin standalone installer is documented in
+[docs/reports/legacy-install.md](docs/reports/legacy-install.md) — do not run it alongside
+the plugin.
 
-- No agent is created during install. The three roles stay intact.
+## Activation
+
+Open **SLP** in the sidebar (or "Open SLP manager" from the command palette) —
+or call the `activate` RPC. The surface asks for the daemon home to manage,
+confirms the host/home mapping, and
+requires the exclusive administrative edit window: while an operation runs,
+no other writer should edit `config.json` — the plugin verifies this
+precondition and reports conflicts rather than racing.
+
+Activation:
+
+- Materializes the embedded payload to
+  `<paseo-home>/slp-runtime/<candidate-sha256>/` — immutable per release.
+- Resolves stable Node plus the four provider-family executables (real
+  `--version` probes; unresolved families fail closed).
+- Writes launch shims under `slp-runtime/launchers/<launchset-sha256>/` —
+  the stable paths the providers reference, so runtime swaps never break
+  running sessions.
+- Patches `config.json` with the twelve providers
+  `slp-{codex,pi,devin,claude}-{supervisor,lead,peer}`, the two saved
+  profiles **SLP Supervisor** and **SLP Lead**, and enables MCP injection.
+- Records a receipt in `slp-runtime/state/receipt.json` — the journal of
+  every operation, used for drift detection and recovery.
+
+The surface's **Inspect** button is read-only — use it to inspect state
+(`INACTIVE`/`ACTIVE`/`RECOVERY_REQUIRED`), the current binding, family
+availability and conflicts before changing anything.
+
+- No agent is created during install or activation. The three roles stay
+  intact.
 - **Peers need no saved profile** — the Lead picks each Peer's runtime from
   the project pool in `.paseo-slp/slp-routing.json`.
 - Repos keep their tactics in `.paseo-slp/workspace-protocol.md`; onboarding
   guides you through both files.
-- Override the install location with `SLP_HOME=/absolute/path` (or pass the
-  path to `slp.mjs install`) and the host config with
-  `PASEO_HOME=/absolute/home` (or a path after `--paseo-home`). Run the
-  installer on the daemon's host.
-- Running the same command again updates an intact installation in place:
-  files are swapped atomically, tuned profile settings are kept, and a
-  hand-modified install is preserved rather than overwritten.
-
-To preview the entries before writing:
-
-```bash
-node bin/slp.mjs install --paseo-home /absolute/paseo-home
-# add --apply to write; add --reload to activate on the running daemon
-```
+- If a pre-existing entry owns an SLP provider/profile ID, activation fails
+  with `COLLISION` and leaves it untouched — `adoptIdentical` only adopts
+  entries that already match exactly.
+- If raw and live config disagree, or an owned entry was modified outside
+  the journal, the state moves to `RECOVERY_REQUIRED`; run **Reconcile →
+  inspect** to re-verify and resolve before retrying.
 
 ## Upgrading
 
-`install` already updates in place; `upgrade` is only for moving the
-installation to a different directory. The command keeps profile settings
-and leaves the old files for sessions still using them:
+Git-managed installs update through Paseo:
 
 ```bash
-node bin/slp.mjs upgrade "$HOME/.local/share/paseo-slp.next" \
-  --from "$HOME/.local/share/paseo-slp" --apply --reload
+paseo plugin update paseo-slp
 ```
 
-Drop `--apply --reload` for a dry run. Existing sessions keep their provider
-process; the new profiles apply to later launches. Upgrade preserves the
-current settings of `slp-peer` and any SLP-owned retired disposition profiles
-by recording them in `paseo-binding.json` → `retiredProfiles` before removing
-them from active profiles. The Supervisor/Lead profiles keep their chosen
-settings; the project pool is neither modified nor auto-filled from old
-profiles. An existing catalog and user-owned profiles outside this install
-are preserved.
+The daemon fetches the source, builds the new checkout and reloads the
+plugin. Reactivating afterwards rebinds to the new candidate: the new
+runtime materializes beside the old one under `slp-runtime/`, launchers are
+rebuilt, and running sessions keep their old provider process until they
+finish — launch shim paths stay stable across candidates. Rebinding is
+idempotent: activating the same candidate twice is a `no-op`.
 
-Keep the old directory around until dependent sessions have finished; do not
-uninstall the old copy to remove entries that moved to the new one. Always
-use the path the providers actually reference for `init` and `prepare`.
+Directory installs are reloaded instead:
+
+```bash
+paseo plugin reload paseo-slp
+```
+
+## Deactivation and removal
+
+**Deactivate** (Settings → SLP screen, or the `deactivate` RPC) detaches the
+pack: it removes the twelve providers and two profiles and restores the MCP
+injection flag to its pre-activation value, while preserving everything else
+in `config.json`. Runtime files, launchers and the receipt are **retained**
+under `slp-runtime/` so in-flight sessions keep working — deactivation never
+deletes them. A changed MCP `enabled` value or a managed entry modified
+outside the journal blocks deactivation instead of being silently
+overwritten.
+
+After deactivation (or for a fresh install that never activated), remove the
+plugin registration with:
+
+```bash
+paseo plugin remove paseo-slp
+```
+
+`remove` deletes the plugin configuration only — it never touches
+`slp-runtime/`, `.paseo-slp/` repo state, or the managed checkout.
 
 ## Getting started
 
-1. Install the package (above), then open a work workspace in Paseo.
-2. Pick **SLP Supervisor** and enter an objective plus a normal authority
-   scope, e.g. "Fix the cart-total display bug; you may edit code/tests in
-   this repo; no commit/push/deploy."
-3. Initialize each work repo once and onboard it (below).
+Setup is one-time; per task only steps 4–5 repeat.
 
-Supervisor and Lead already carry the procedures for picking child profiles,
-keeping parentage and using finish notifications. **SLP Lead** also works
-when you want to hand work straight to a Lead.
+1. Install and activate the plugin (above).
+2. Optional, once: on the SLP surface, the **Communication language** card
+   sets the language every managed seat uses for reports, handbacks and
+   replies to you. Toggle on, enter e.g. `English`, Apply — the value
+   lives in plugin state, is injected into each new session, and needs no
+   re-activation. Leave it off and each model follows the prompt's own
+   language; nothing is injected.
+3. Initialize each work repo once and onboard it (below).
+4. Per task: **New agent** in the repo's workspace → profile
+   **SLP Supervisor** → title `Supervisor — <task>` → an objective:
+
+   ```text
+   <task — e.g. fix bug A, add feature B, review change C>
+   ```
+
+5. Send, then keep chatting in that session — it is the whole interface.
+   The Supervisor asks there when it needs you and reports the outcome
+   there when the work settles.
+
+   Behind the prompt, the seat already carries its role contract,
+   delegation rules and spawn kit (see
+   [Plugin architecture](docs/architecture.md)): it observes or creates a
+   Lead, and the Lead picks Peers from the repo pool. You never name the
+   child seats — they are ordinary Paseo agents you can open if curious.
+
+Two prompt lines are cheap insurance, not requirements:
+
+- `Repository:` — the seat resolves the repo itself from its workspace;
+  include the line when the session's workspace may not be the target, or
+  the task spans repos.
+- `Report back…` — the handback has nowhere else to go; the line marks
+  the prompt as a bounded assignment with a deliverable rather than an
+  open conversation, so an idle seat reads as "waiting on the Lead", not
+  "done".
+
+**SLP Lead** also works when you want to hand work straight to a Lead —
+same flow, one less layer. Supervisor and Lead already carry the
+procedures for picking child profiles, keeping parentage and using
+finish notifications.
 
 ## Skills
 
@@ -115,8 +191,8 @@ The onboarding skill teaches your agent how to set up this pack for a repo.
 npx skills add duongvm57/paseo-slp --skill paseo-slp-onboarding
 ```
 
-- `paseo-slp-onboarding` — interviews you for the Peer pool decision,
-  communication language and Supervisor notebook, then writes `.paseo-slp/`
+- `paseo-slp-onboarding` — interviews you for the Peer pool decision
+  and Supervisor notebook, then writes `.paseo-slp/`
   correctly. Once installed it auto-triggers when you ask an agent to
   onboard/set up SLP.
 
@@ -159,10 +235,13 @@ own default for future sessions. See
 
 ## Repository setup
 
-Initialize each work repo once:
+Initialize each work repo once. The CLI lives inside the materialized
+runtime — the active binding's `runtimePath` from the SLP screen/status is
+`<paseo-home>/slp-runtime/<candidate-sha256>`:
 
 ```bash
-node "$HOME/.local/share/paseo-slp/bin/slp.mjs" init /absolute/job-repo --apply
+SLP_RT="$HOME/.paseo/slp-runtime/<candidate-sha256>"
+node "$SLP_RT/bin/slp.mjs" init /absolute/job-repo --apply
 ```
 
 Init only creates missing files and never overwrites existing ones:
@@ -178,13 +257,12 @@ Init only creates missing files and never overwrites existing ones:
   records its owner and the actual retrieval method (this file or
   `timeline:<agentId>`).
 
-The user-scope catalog `$PASEO_HOME/slp-routing.json` exists because
-`install`/`upgrade --apply` seeds the same skeleton when the file is absent;
-it is never overwritten if it already exists. Its seats stay disabled until
-onboarding or the Human fills in models — a skeleton-only user catalog means
-no fallback pool, not an error. `uninstall` removes it only while it is still
-byte-identical to the scaffold (hash recorded in `paseo-binding.json`); once
-you have edited it, uninstall preserves it.
+The user-scope catalog `$PASEO_HOME/slp-routing.json` is **not** created by
+the plugin — activation only manages `config.json` and `slp-runtime/`. It
+comes from `slp.mjs init` or onboarding writing it for you; while absent,
+repos without their own catalog simply have no fallback pool (not an
+error). Deactivation and `plugin remove` never touch it — once it exists it
+is yours.
 
 ### Onboarding
 
@@ -229,7 +307,7 @@ If you already have a global table from an earlier version, import it once
 into the repo:
 
 ```bash
-node "$HOME/.local/share/paseo-slp/bin/slp.mjs" init /absolute/job-repo \
+node "$SLP_RT/bin/slp.mjs" init /absolute/job-repo \
   --routing-from /absolute/previous/slp-routing.json --apply
 ```
 
@@ -258,6 +336,10 @@ receive the relevant constraints through assignments. This is a policy pack
 for agents using Paseo primitives — there is no monitoring daemon or semantic
 detector in the package; `monitor` (below) is a caller-invoked, delta-only
 signal scan.
+
+What the shim injects at session entry — and how to verify it reached a
+seat — is documented in
+[Plugin architecture](docs/architecture.md#the-hidden-channel).
 
 ## Peer runtime pool
 
@@ -376,8 +458,8 @@ Two read-only commands support discovery and work offline (no daemon or
 `paseo` on PATH required):
 
 ```bash
-node bin/slp.mjs inventory [--paseo-home /absolute/paseo-home]
-node bin/slp.mjs agents [--paseo-home /absolute/paseo-home]
+node "$SLP_RT/bin/slp.mjs" inventory [--paseo-home /absolute/paseo-home]
+node "$SLP_RT/bin/slp.mjs" agents [--paseo-home /absolute/paseo-home]
 ```
 
 `inventory` prints `{providers, profiles, source}` in exactly the shape
@@ -413,7 +495,7 @@ worktree lacks the protocol and catalog entirely. `materialize` clones them
 from an existing checkout:
 
 ```bash
-node bin/slp.mjs materialize /absolute/target-repo --from /absolute/source-repo
+node "$SLP_RT/bin/slp.mjs" materialize /absolute/target-repo --from /absolute/source-repo
 # dry-run by default; add --apply to write
 ```
 
@@ -436,7 +518,7 @@ one invocation is one scan, not a daemon, and it emits candidates, never
 verdicts:
 
 ```bash
-node bin/slp.mjs monitor /absolute/request.json
+node "$SLP_RT/bin/slp.mjs" monitor /absolute/request.json
 ```
 
 The request names `agents` (`id`, optional `cwd` — falls back to the state
@@ -470,7 +552,7 @@ run lives in another checkout — a worktree Supervisor's record sits at
 `<its-checkout>/.paseo-slp/notebook.md`, invisible from the main checkout:
 
 ```bash
-node bin/slp.mjs notebook /absolute/repository [--paseo-home /absolute/paseo-home]
+node "$SLP_RT/bin/slp.mjs" notebook /absolute/repository [--paseo-home /absolute/paseo-home]
 ```
 
 It resolves the repository's git common dir — the property linking a
@@ -482,26 +564,6 @@ plus `gaps` for agent cwds that fail the git probe. Read-only — it never
 copies, merges or edits notebook content, and picks no authoritative
 candidate; where governance lives stays per-checkout.
 
-## Uninstall
-
-Uninstall after the sessions using the install have finished:
-
-```bash
-node bin/slp.mjs uninstall "$HOME/.local/share/paseo-slp" --apply --reload
-```
-
-Uninstall removes the entries the install created and restores the two MCP
-flags from before; it keeps other config and a Human-edited catalog. The
-user-scope catalog scaffold is removed only while still unmodified (recorded
-hash), so a catalog you populated survives. If an
-installed profile/provider/file has been modified, the command stops and
-leaves everything in place for you to decide how to keep the changes. The
-protocol in the work repo is preserved. A reload failure does not roll back
-the file writes: the output reports `reloadRequired`/`reloadError`; rerun
-`PASEO_HOME=/absolute/home paseo reload --json` after fixing the cause. The
-installer never restarts the daemon itself nor answers agent permission
-prompts.
-
 ## Testing
 
 ```bash
@@ -509,13 +571,16 @@ npm test
 npm run check
 ```
 
-Local checks cover install–uninstall, config preservation, protocol and the
+Local checks cover the manager's transaction/recovery logic, the
+materializer, launch-shim generation, config preservation, protocol and the
 stdio adapter; they do not prove role compliance with the operating guide.
-The transport was previously cross-checked against Paseo 0.7.2/Codex
-0.153.4; there is no E2E acceptance for this revision yet. Roles are
+The plugin has additionally been verified live on a real Paseo 0.8.0 daemon:
+Git-source install, management surface, activate/deactivate/reconcile RPCs,
+provider/profile patching, collision and drift refusals, and recovery
+classification — see `.local-checks/` for the evidence ledger. Roles are
 behavioral instructions, not a filesystem/MCP sandbox. The transport supports
-Codex, Pi, Devin and Claude; routing, adapter, upgrade and handoff have local checks. Live
-provider switching, heartbeat, council, recovery and concurrent writers are
+Codex, Pi, Devin and Claude; routing, adapter and handoff have local checks.
+Live provider switching, heartbeat, council and the full E2E manifest are
 not yet E2E-accepted. Capability and policy-load paths are recorded in the
 trace table below.
 
@@ -541,17 +606,33 @@ and option/hash for the Peer. `mixed-peer` checks a pool containing both
 Codex/Pi — no extra saved profile needed and no forcing the Lead's family per
 Peer. Scenarios outside the scope stay NOT_RUN.
 
-The offline path remains: `install <dir> --apply` without `--paseo-home` only
-stages the package; `prepare <request.json>` emits create_agent arguments
-with a role envelope. This path registers no profile and creates no agent
-itself.
+The offline CLI path remains: `prepare <request.json>` (from a source
+checkout's `bin/slp.mjs`) emits create_agent arguments with a role envelope,
+and `install <dir> --apply` stages the package — see
+[docs/reports/legacy-install.md](docs/reports/legacy-install.md). This path registers no
+profile and creates no agent itself.
 
 ## Documentation
 
-- [Agent setup guide](docs/agent-guide.md)
+How it works:
+
+- [Plugin architecture](docs/architecture.md) — the role model, what the
+  plugin adds to Paseo, the hidden injection channel, the delegation loop
 - [File map and contract](docs/contract.md)
-- [Guide → policy, procedure and protocol trace](docs/guide-coverage.md)
+- [Agent setup guide](docs/agent-guide.md)
 - [Independent acceptance checklist](docs/review-checklist.md)
+
+Implementation specification:
+
+- [Plugin implementation spec](docs/spec/paseo-plugin-implementation.md)
+- [Plugin feasibility audit](docs/spec/paseo-plugin-feasibility.md)
+- [Settings-driven providers + hook injection](docs/spec/settings-driven-providers.md) —
+  post-v1 direction sketch
+
+Reports and investigations:
+
+- [Guide → policy, procedure and protocol trace](docs/reports/guide-coverage.md)
+- [Legacy standalone installer](docs/reports/legacy-install.md)
 
 Referenced host mechanisms:
 [custom providers](https://paseo.sh/docs/custom-providers.md),

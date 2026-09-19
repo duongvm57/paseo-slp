@@ -71,6 +71,17 @@ test('spawnKit carries role-scoped approximate MCP tool signatures', t => {
   assert.throws(() => spawnKit('human'), /Unknown role/);
 });
 
+test('the carrier appears exactly once in a stock-provider prompt', t => {
+  const { dir, installed } = fixture(t);
+  // Stock providers inline role instructions into the prompt AND plan()
+  // appends the carrier block — the inline copy must not repeat it.
+  const plan = launchPlan(installed, { ...request, repository: dir, role: 'lead', binding: piBinding });
+  assert.equal(plan.create.initialPrompt.split('Spawn kit — role-scoped').length - 1, 1);
+  assert.equal(plan.create.initialPrompt.split('Policy locators —').length - 1, 1);
+  // The inline instructions keep their policy bytes; only the carrier opts out.
+  assert.ok(plan.create.initialPrompt.includes(readFileSync(join(installed, 'src/roles/lead.md'), 'utf8')));
+});
+
 test('orientation carries mechanical locators only', t => {
   const { dir, installed } = fixture(t);
   const lead = launchPlan(installed, { ...request, repository: dir, role: 'lead', binding: piBinding });

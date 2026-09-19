@@ -38,4 +38,4 @@ For a branch selected by the assignment, include its specific evidence: independ
 review candidate/report; sealed design and Lead reconciliation; dependency ownership
 and integration; heartbeat owner/creation/wake/deletion receipts; or recovery mandate,
 old-owner settlement and replacement handback. Mark unexercised branches NOT_RUN.
-The [guide coverage matrix](guide-coverage.md) traces policy text, not E2E outcomes.
+The [guide coverage matrix](reports/guide-coverage.md) traces policy text, not E2E outcomes.

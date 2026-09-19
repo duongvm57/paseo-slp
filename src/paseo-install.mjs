@@ -61,6 +61,10 @@ export function installPaseo(source, destination, home, apply = false) {
   if (!homeWithinInstall || (!homeWithinInstall.startsWith('..') && !isAbsolute(homeWithinInstall))) throw new Error('Paseo home must be outside the installation directory');
   const file = configFile(home);
   if (existsSync(destination)) {
+    // A pre-existing directory that was never installed would crash inside
+    // verifyInstall with a raw ENOENT — report the business condition instead.
+    if (!existsSync(join(destination, 'installed.json')))
+      throw new Error(`Not an installed SLP directory (missing installed.json): ${destination} — install the runtime there first`);
     const manifest = verifyInstall(destination);
     const binding = readJson(join(destination, 'paseo-binding.json'));
     if (binding.configPath !== file.path) throw new Error('Installation belongs to a different Paseo home');

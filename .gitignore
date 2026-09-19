@@ -1,6 +1,7 @@
 .local-checks/
 .e2e-runs/
 .paseo-slp/
+node_modules/
 
 # Local skill-install artifacts (skills CLI)
 .agents/

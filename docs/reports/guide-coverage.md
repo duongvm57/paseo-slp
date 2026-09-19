@@ -24,18 +24,18 @@ agent compliance or E2E success.
 
 | Material | Entry and reader | When loaded |
 |---|---|---|
-| [Common](../src/common.md) | [roleBundle](../src/role-bundle.mjs) for all three roles | Session entry; adapter injects assembled instructions on supported start/resume/override messages. |
-| [Supervisor](../src/roles/supervisor.md), [Lead](../src/roles/lead.md), [Peer](../src/roles/peer.md) | roleBundle selects exactly one | Always for that role. |
-| [Delegation](../src/delegation.md) | roleBundle for orchestrating roles only (bundleParts) | Always for orchestrating roles; Peer excluded. |
-| [Orchestration](../src/references/orchestration.md) | Lead pointer; delegation points to isolation branch | Before topology selection, independent review, design dispute or dependency splitting. |
-| [Monitoring](../src/references/monitoring.md) | Supervisor/Lead and delegation pointers | Before observation/wait and at settlement. |
-| [Governance](../src/references/governance.md) | Supervisor pointer; recovery branch from orchestration | Supervision setup, recovery or policy evolution; recovery owner is Supervisor under mandate. |
-| [Anti-patterns](../src/references/anti-patterns.md) | Supervisor/Lead pointers, monitoring/governance | Workflow audit, drift, repeated failure, unclear architecture or lost momentum. |
-| [Routing](../src/references/provider-routing.md) | Delegation and saved-profile pointer for Supervisor/Lead | Before every spawn: refresh the Human-configured role profile, validate capabilities and record the complete launch bundle. |
-| [Onboarding skill](../skills/paseo-slp-onboarding/SKILL.md) | Installable skill at native project/global scope | Human requests repo setup/update: the host triggers the installed skill, which fills protocol and repo-local routing with preserved preferences and discovery evidence. Skill installation is separate from `init`. |
-| [Protocol template](../src/templates/workspace-protocol.md) | Explicit init creates repository .paseo-slp/workspace-protocol.md | Lead reads repository file in full; Supervisor reads for an assigned protocol audit/create/update. Peer receives only relevant constraints. |
+| [Common](../../src/common.md) | [roleBundle](../../src/role-bundle.mjs) for all three roles | Session entry; adapter injects assembled instructions on supported start/resume/override messages. |
+| [Supervisor](../../src/roles/supervisor.md), [Lead](../../src/roles/lead.md), [Peer](../../src/roles/peer.md) | roleBundle selects exactly one | Always for that role. |
+| [Delegation](../../src/delegation.md) | roleBundle for orchestrating roles only (bundleParts) | Always for orchestrating roles; Peer excluded. |
+| [Orchestration](../../src/references/orchestration.md) | Lead pointer; delegation points to isolation branch | Before topology selection, independent review, design dispute or dependency splitting. |
+| [Monitoring](../../src/references/monitoring.md) | Supervisor/Lead and delegation pointers | Before observation/wait and at settlement. |
+| [Governance](../../src/references/governance.md) | Supervisor pointer; recovery branch from orchestration | Supervision setup, recovery or policy evolution; recovery owner is Supervisor under mandate. |
+| [Anti-patterns](../../src/references/anti-patterns.md) | Supervisor/Lead pointers, monitoring/governance | Workflow audit, drift, repeated failure, unclear architecture or lost momentum. |
+| [Routing](../../src/references/provider-routing.md) | Delegation and saved-profile pointer for Supervisor/Lead | Before every spawn: refresh the Human-configured role profile, validate capabilities and record the complete launch bundle. |
+| [Onboarding skill](../../skills/paseo-slp-onboarding/SKILL.md) | Installable skill at native project/global scope | Human requests repo setup/update: the host triggers the installed skill, which fills protocol and repo-local routing with preserved preferences and discovery evidence. Skill installation is separate from `init`. |
+| [Protocol template](../../src/templates/workspace-protocol.md) | Explicit init creates repository .paseo-slp/workspace-protocol.md | Lead reads repository file in full; Supervisor reads for an assigned protocol audit/create/update. Peer receives only relevant constraints. |
 
-[Package identity/install](../src/package.mjs) recursively includes `src/`, so all
+[Package identity/install](../../src/package.mjs) recursively includes `src/`, so all
 five references are in the install unit without adding them to every prompt.
 Common resolves `references/` relative to the installed policy directory supplied by
 the loader. The full guide and this matrix remain source documentation under docs/.
@@ -58,7 +58,7 @@ Targets refer to the linked materials above and their named sections.
 | G09 · §3.3 | I/C | One writer per moving scope, real isolation, explicit transfer and frozen review. | Restricted to one writer total | Policy covered: Common; Orchestration → Ownership, isolation and integration. Host worktree creation is conditional. |
 | G10 · §3.4, §6.3 | I/T | Discover providers/models; route by risk/budget; no stale model ID prescriptions. | Partial | Policy and implementation covered: `.paseo-slp/workspace-protocol.md` specifies repo criteria/budget; adjacent `slp-routing.json` describes options/quota for that repo. Lead selects each runtime bundle independently of disposition, with fresh hash/eligibility checks in prepare and live discovery in Delegation. No host/global fallback; two managed profiles and a project Peer pool. |
 | G11 · §3.5 | I | Exact artifact, identity, real checks, independent review when required, correct acceptance owner. | Partial: no independent lane | Policy covered: Lead; Orchestration → Proof and acceptance; Peer review disposition. |
-| G12 · §3.6, §5.1 | I/T | Explicit edit/commit/push/deploy, scope, important architecture, cost and acceptance boundaries. | Partial | Policy covered: Common, Supervisor, Protocol → Decision boundaries; assignment supplies actual grants. |
+| G12 · §3.6, §5.1 | I/T | Explicit edit/commit/push/deploy, scope, important architecture, cost and acceptance boundaries. | Partial | Policy covered: Common, Supervisor, Protocol → Decision matrix; assignment supplies actual grants. |
 | G13 · §4 | I | Profile = invariant; protocol = repo tactic; prompt = bounded assignment. | Mixed: global bounded topology | Policy covered: Common; role restrictions removed; tactics located in Protocol; Delegation step 2 carries task fields. |
 | G14 · §5.2 scope | I/C | Supervisor observes assigned sessions/workspaces across projects without project acceptance ownership. | Restricted to one new Lead | Policy covered: Supervisor; Governance → Establish supervision. Existing Leads and multiple projects supported in policy. |
 | G15 · §5.2 attention | I/C | Observation → evidence → hypothesis → open question; address Lead within mandate. | Partial | Policy covered: Supervisor; Monitoring → On a signal; anti-pattern catalog. |
@@ -84,7 +84,7 @@ Targets refer to the linked materials above and their named sections.
 | G35 · §8.1–8.3 | I/H | Independent coworkers, low authority gradient, provisional vertical planning. | Partial | Policy covered: Lead/Peer, Orchestration framing/council; anti-patterns §9.1/§9.2/§9.12. |
 | G36 · §8.4–8.5 | I | Stable snapshot review; proof, falsification, technical acceptance and owner trade-offs are distinct. | Partial | Policy covered: Lead, Peer, Orchestration proof; integrated artifact is reverified. |
 | G37 · §8.6 | I/C | Sparse intervention on material delta; wake alone never creates implementation or authority. | Partial | Policy covered: Common, Monitoring; loader now preserves authorized assignment across wake messages. |
-| G38 · §8.7, §8.9 | I/C | Improve from real causal evidence; version repo policy; distinguish generic invariant from local tactic. | Partial | Policy covered: Governance → Policy evolution; Protocol → Repo anti-patterns and evolution. |
+| G38 · §8.7, §8.9 | I/C | Improve from real causal evidence; version repo policy; distinguish generic invariant from local tactic. | Partial | Policy covered: Governance → Policy evolution; Protocol → Repo anti-patterns, Evolution. |
 | G39 · §8.8 | I/T | Role-appropriate skills, progressive disclosure and bounded attention. | Partial | Policy covered: role skill guidance, Protocol routing and conditional reference pointers. Runtime skill filtering remains H06. |
 | G40 · §8.10 | H | Evidence/case and open questions precede diagnosis; preserve counterevidence. | Partial | Policy covered: Supervisor, Governance notebook, anti-pattern investigation method. |
 | G41 · §9.1–9.20 | I/H | Operational guards plus signal/evidence/question/response for every catalog entry. | Partial scattered guards | Policy covered: full mapping in next table; generic catalog reached only by relevant roles/triggers. |
@@ -101,7 +101,7 @@ Targets refer to the linked materials above and their named sections.
 ## Every anti-pattern in §9
 
 All rows below resolve to the correspondingly numbered row in the installed
-[anti-pattern reference](../src/references/anti-patterns.md). Each has a signal and
+[anti-pattern reference](../../src/references/anti-patterns.md). Each has a signal and
 mechanism, evidence to inspect, an open question and a bounded response. This table
 also identifies the immediate guard or execution procedure when that pattern arises.
 

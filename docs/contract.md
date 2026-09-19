@@ -26,7 +26,7 @@ Local installation/transport checks do not constitute workflow acceptance.
 | skills/paseo-slp-onboarding/SKILL.md | Installable repo tactics and Peer pool setup, with Supervisor/Lead profile verification; project/global installation is independent from repo config initialization. |
 | src/templates/workspace-protocol.md | Repository tactics template with risk classes, routing, monitoring and proof gates; the `agent_mode` frontmatter field records the intended spawn mode for direct launches (empty falls back to the bundle's `modeId`, then asks); explicit init preserves existing files. |
 | src/binding.mjs | Every rule a Binding must satisfy: setting patterns, the route override deny-lists and the single provider-health check. Imports nothing from the package. |
-| src/role-bundle.mjs | Which policy bytes each role receives at session entry, and their order; the load-path contract traced in guide-coverage.md. |
+| src/role-bundle.mjs | Which policy bytes each role receives at session entry, and their order; the load-path contract traced in reports/guide-coverage.md. Managed sessions also inject the plugin-set communication language (slp-runtime/state/communication-language) when present — one line, nothing when unset. |
 | src/launch.mjs, src/profiles.mjs | Select one Binding source (saved profiles, catalog routing or an explicit binding), then compose the create_agent argument record. launchPlan and handoffPlan share one builder; nothing edits that record afterwards. Handoff adds explicit authority, old-owner evidence, resources and current work snapshot; no lifecycle mutations. request.inventoryFile fills providers/profiles the request did not inline; request.assignmentFile appends a read-first pointer to the emitted prompt without inlining file bytes. The plan also surfaces the intended `modeId` (with a warning when the binding lacks one), a `spawnKit` of role-appropriate MCP tool signatures, and an `orientation` manifest of policy-byte locators (path/bytes/sha256, `missing` for declared files not shipped) — locators only, never interpretation; the same payload is carried inside `create.initialPrompt`, the only field create_agent transmits, so the spawned seat actually receives it. |
 | src/inventory.mjs | Provider/profile inventory in the exact shapes prepare consumes: `paseo provider ls --json` only when the requested home's paseo.pid names a live process, else that home's own config.json `agents.providers` — never another daemon's providers, no directory materialization; provider `enabled` may be null for unrecognized states; profiles always from `daemon.agentProfiles`. Read-only; on multi-daemon hosts the live listing reflects whichever daemon the paseo CLI reaches. |
 | src/agents.mjs | Agent listing from daemon persistence (`<paseoHome>/agents/*/<id>.json`) with shell-quoted devin-family `devin -r` attach hints; works around `paseo inspect`/`ls` not surfacing `persistence.nativeHandle`. Read-only, best-effort host detail. |
@@ -43,17 +43,26 @@ Local installation/transport checks do not constitute workflow acceptance.
 | tests/*.test.mjs | Local installer, rollback, transport, envelope and snapshot checks. |
 
 The install unit is package.json, install.sh, bin/, skills/ and src/. installed.json binds their
-exact bytes. A Paseo-integrated install also binds paseo-binding.json, containing
-only owned entries and the prior values of two MCP flags, never credentials.
-The shell installer and installed CLI share the same installation code.
+exact bytes. The standalone Paseo installer also binds paseo-binding.json, containing
+only owned entries and prior MCP values, never credentials. The Option A plugin
+keeps its receipt and operation intents in a private per-daemon-home sidecar
+outside immutable candidates and plugin settings; its payload manifest
+additionally verifies file modes. The shell installer and installed CLI share
+the standalone installation code. The plugin uses the documented config.patch
+transaction and stable executable shims.
 
 Three roles remain Supervisor, Lead and Peer. Only two saved profiles are managed:
 slp-supervisor and slp-lead. The twelve providers remain slp-codex-{role},
 slp-pi-{role}, slp-devin-{role} and slp-claude-{role}; Peer chooses runtime from
 the project pool, not a saved profile. Devin bindings accept swe-2 models only.
 Peer disposition belongs to the assignment, independent of pool option choice.
-Installation refuses collisions with owned provider and Supervisor/Lead profile
-IDs; unrelated configuration is preserved.
+Standalone installation refuses collisions with owned provider and Supervisor/Lead
+profile IDs. Plugin activation may adopt existing entries only by explicit
+request and exact persisted-schema equality. A surviving receipt preserves the
+original restoration baseline; adoption without that receipt records the
+observed baseline and cannot recover earlier shared values. Unrelated
+configuration is preserved within the documented exclusive administrative edit
+window.
 
 Installation performs no agent creation. Reload changes host configuration for
 future launches. Uninstall requires unchanged managed entries and package files;
@@ -65,11 +74,43 @@ current profile preferences and unrelated config, adds new bundles and rebinds o
 providers to the new directory while retaining the old installation for active sessions.
 Owned slp-peer and legacy disposition profiles are removed from host profiles and archived exactly
 in paseo-binding.json retiredProfiles for review. Other profiles remain untouched.
-Host install/upgrade neither creates nor reads/writes routing catalogs; previous global
-catalogs stay untouched until an explicitly requested repo migration.
+Standalone host install/upgrade creates an empty user routing-catalog scaffold
+at <paseo-home>/slp-routing.json only when absent. Uninstall removes that
+scaffold only while its bytes remain unchanged; existing or Human-edited
+catalogs are preserved. Plugin v1 activation/deactivation does not create,
+edit, or delete routing catalogs. Populating routing choices and migrating
+repository catalogs require explicit onboarding or migration authority.
 The old retained binding
 no longer owns current host entries and cannot uninstall those entries. Runtime cutover
 still requires task authority; neither install nor upgrade creates replacement sessions.
+
+Option A plugin deactivation restores shared configuration semantics, not
+original JSON bytes or absent-key shape. It removes unchanged owned
+provider/profile entries and restores the recorded effective injectIntoAgents
+value; an originally absent value may become explicit false and an absent
+profile array may become empty. It never patches mcp.enabled, which must
+already be enabled. Human profile preferences are preserved during rebind and
+may be acknowledged by reconcile; conflicting managed entries stop
+deactivation.
+
+SLP management operations are administrator-only and require an exclusive
+administrative edit window for the selected daemon. Do not edit daemon
+configuration through the app, another plugin, a CLI, or a file while
+activate, reconcile, or deactivate is in progress. The plugin serializes its
+own operations and verifies persisted and live results. Paseo 0.8.0 provides
+no compare-and-swap for these patches; this plugin cannot guarantee
+preservation against concurrent external writers. A detected mismatch stops
+automatic mutation and requires reconciliation.
+
+Plugin disable/remove is not SLP deactivation. Raw removal leaves verified
+stable transports operational and correctly roled, with ownership recoverable
+by reinstalling the same plugin ID and reconciling its retained receipt.
+Deactivate before removing the manager when detachment is intended. Neither
+lifecycle cleanup nor deactivate deletes stable runtime or launcher
+directories. These directories belong to the per-daemon SLP store and remain
+available to existing sessions; deletion requires separate maintenance
+authority after dependencies have ended. Provider commands and policy/helper
+paths must never reference managed plugin checkouts.
 
 Policy is injected independently of the ordinary task prompt. Provider labels
 and agent self-reports are not proof of loading: E2E evidence must correlate the
@@ -99,7 +140,7 @@ paths are not E2E-qualified by this revision. Heartbeat uses discovered host wak
 primitives; `slp.mjs monitor` adds a caller-invoked, delta-only signal scan that
 emits candidates without verdicts — it is not a semantic detector, and no
 lifecycle runner, tool filter or schedule adapter is added. Missing capabilities remain explicit before any fallback. See
-[guide coverage](guide-coverage.md) for requirement mapping, load paths and host gaps.
+[guide coverage](reports/guide-coverage.md) for requirement mapping, load paths and host gaps.
 
 Codex, Pi, Devin and Claude share role bytes through their respective adapters. Human configures
 slp-supervisor/slp-lead with matching role providers and chosen models/settings.

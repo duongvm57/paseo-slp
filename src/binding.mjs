@@ -34,6 +34,11 @@ export function verifyProvider(inventory, id, familyFor, label = id) {
   if (!Array.isArray(inventory)) throw new Error('Paseo list_providers inventory required: pass the discovered providers array as request.providers, not the tool response envelope');
   const observed = inventory?.find(item => item.id === id);
   if (!observed || observed.enabled === false || observed.status === 'unavailable') throw new Error(`Unverified provider ${label}`);
+  // Managed-runtime inventory entries carry provenance:"configured" — static
+  // config reads, never live provider state. Launch planning requires live
+  // selected-connection inventory, so the enabled/status checks alone are
+  // insufficient here (spec §10).
+  if (observed.provenance === 'configured') throw new Error(`Unverified provider ${label}: configured inventory is not live evidence`);
   const family = familyFor(observed.id);
   if (observed.extends != null && observed.extends !== transportOf(family)) throw new Error(`Unverified provider family ${label}`);
   return { observed, family };
