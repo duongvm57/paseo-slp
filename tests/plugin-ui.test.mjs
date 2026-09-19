@@ -469,17 +469,29 @@ test('the routing UI is one card with one save and one divergence warning', () =
   const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
   const bundle = clientBundle();
 
-  // One consolidated "Role providers" card holds both role pickers; the old
-  // per-role card titles and the separate peer card are gone. The "routing"
-  // metaphor is retired from the card title only — the stored artifact keeps
-  // its role-routing file/RPC names.
-  assert.equal(occurrences(source, '"Role providers"'), 1, 'exactly one Role providers card title');
+  // One consolidated "Role profiles" card edits the full profile each role
+  // binds; the old per-role card titles and the separate peer card are gone.
+  // The "routing" metaphor is retired from the card title only — the stored
+  // artifact keeps its role-routing file/RPC names.
+  assert.equal(occurrences(source, '"Role profiles"'), 1, 'exactly one Role profiles card title');
+  assert.equal(occurrences(source, '"Role providers"'), 0);
   assert.equal(occurrences(source, '"Role routing"'), 0);
   assert.equal(occurrences(source, '"Supervisor routing"'), 0);
   assert.equal(occurrences(source, '"Lead routing"'), 0);
   assert.equal(occurrences(source, '"Peer routing"'), 0);
-  assert.ok(bundle.includes('Role providers'));
+  assert.ok(bundle.includes('Role profiles'));
   assert.ok(!bundle.includes('Role routing'));
+
+  // The "Agent profiles" card and its immediate-apply path are gone —
+  // routing is the sole role→provider configurator; the activate RPC's
+  // profiles/initialProfileFamily inputs stay for scripted use.
+  assert.equal(occurrences(source, '"Agent profiles"'), 0, 'Agent profiles card removed');
+  assert.equal(occurrences(bundle, '"Agent profiles"'), 0, 'Agent profiles card removed from bundle');
+  assert.equal(occurrences(source, 'Apply profile changes'), 0);
+  assert.equal(occurrences(bundle, 'Apply profile changes'), 0);
+  assert.equal(occurrences(source, 'runApplyProfiles'), 0);
+  assert.equal(occurrences(source, 'buildProfiles'), 0);
+  assert.equal(occurrences(source, 'pref('), 0, 'profile prefs machinery gone');
 
   // One Save action — a single button label and a single dispatch site for
   // the one set-role-routing call that carries both roles.
@@ -489,10 +501,20 @@ test('the routing UI is one card with one save and one divergence warning', () =
 
   // The divergence warning renders once on the card, not once per role.
   assert.equal(
-    occurrences(source, 'Stored routing differs from the live binding'),
+    occurrences(source, 'Stored role profiles differ from the live binding'),
     1,
     'exactly one divergence warning',
   );
+
+  // The routing card carries the full RoleChoice surface: feature controls
+  // keyed on the routing form's picks plus a thinking-option field.
+  assert.ok(
+    source.includes('const family = routingForm[role].family'),
+    'feature defs fetch keys on the routing form',
+  );
+  assert.equal(occurrences(source, 'featureDefsFor(role)'), 4, 'feature controls rendered + merged on save');
+  assert.equal(occurrences(source, '"Feature values (JSON)"'), 1, 'JSON fallback field present');
+  assert.equal(occurrences(source, '"Thinking option"'), 1, 'thinking option field present');
 
   // The Activation card no longer exposes the pre-binding configurators;
   // the routing card is the sole role→provider configurator in the UI

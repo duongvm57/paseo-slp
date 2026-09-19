@@ -300,27 +300,56 @@ After this refactor the remaining steps are exactly three:
   `executables.ts` and `config-view.ts` re-export `FAMILIES`/`ROLES`/
   `OWNED_PROVIDER_IDS`/`PROVIDER_EXTENDS` under their historical names
   so existing consumers keep one import site; nothing defines a literal.
-- **Peer note placement** — inside the "Role providers" card, not a
+- **Peer note placement** — inside the "Role profiles" card, not a
   separate card: the note scopes what routing does not configure and a
   separate card would orphan one line of disclosure.
-- **Routing surface shape** — one "Role providers" card carrying the
-  supervisor and lead pickers behind a single Save that issues one
-  `set-role-routing` call (the RPC payload is the full routing object
-  anyway). The divergence warning renders once on the card, not per role.
-- **Card title** — "Role providers", per the Human's proposal: the
-  "routing" metaphor was wrong because the binding is static (a stored
-  role→provider assignment applied at activation), not per-request
-  dispatch. Only the UI title changed — the stored artifact keeps its
-  `role-routing.json` file name and the `get-role-routing`/
-  `set-role-routing` RPC names, so "Save routing" and "stored routing"
-  in the warning still name the actual artifact.
-- **"Preferred provider family" / "Initial profiles"** — removed from the
-  Activation card by explicit human decision. Routing is the sole UI
-  configurator for role→provider; the `profiles` and
+- **Routing surface shape** — one "Role profiles" card carrying the
+  supervisor and lead pickers for every `RoleChoice` field behind a
+  single Save that issues one `set-role-routing` call (the RPC payload
+  is the full routing object anyway). The divergence warning renders
+  once on the card, not per role.
+- **Card title** — "Role profiles" (the Human's preferred option in the
+  2026-09-19 amendment): the card now edits the full profile each role
+  binds — provider, model, mode, feature values, thinking option — not
+  only which provider, so "profiles" names the scope better than
+  "providers". The subtitle was widened to match. Only the UI title
+  changed — the stored artifact keeps its `role-routing.json` file name
+  and the `get-role-routing`/`set-role-routing` RPC names, so
+  "Save routing" and "stored routing" in the warning still name the
+  actual artifact.
+- **"Agent profiles" card removal** — by explicit human decision
+  (2026-09-19 amendment). Two cards were two views of the same state —
+  stored desired vs live — with the precedence rule "routing wins at the
+  next activation", a footgun; merging makes the "where do I edit /
+  which wins" question disappear instead of needing explanation. The
+  bound apply-profiles path was the same exclusive-window operation
+  anyway, so nothing is lost operationally; the `profiles` and
   `initialProfileFamily` RPC inputs remain supported for scripted and
-  advanced use. Accepted trade-off: the pre-binding UI no longer edits
-  `featureValues`/`thinkingOptionId` either — post-binding edits remain
-  available on the "Agent profiles" card.
+  advanced use. Accepted consequence (Human-decided, recorded not
+  re-decided): no quick-edit of live profiles in the UI — every
+  parameter change applies via activation. Routing is the sole source of
+  truth for role config; the live profile is a projection of it plus
+  RPC overrides.
+- **Features/thinking editable pre-binding** — the routing card carries
+  the catalog-driven feature controls (toggle → switch, select → chips,
+  a raw JSON field when the provider declares no defs) plus a free-text
+  thinking-option field, so `featureValues`/`thinkingOptionId` are
+  editable before the first binding for the first time — the earlier
+  trade-off note (features/thinking only editable post-binding via the
+  profiles card) no longer applies. Feature defs are fetched per
+  routing-form `family|model|modeId` pick. `CatalogOutput` exposes
+  models/modes/features only — no thinking options — so thinking stays
+  a free-text field rather than a picker. Save maps empty fields to
+  absent keys (`RoleChoice` unset semantics — the live value is
+  preserved at activation; `null` is the profiles wire shape and is
+  never emitted), declared feature controls win over the raw JSON base,
+  undeclared keys are preserved from the base, and an empty control
+  drops the key.
+- **"Preferred provider family" / "Initial profiles"** — removed from
+  the Activation card by explicit human decision. Routing is the sole
+  UI configurator for role→provider; the `profiles` and
+  `initialProfileFamily` RPC inputs remain supported for scripted and
+  advanced use.
 - **Payload coupling** — `bin/`/`src/` deliberately do not import the
   registry; `npm run check:plugin-payload` verifies the embedded payload
   stays byte-identical unless deliberately regenerated.
