@@ -31,6 +31,7 @@ import {
   STATUS_POLL_MS,
   activationLabel,
   applyPatch,
+  buildRoleChoice,
   conflictLines,
   createTargetViews,
   emptyTargetView,
@@ -43,6 +44,7 @@ import {
   operationRows,
   pollDelayAfterStatus,
   reconcileProblem,
+  routingChoiceDiffers,
   routingDiverges,
   startPatch,
   stateHint,
@@ -51,7 +53,7 @@ import {
   recoverPendingStart,
   visibleConflicts,
 } from "./manager-state.ts";
-import type { ReconcileAction, TargetView } from "./manager-state.ts";
+import type { ReconcileAction, RoutingRoleForm, TargetView } from "./manager-state.ts";
 
 // Family knowledge derives from the shared registry (shared/families.ts):
 // FAMILY_IDS is the canonical order, FAMILY_PICKER_ORDER the picker order
@@ -413,21 +415,10 @@ const styles = StyleSheet.create({
 });
 
 // ---------------------------------------------------------------------------
-// Routing form — the single Role profiles card edits every RoleChoice
-// field: provider family, model, mode, feature values, and thinking option.
-// `features` is the raw JSON base shown when a provider declares no feature
-// defs (and the source of undeclared keys when it does); `feature` holds the
-// per-definition control values, "" meaning unset.
+// Routing form — the single Role profiles card edits every RoleChoice field
+// through one RoutingRoleForm per role (manager-state.ts). The same
+// buildRoleChoice path feeds the Save diff-gate and saveRouting.
 // ---------------------------------------------------------------------------
-
-type RoutingRoleForm = {
-  family: FamilyName;
-  model: string;
-  modeId: string;
-  thinkingOptionId: string;
-  features: string;
-  feature: Record<string, string>;
-};
 
 const sameRoleForm = (a: RoutingRoleForm, b: RoutingRoleForm): boolean =>
   a.family === b.family &&
@@ -437,24 +428,6 @@ const sameRoleForm = (a: RoutingRoleForm, b: RoutingRoleForm): boolean =>
   a.features === b.features &&
   Object.keys(a.feature).length === Object.keys(b.feature).length &&
   Object.keys(a.feature).every(key => a.feature[key] === b.feature[key]);
-
-/** Merge the declared feature controls over the raw JSON base: controls win
- *  for keys the provider declares, undeclared keys are preserved from the
- *  base, and an empty control value drops the key — the stored routing then
- *  carries no explicit value for it (RoleChoice absent-key = unset). */
-const mergeFeatureValues = (
-  defs: CatalogResult["features"],
-  base: Record<string, unknown>,
-  controlValues: Record<string, string>,
-): Record<string, unknown> => {
-  const merged = { ...base };
-  for (const def of defs) {
-    const raw = controlValues[def.id] ?? "";
-    if (raw === "") delete merged[def.id];
-    else merged[def.id] = def.type === "toggle" ? raw === "true" : raw;
-  }
-  return merged;
-};
 
 // ---------------------------------------------------------------------------
 // Surface
@@ -690,56 +663,17 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   };
 
   // Save validates through the strict schema server-side and lands
-  // atomically; it takes effect at the NEXT activation — never here. Each
-  // role's full RoleChoice is built from the form: empty fields delete the
-  // key (absent = unset — the live value is preserved at activation, never
-  // `null`), and a malformed feature-values JSON blocks the save before
-  // dispatch rather than mid-operation.
+  // atomically; it takes effect at the NEXT activation — never here. The
+  // choices are the same routingBuilds the Save diff-gate compares, so an
+  // enabled button can never write something the gate did not see, and a
+  // malformed feature-values JSON arrives here as the build's error and
+  // surfaces in lastError before dispatch rather than mid-operation.
   const saveRouting = async () => {
     if (!target) return;
-    const build = (role: "supervisor" | "lead"): { choice?: Record<string, unknown>; error?: string } => {
-      const label = role === "supervisor" ? "SLP Supervisor" : "SLP Lead";
-      const form = routingForm[role];
-      const choice: Record<string, unknown> = {
-        ...(routing?.[role] ?? {}),
-        family: form.family,
-      };
-      const model = form.model.trim();
-      const modeId = form.modeId.trim();
-      const thinkingOptionId = form.thinkingOptionId.trim();
-      if (model) choice.model = model;
-      else delete choice.model;
-      if (modeId) choice.modeId = modeId;
-      else delete choice.modeId;
-      if (thinkingOptionId) choice.thinkingOptionId = thinkingOptionId;
-      else delete choice.thinkingOptionId;
-      const featuresRaw = form.features.trim();
-      let featuresJson: Record<string, unknown> = {};
-      if (featuresRaw) {
-        try {
-          const parsed: unknown = JSON.parse(featuresRaw);
-          if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-            return { error: `${label}: feature values must be a JSON object` };
-          }
-          featuresJson = parsed as Record<string, unknown>;
-        } catch {
-          return { error: `${label}: feature values are not valid JSON` };
-        }
-      }
-      const defs = featureDefsFor(role).defs;
-      if (defs.length > 0) {
-        choice.featureValues = mergeFeatureValues(defs, featuresJson, form.feature);
-      } else if (featuresRaw) {
-        choice.featureValues = featuresJson;
-      } else {
-        delete choice.featureValues;
-      }
-      return { choice };
-    };
-    const supervisor = build("supervisor");
-    if (supervisor.error) { update({ lastError: supervisor.error }, target); return; }
-    const lead = build("lead");
-    if (lead.error) { update({ lastError: lead.error }, target); return; }
+    const supervisor = routingBuilds.supervisor;
+    if ("error" in supervisor) { update({ lastError: supervisor.error }, target); return; }
+    const lead = routingBuilds.lead;
+    if ("error" in lead) { update({ lastError: lead.error }, target); return; }
     setRoutingBusy(true);
     try {
       const result = await callSetRoleRouting({
@@ -854,6 +788,20 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
       loading: key !== null && featuresLoadingFor === key && featureSets[key] === undefined,
     };
   };
+
+  // The Save diff-gate (spec §9): ONE build path produces the choices the
+  // gate compares and saveRouting dispatches. Save enables when a bound
+  // form builds to a routing that differs from the stored one — a bound
+  // form equal to stored leaves nothing to persist (a save would be a
+  // no-op), while a stored-absent routing always differs because the
+  // prefilled form carries a config worth persisting.
+  const routingBuilds = {
+    supervisor: buildRoleChoice("supervisor", routingForm.supervisor, routing?.supervisor, featureDefsFor("supervisor").defs),
+    lead: buildRoleChoice("lead", routingForm.lead, routing?.lead, featureDefsFor("lead").defs),
+  };
+  const routingDiffers =
+    routingChoiceDiffers(routingBuilds.supervisor, routing?.supervisor) ||
+    routingChoiceDiffers(routingBuilds.lead, routing?.lead);
 
   // Poll the tracked operation until it reaches a terminal outcome. The first
   // delay is the server's pollAfterMs; later polls run every STATUS_POLL_MS.
@@ -1310,8 +1258,8 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
           ) : null}
           <Button
             colors={colors}
-            label={routingBusy ? "Saving…" : "Save routing"}
-            disabled={!target || routingBusy || !routingDirty || !statusView?.binding}
+            label={routingBusy ? "Saving…" : "Save"}
+            disabled={!target || routingBusy || !statusView?.binding || !routingDiffers}
             onPress={() => void saveRouting()}
           />
         </Card>

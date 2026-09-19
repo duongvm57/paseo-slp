@@ -386,6 +386,34 @@ After this refactor the remaining steps are exactly three:
   single "what happens next" text; the failure path already surfaces
   `lastError`, and unbound saves cannot happen so no unbound feedback
   string exists.
+- **Save label + diff-gate** — Human decision (2026-09-19; complaint:
+  "nút Save luôn disable — gate `!routingDirty` chỉ bật khi user edit, còn
+  form prefill từ stored/live không tính dirty → form hiển thị config mà
+  không save được"). The label is "Save" — the card context already names
+  the artifact. The dirty flag no longer gates the button; the gate is a
+  diff against the stored routing: enabled while `statusView.binding`
+  exists AND the form-built `RoleChoice` differs
+  (`buildRoleChoice` → `routingChoiceDiffers` → `roleChoiceEquals`,
+  comparing family/model/modeId/thinkingOptionId field-equal with
+  absent==unset plus `featureValuesKey`-canonicalized featureValues, so
+  `{}` vs absent still differs — an explicit clear is a real change).
+  Gate and save share the ONE `routingBuilds` path, so an enabled button
+  can never write what the gate did not compare. The matrix: bound +
+  form==stored → disabled (a save would be a no-op); bound + stored=null
+  + live-prefilled form → enabled (the reported case — the shown config
+  is not yet persisted); edit → enabled, editing back to stored →
+  disabled; just-saved → disabled because `setRouting(result.routing)`
+  stores the server's unchanged parse (the strict schema normalizes
+  nothing — verified `set-role-routing` returns `parsed.data.routing`
+  verbatim, `featureValues: {}` included). Malformed feature JSON counts
+  as differing so the press still reaches the save path, which surfaces
+  the build error. `routingDirty` keeps its remaining role: it only
+  blocks prefill from overwriting staged edits. Unbound stays disabled
+  with the "Activate first" hint — the bound check precedes the diff.
+  Residual: a declared select feature whose stored value is non-string
+  (e.g. `1`) prefills as its string form `"1"`, so the built choice
+  differs and Save enables though nothing was edited — honest, since the
+  save would write the string form; accepted.
 - **impeccable principles applied** — visibility of system status (the
   disabled Save + hint state the prerequisite and the saved line
   confirms the bound save), context switch (binding state lives beside

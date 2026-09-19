@@ -16,6 +16,7 @@ import {
   activationKind,
   activationLabel,
   applyPatch,
+  buildRoleChoice,
   conflictLine,
   conflictLines,
   createTargetViews,
@@ -33,6 +34,8 @@ import {
   reconcileProblem,
   recoverPendingStart,
   familyFromProviderId,
+  roleChoiceEquals,
+  routingChoiceDiffers,
   routingDiverges,
   startPatch,
   shortenSha,
@@ -384,6 +387,67 @@ test('routingDiverges compares the stored routing against the live binding', () 
   assert.equal(routingDiverges(routing, []), false);
 });
 
+test('the Save diff-gate enables only when the form-built choice differs from stored', () => {
+  // buildRoleChoice is THE build path — the gate and saveRouting share it,
+  // so the matrix below exercises exactly what a press would write.
+  const form = (over = {}) => ({
+    family: 'pi',
+    model: 'pi-model',
+    modeId: '',
+    thinkingOptionId: '',
+    features: '',
+    feature: {},
+    ...over,
+  });
+  const stored = { family: 'pi', model: 'pi-model' };
+  const build = (f, s, defs = []) => buildRoleChoice('supervisor', f, s, defs);
+
+  // Bound + form == stored → equal → Save disabled (a save would be a no-op).
+  const equal = build(form(), stored);
+  assert.equal(routingChoiceDiffers(equal, stored), false);
+  assert.equal(roleChoiceEquals(equal.choice, stored), true);
+
+  // Bound + stored=null + live-prefilled form → differs → enabled — the
+  // reported bug: the shown config is not yet persisted.
+  assert.equal(routingChoiceDiffers(build(form(), undefined), undefined), true);
+  assert.equal(roleChoiceEquals(build(form(), undefined).choice, null), false);
+
+  // An edit differs; editing back to the stored values compares equal again.
+  assert.equal(routingChoiceDiffers(build(form({ model: 'other' }), stored), stored), true);
+  assert.equal(routingChoiceDiffers(build(form({ model: ' pi-model ' }), stored), stored), false);
+
+  // Post-save auto-disable: the server returns the parsed routing unchanged,
+  // so storing the built choice makes the next comparison equal.
+  const saved = build(form(), stored).choice;
+  assert.equal(routingChoiceDiffers(build(form(), saved), saved), false);
+
+  // Malformed feature JSON builds an error, which counts as differing — the
+  // press reaches the save path, which surfaces the build error.
+  const bad = build(form({ features: '{nope' }), stored);
+  assert.ok('error' in bad);
+  assert.match(bad.error, /not valid JSON/);
+  assert.equal(routingChoiceDiffers(bad, stored), true);
+
+  // featureValues canonicalization: key order never differs, but {} vs
+  // absent does — an explicit clear is a real change.
+  const withFeatures = { ...stored, featureValues: { a: 1, b: 2 } };
+  assert.equal(
+    routingChoiceDiffers(build(form({ features: '{"b":2,"a":1}' }), withFeatures), withFeatures),
+    false,
+  );
+  assert.equal(routingChoiceDiffers(build(form({ features: '{}' }), stored), stored), true);
+
+  // Declared controls merge over the raw JSON base: an undeclared key is
+  // preserved and an empty control drops the declared key.
+  const toggleDefs = [{ type: 'toggle', id: 'auto_accept', label: 'Auto', value: false }];
+  const merged = build(
+    form({ features: '{"auto_accept":true,"x":1}', feature: { auto_accept: 'false' } }),
+    stored,
+    toggleDefs,
+  );
+  assert.deepEqual(merged.choice.featureValues, { auto_accept: false, x: 1 });
+});
+
 test('familyFromProviderId parses managed provider ids for form prefill', () => {
   assert.equal(familyFromProviderId('slp-pi-supervisor'), 'pi');
   assert.equal(familyFromProviderId('slp-claude-peer'), 'claude');
@@ -494,10 +558,18 @@ test('the routing UI is one card with one save and one divergence warning', () =
   assert.equal(occurrences(source, 'pref('), 0, 'profile prefs machinery gone');
 
   // One Save action — a single button label and a single dispatch site for
-  // the one set-role-routing call that carries both roles.
-  assert.equal(occurrences(source, '"Save routing"'), 1, 'exactly one Save routing button');
+  // the one set-role-routing call that carries both roles. The label is
+  // "Save" — the card context already names what is saved (spec §9).
+  assert.equal(occurrences(source, '"Save routing"'), 0, 'label shortened to Save');
+  assert.equal(occurrences(source, '"Save"'), 1, 'exactly one Save button');
   assert.equal(occurrences(source, 'callSetRoleRouting('), 1, 'one set-role-routing call site');
   assert.equal(occurrences(source, 'saveRouting()'), 1, 'one save dispatch');
+
+  // ONE build path: buildRoleChoice runs only inside routingBuilds (two
+  // roles), and saveRouting consumes the same routingBuilds the gate
+  // compares — never a second construction that could drift.
+  assert.equal(occurrences(source, 'buildRoleChoice('), 2, 'one shared build site, two roles');
+  assert.equal(occurrences(source, 'routingBuilds.'), 4, 'gate + save consume the same builds');
 
   // The divergence warning renders once on the card, not once per role.
   assert.equal(
@@ -512,7 +584,12 @@ test('the routing UI is one card with one save and one divergence warning', () =
     source.includes('const family = routingForm[role].family'),
     'feature defs fetch keys on the routing form',
   );
-  assert.equal(occurrences(source, 'featureDefsFor(role)'), 4, 'feature controls rendered + merged on save');
+  assert.equal(occurrences(source, 'featureDefsFor(role)'), 3, 'feature controls rendered');
+  assert.equal(
+    occurrences(source, 'featureDefsFor("'),
+    2,
+    'the shared build merges the same defs for both roles',
+  );
   assert.equal(occurrences(source, '"Feature values (JSON)"'), 1, 'JSON fallback field present');
   assert.equal(occurrences(source, '"Thinking option"'), 1, 'thinking option field present');
 
@@ -555,11 +632,16 @@ test('activation is a prerequisite: it renders above Role profiles and gates Sav
   // unbound prefill falls back to the codex default, so a careless
   // save + activate could bind the wrong family. The hint names the
   // prerequisite; the block is UI-only (set-role-routing is unchanged).
+  // While bound the gate is a diff-gate: enabled iff the form-built routing
+  // differs from the stored one (routingDirty no longer participates —
+  // prefill does not set it, which was the reported stuck-disabled bug).
   const saveButton = source.match(
-    /label=\{routingBusy \? "Saving…" : "Save routing"\}[\s\S]*?disabled=\{([^}]*)\}/,
+    /label=\{routingBusy \? "Saving…" : "Save"\}[\s\S]*?disabled=\{([^}]*)\}/,
   );
-  assert.ok(saveButton, 'Save routing button not found');
+  assert.ok(saveButton, 'Save button not found');
   assert.match(saveButton[1], /!statusView\?\.binding/, 'Save is not gated on a live binding');
+  assert.match(saveButton[1], /!routingDiffers/, 'Save is not diff-gated against the stored routing');
+  assert.ok(!/routingDirty/.test(saveButton[1]), 'the dirty flag no longer gates Save');
   assert.ok(
     source.includes('Activate first — role profiles are saved against a live binding.'),
     'activate-first hint missing',

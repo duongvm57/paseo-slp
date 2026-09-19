@@ -4,9 +4,12 @@
 import { AbsolutePath, Id } from "../shared/contracts.ts";
 import { OWNED_PROVIDER_ID_RE, ownedProviderId } from "../shared/families.ts";
 import type {
+  CatalogResult,
   ConflictValue,
+  FamilyName,
   FamilyViewValue,
   OperationViewValue,
+  RoleChoiceValue,
   RoleRoutingValue,
   StartResult,
   StateValue,
@@ -325,6 +328,121 @@ export function routingDiverges(
 export function familyFromProviderId(provider: string | null | undefined): string | null {
   return OWNED_PROVIDER_ID_RE.exec(provider ?? "")?.[1] ?? null;
 }
+
+// ---------------------------------------------------------------------------
+// Routing form → stored RoleChoice — the single build path the Save gate and
+// saveRouting share, so an enabled button can never write something the gate
+// did not compare (spec §9).
+// ---------------------------------------------------------------------------
+
+export type RoutingRole = "supervisor" | "lead";
+
+/** The routing card's editable copy of one RoleChoice: `features` is the raw
+ *  JSON base shown when a provider declares no feature defs (and the source of
+ *  undeclared keys when it does); `feature` holds the per-definition control
+ *  values, "" meaning unset. */
+export interface RoutingRoleForm {
+  family: FamilyName;
+  model: string;
+  modeId: string;
+  thinkingOptionId: string;
+  features: string;
+  feature: Record<string, string>;
+}
+
+/** Merge the declared feature controls over the raw JSON base: controls win
+ *  for keys the provider declares, undeclared keys are preserved from the
+ *  base, and an empty control value drops the key — the stored routing then
+ *  carries no explicit value for it (RoleChoice absent-key = unset). */
+const mergeFeatureValues = (
+  defs: CatalogResult["features"],
+  base: Record<string, unknown>,
+  controlValues: Record<string, string>,
+): Record<string, unknown> => {
+  const merged = { ...base };
+  for (const def of defs) {
+    const raw = controlValues[def.id] ?? "";
+    if (raw === "") delete merged[def.id];
+    else merged[def.id] = def.type === "toggle" ? raw === "true" : raw;
+  }
+  return merged;
+};
+
+export type RoleChoiceBuild = { choice: Record<string, unknown> } | { error: string };
+
+/** Form → storable RoleChoice. `stored` spreads first so a field the schema
+ *  later adds passes through untouched; an empty form field deletes the key
+ *  (absent = unset — the live value is preserved at activation, never `null`),
+ *  and malformed feature JSON returns an error rather than throwing
+ *  mid-dispatch. */
+export function buildRoleChoice(
+  role: RoutingRole,
+  form: RoutingRoleForm,
+  stored: RoleChoiceValue | undefined,
+  defs: CatalogResult["features"],
+): RoleChoiceBuild {
+  const label = role === "supervisor" ? "SLP Supervisor" : "SLP Lead";
+  const choice: Record<string, unknown> = { ...(stored ?? {}), family: form.family };
+  const model = form.model.trim();
+  const modeId = form.modeId.trim();
+  const thinkingOptionId = form.thinkingOptionId.trim();
+  if (model) choice.model = model;
+  else delete choice.model;
+  if (modeId) choice.modeId = modeId;
+  else delete choice.modeId;
+  if (thinkingOptionId) choice.thinkingOptionId = thinkingOptionId;
+  else delete choice.thinkingOptionId;
+  const featuresRaw = form.features.trim();
+  let featuresJson: Record<string, unknown> = {};
+  if (featuresRaw) {
+    try {
+      const parsed: unknown = JSON.parse(featuresRaw);
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return { error: `${label}: feature values must be a JSON object` };
+      }
+      featuresJson = parsed as Record<string, unknown>;
+    } catch {
+      return { error: `${label}: feature values are not valid JSON` };
+    }
+  }
+  if (defs.length > 0) {
+    choice.featureValues = mergeFeatureValues(defs, featuresJson, form.feature);
+  } else if (featuresRaw) {
+    choice.featureValues = featuresJson;
+  } else {
+    delete choice.featureValues;
+  }
+  return { choice };
+}
+
+/** Diff-gate equality between two stored-shape choices: field equality on
+ *  family/model/modeId/thinkingOptionId — an absent key is unset on both
+ *  sides — plus the order-stable featureValuesKey on featureValues, so `{}`
+ *  vs absent still differs (an explicit clear is a real change). */
+export function roleChoiceEquals(
+  a: RoleChoiceValue | Record<string, unknown> | null | undefined,
+  b: RoleChoiceValue | Record<string, unknown> | null | undefined,
+): boolean {
+  if (a == null || b == null) return a == b;
+  return (
+    a.family === b.family &&
+    a.model === b.model &&
+    a.modeId === b.modeId &&
+    a.thinkingOptionId === b.thinkingOptionId &&
+    featureValuesKey(a.featureValues as Record<string, unknown> | null | undefined) ===
+      featureValuesKey(b.featureValues as Record<string, unknown> | null | undefined)
+  );
+}
+
+/** One gate predicate for a built choice against the stored one. A malformed
+ *  feature JSON (an error build) counts as differing so the button stays
+ *  pressable and the save path surfaces the build error; an absent stored
+ *  choice never equals a built one — the form always carries a family, so
+ *  there is always something to persist. */
+export const routingChoiceDiffers = (
+  build: RoleChoiceBuild,
+  stored: RoleChoiceValue | null | undefined,
+): boolean => "error" in build || !roleChoiceEquals(build.choice, stored);
 
 // The view patch a start response produces. Conflicts are surfaced whenever
 // they are present — accepted or not (an accepted reconcile inspect can still
