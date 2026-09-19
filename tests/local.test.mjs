@@ -413,4 +413,15 @@ test('decision-doctrine lines reach the standalone bundles that need them and ne
   assert.match(template, /agent-scoped create_agent/);
   assert.match(template, /share the assignment'?s workspace by default/, 'team-workspace default');
   assert.match(template, /owner map and creation receipts/, 'formation receipts tactic');
+  // B25: split-seat naming convention — slash suffix, never an "axis" suffix.
+  assert.match(template, /Reviewer — <task> \/ Spec/, 'Spec seat naming convention');
+  assert.match(template, /Reviewer — <task> \/ Std/, 'Std seat naming convention');
+  assert.match(template, /never an "axis" suffix/);
+  // B24: monitoring doctrine enumerates seats by identity, not cwd, and never
+  // infers nonexistence from an empty listing (references ship as locators —
+  // pin the installed bytes directly).
+  const monitoring = readFileSync(join(installed, 'src/references/monitoring.md'), 'utf8');
+  assert.match(monitoring, /never by cwd/, 'seat enumeration is not cwd-scoped');
+  assert.match(monitoring, /empty list_agents result does not prove/, 'empty list is not nonexistence');
+  assert.match(monitoring, /refs\/heads\/<lane>/, 'lane branches carry lane commits');
 });

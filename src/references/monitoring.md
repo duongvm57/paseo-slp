@@ -22,6 +22,14 @@ route against the formation record. Where the host does not expose that
 metadata, record the visibility gap rather than inferring the relation; reports
 keep going to the recorded owner, never to a convenient address.
 
+Enumerate the team's seats by provider prefix, parentage and assignment
+labels — never by cwd: a worktree lane runs from a different checkout path
+than the main workspace, and lane commits land on refs/heads/<lane> before
+any merge reaches the shared branch. Keep each seat's agent ID and creation
+receipt; an empty list_agents result does not prove a seat is gone — verify
+it by ID through get_agent_status against the recorded receipts, and never
+spawn a replacement on the strength of an empty listing.
+
 Use create_agent/send_agent_prompt with notifyOnFinish=true for completion, error
 and permission wakes. While work is active, material signals include major design
 decisions, ambiguity, reopen/dependency requests, changed assumptions, repeated

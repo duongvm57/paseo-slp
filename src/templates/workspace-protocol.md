@@ -65,6 +65,11 @@ not universal role requirements. Escalate foundation uncertainty before tests pi
 an undecided API or representation. In a new domain, establish enough Human framing
 to locate owner boundaries before foundational implementation.
 
+Keep split-seat titles short: name the seat inside taskLabel —
+`Peer — Reviewer — <task> / Spec` and `Peer — Reviewer — <task> / Std`, QC as
+`Peer — Reviewer — <task> / QC` — never an "axis" suffix. Apply the
+convention to new spawns; seats already running keep their titles.
+
 ## Ownership and integration
 
 Inspect existing changes and active writers. Record owned/excluded scopes and return
