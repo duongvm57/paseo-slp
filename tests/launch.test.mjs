@@ -55,6 +55,8 @@ test('prepare on a non-installed root names the root and the installed CLI, neve
   assert.match(error.message, /No installed runtime at .*missing installed\.json receipt/);
   assert.match(error.message, /bin\/slp\.mjs/);
   assert.ok(!/ENOENT/.test(error.message), `raw ENOENT leaked: ${error.message}`);
+  // The tail is caller-neutral: verify/uninstall hit the same path.
+  assert.ok(!/prepare/.test(error.message), `prepare-flavored tail leaked: ${error.message}`);
   // A corrupt receipt is tampering evidence, not a missing install.
   writeFileSync(join(dir, 'installed.json'), 'not json');
   assert.throws(() => launchPlan(dir, request), /not valid JSON/);
@@ -64,6 +66,11 @@ test('prepare on a non-installed root names the root and the installed CLI, neve
   rmSync(join(installed, 'src/common.md'));
   assert.throws(() => launchPlan(installed, request), /Installed candidate changed/);
   assert.throws(() => launchPlan(installed, request), /^(?!.*No installed runtime)/s);
+  // Payload-level ENOTDIR (a package path is a regular file) maps to the
+  // same incomplete-install class instead of surfacing unadorned.
+  rmSync(join(installed, 'src'), { recursive: true });
+  writeFileSync(join(installed, 'src'), 'not a directory');
+  assert.throws(() => launchPlan(installed, request), /Installed runtime at .* is incomplete — a package file is missing/s);
 });
 
 test('spawnKit carries role-scoped approximate MCP tool signatures', t => {

@@ -30,14 +30,14 @@ export function verifyInstall(root) {
     if (error.code === 'ENOENT' || error.code === 'ENOTDIR') throw new Error(`No installed runtime at ${root} (missing installed.json receipt). `
       + `Run the CLI from the installed runtime instead: node <installed-root>/bin/slp.mjs <command> — `
       + `<installed-root> is the directory 'install <dir>' or plugin activation wrote (the managed role `
-      + `instructions name it); verify it with 'verify <installed-root>'. A source checkout cannot prepare plans.`);
+      + `instructions name it); verify it with 'verify <installed-root>'.`);
     if (error instanceof SyntaxError) throw new Error(`installed.json at ${root} is not valid JSON: ${error.message}`);
     throw error;
   }
   let actual;
   try { actual = identity(root); }
   catch (error) {
-    if (error.code === 'ENOENT') throw new Error(`Installed runtime at ${root} is incomplete — a package file is missing: ${error.message}`);
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') throw new Error(`Installed runtime at ${root} is incomplete — a package file is missing: ${error.message}`);
     throw error;
   }
   if (json(actual) !== json(expected.candidate)) throw new Error('Installed candidate changed');
