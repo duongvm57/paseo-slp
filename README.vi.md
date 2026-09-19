@@ -402,7 +402,11 @@ chọn nữa, áp dụng cho cả `prepare-handoff`:
 
 - `inventoryFile`: đường dẫn tuyệt đối tới JSON object có
   `providers`/`profiles`; các mảng này chỉ điền trường request chưa inline —
-  mảng inline tường minh (kể cả `[]`) luôn thắng.
+  mảng inline tường minh (kể cả `[]`) luôn thắng. Tạo file bằng
+  `inventory --paseo-home <absolute-home>` (bên dưới); dưới managed runtime
+  providers của nó mang `provenance: "configured"` và bị từ chối làm bằng
+  chứng launch — truyền output `list_providers` live từ cùng daemon inline
+  vào `providers` thay thế.
 - `assignmentFile`: đường dẫn tuyệt đối tới file assignment đầy đủ (phải tồn
   tại, là file thường và đọc được). Prompt giữ `assignment` làm brief ngắn và
   thêm dòng `Assignment file: <path> — read it first; it is authoritative
@@ -438,11 +442,18 @@ node "$SLP_RT/bin/slp.mjs" inventory [--paseo-home /absolute/paseo-home]
 node "$SLP_RT/bin/slp.mjs" agents [--paseo-home /absolute/paseo-home]
 ```
 
-`inventory` in `{providers, profiles, source}` đúng shape `prepare` nhận.
-Lệnh chỉ gọi `paseo provider ls --json` khi `paseo.pid` của home được chỉ
-định là tiến trình đang sống; không thì đọc `agents.providers` trong
-`config.json` của chính home đó — không bao giờ lấy providers của daemon khác
-và không tạo thư mục. Providers live được chuẩn hóa thành `{id, enabled,
+`inventory` in `{providers, profiles, source}` đúng shape `prepare` nhận —
+pipeline dự kiến là `inventory --paseo-home <absolute-home> > inventory.json`,
+rồi `"inventoryFile": "/absolute/path/to/inventory.json"` trong request (xem
+[`prepare`](#prepare--prepare-handoff) ở trên). Lệnh chỉ gọi `paseo provider
+ls --json` khi `paseo.pid` của home được chỉ định là tiến trình đang sống;
+không thì đọc `agents.providers` trong `config.json` của chính home đó —
+không bao giờ lấy providers của daemon khác và không tạo thư mục. Dưới
+managed runtime (`SLP_MANAGED_RUNTIME=1`) listing qua CLI không bao giờ được
+gọi và mọi provider đều mang nhãn `provenance: "configured"` — config tĩnh,
+bị từ chối làm bằng chứng launch. Dù theo đường nào, inventory chỉ chứng minh
+độ đầy đủ của cấu hình, không phải sức khỏe provider; một entry được liệt kê
+có thể đã stale và không phải dấu readiness. Providers live được chuẩn hóa thành `{id, enabled,
 status}` (`enabled` có thể null với trạng thái không nhận diện được), còn
 config cho `{id, enabled, extends}`; profiles luôn đọc từ
 `daemon.agentProfiles`. Trên host nhiều daemon, listing live phản ánh daemon

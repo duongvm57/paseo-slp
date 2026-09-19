@@ -201,8 +201,8 @@ route: { optionId, catalogSha256 } to inspect launch arguments without creating
 an agent. Verify the wrapper/model/settings match the option. Include profiles
 only if useful for discovery; they never select or override the Peer runtime.
 For repeated prepares, capture discovery once: `node <slp-cli> inventory
---paseo-home <absolute-home>` writes {providers, profiles} in the shape prepare
-consumes — pass the file's absolute path as request.inventoryFile (inline arrays,
+--paseo-home <absolute-home>` prints {providers, profiles} to stdout in the
+shape prepare consumes — pass the file's absolute path as request.inventoryFile (inline arrays,
 including [], still win). Under a managed runtime its providers are labeled
 provenance configured and are refused as launch evidence; pass live
 list_providers output from the same daemon inline as providers instead. Inventory

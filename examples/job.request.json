@@ -7,5 +7,5 @@
   "providers": [
     { "id": "slp-<family>-supervisor", "enabled": true, "status": "available" }
   ],
-  "assignment": "Replace with a real bounded objective: owned/excluded paths, current user changes to preserve, distinct edit/commit/push/external-effect authority, verification expectations and the stop/handback condition, plus your agent ID as report recipient. Authorize the Supervisor to form the team the task needs — topology is its judgment call, not a fixed seat count."
+  "assignment": "Replace with a real bounded objective: owned/excluded paths, current user changes to preserve, distinct edit/commit/push/external-effect authority, verification expectations and the stop/handback condition, plus the sender's agent ID as report recipient. Authorize the Supervisor to form the team the task needs — topology is its judgment call, not a fixed seat count."
 }
