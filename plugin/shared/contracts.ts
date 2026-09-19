@@ -148,7 +148,25 @@ export const StatusOutput = z.object({
   conflicts: z.array(Conflict).max(64),
   verifiedAt: Time.nullable(),
   retainedRuntimeCount: z.number().int().nonnegative(),
+  /** Communication language injected into managed sessions — the content of
+   *  slp-runtime/state/communication-language, or null when unset (seats then
+   *  keep their model default; nothing is injected). */
+  communicationLanguage: z.string().nullable(),
   liveAcceptance: z.literal("not-established-by-this-rpc"),
+}).strict();
+/** Plugin-owned state mutation: writes or removes the communication-language
+ *  file under the target's slp-runtime/state. No authority gate — it touches
+ *  no config.json entry, only a plugin-owned file, and takes effect at the
+ *  next session entry without re-activation. */
+export const SetLanguageInput = z.object({
+  schemaVersion: z.literal(1),
+  target: Target,
+  /** null clears the setting (toggle off); a non-empty string sets it. */
+  value: z.string().trim().min(1).max(256).nullable(),
+}).strict();
+export const SetLanguageOutput = z.object({
+  schemaVersion: z.literal(1),
+  value: z.string().nullable(),
 }).strict();
 export const LocalTargetInput = z.object({
   schemaVersion: z.literal(1),
@@ -222,6 +240,7 @@ export const deactivate = defineRpc({ name: "deactivate", input: DeactivateInput
 export const status = defineRpc({ name: "status", input: StatusInput, output: StatusOutput });
 export const localTarget = defineRpc({ name: "local-target", input: LocalTargetInput, output: LocalTargetOutput });
 export const catalog = defineRpc({ name: "catalog", input: CatalogInput, output: CatalogOutput });
+export const setLanguage = defineRpc({ name: "set-language", input: SetLanguageInput, output: SetLanguageOutput });
 
 // ---------------------------------------------------------------------------
 // §7 receipt / operation-intent journal schemas (server-internal; the client
@@ -367,6 +386,8 @@ export type CatalogResult = z.infer<typeof CatalogOutput>;
 export type ReconcileRequest = z.infer<typeof ReconcileInput>;
 export type DeactivateRequest = z.infer<typeof DeactivateInput>;
 export type StatusRequest = z.infer<typeof StatusInput>;
+export type SetLanguageRequest = z.infer<typeof SetLanguageInput>;
+export type SetLanguageResult = z.infer<typeof SetLanguageOutput>;
 export type StartResult = z.infer<typeof StartOutput>;
 export type StatusResult = z.infer<typeof StatusOutput>;
 export type BindingViewValue = z.infer<typeof BindingView>;
@@ -570,6 +591,10 @@ export interface Manager {
   reconcile(input: ReconcileRequest, daemon: ConnectedDaemon): Promise<StartResult>;
   deactivate(input: DeactivateRequest, daemon: ConnectedDaemon): Promise<StartResult>;
   status(input: StatusRequest, daemon: ConnectedDaemon): Promise<StatusResult>;
+  /** Write or clear the plugin-owned communication-language file. No journal,
+   *  no mutex — it is one atomic file under slp-runtime/state that only the
+   *  role bundle reads, at session entry. */
+  setLanguage(input: SetLanguageRequest): Promise<SetLanguageResult>;
   /** Stop accepting work and close owned resources. Does not deactivate SLP
    * or remove files; recovery stays journal-driven. */
   close(): void;

@@ -5,7 +5,7 @@
 import type { PluginServerContribution } from "@getpaseo/plugin/server";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { activate, reconcile, deactivate, status, localTarget, catalog } from "./shared/contracts.ts";
+import { activate, reconcile, deactivate, status, localTarget, catalog, setLanguage } from "./shared/contracts.ts";
 import type { CatalogRequest, FamilyName, Manager } from "./shared/contracts.ts";
 import { createManager } from "./server/manager.ts";
 import { createMaterializer } from "./server/materializer.ts";
@@ -28,6 +28,7 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   server.handle(status, (input, { paseo }) => manager.status(input, paseo));
   server.handle(localTarget, () => detectDaemonHome());
   server.handle(catalog, (input, { paseo }) => loadCatalog(input, paseo));
+  server.handle(setLanguage, input => manager.setLanguage(input));
   return () => manager.close();
 }
 

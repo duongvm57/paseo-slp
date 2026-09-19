@@ -123,6 +123,32 @@ test('managed bundle fails closed on a missing or relative launch env var', t =>
   assert.ok(off.instructions.includes(`node '${join(installed, 'bin/slp.mjs')}'`));
 });
 
+test('managed bundle injects the communication language only when the state file sets it', t => {
+  const dir = fixture(t), installed = join(dir, 'release');
+  install(root, installed);
+  const home = join(dir, 'daemon-home');
+  const env = {
+    SLP_MANAGED_RUNTIME: '1', SLP_NODE_BIN: '/n/bin/node',
+    SLP_RUNTIME_ROOT: installed, SLP_DAEMON_HOME: home,
+  };
+  // No file → no language bytes at all.
+  const unset = roleBundle(installed, 'supervisor', env);
+  assert.ok(!unset.instructions.includes('Communication language:'));
+  // File set → the verbatim value is injected once.
+  mkdirSync(join(home, 'slp-runtime/state'), { recursive: true });
+  writeFileSync(join(home, 'slp-runtime/state/communication-language'), 'Vietnamese\n');
+  const set = roleBundle(installed, 'supervisor', env);
+  assert.equal(set.instructions.match(/Communication language: /g).length, 1);
+  assert.ok(set.instructions.includes('Communication language: Vietnamese — reports, assignments, handbacks and replies to the Human use it'));
+  // Whitespace-only file behaves as unset.
+  writeFileSync(join(home, 'slp-runtime/state/communication-language'), '  \n');
+  const blank = roleBundle(installed, 'supervisor', env);
+  assert.ok(!blank.instructions.includes('Communication language:'));
+  // Unmanaged launches never inject, even if a file path would resolve.
+  const unmanaged = roleBundle(installed, 'supervisor', { SLP_DAEMON_HOME: home });
+  assert.ok(!unmanaged.instructions.includes('Communication language:'));
+});
+
 test('role instructions carry the spawn kit and policy locators at session entry', t => {
   const dir = fixture(t), installed = join(dir, 'release');
   install(root, installed);

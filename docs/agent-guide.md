@@ -8,7 +8,7 @@ canonical procedure — this file is the same workflow in standalone form.
 
 - `.paseo-slp/workspace-protocol.md` — operating tactics for this repo's
   agent teams. Human-readable: risk levels, proof gates, budget, fallback
-  authority, communication language, notebook location.
+  authority, notebook location.
 - `.paseo-slp/slp-routing.json` — the Peer runtime pool. Machine-readable
   catalog the Lead picks from per delegation.
 - `.paseo-slp/notebook.md` — the Supervisor's durable notebook scaffold.
@@ -140,8 +140,7 @@ Preview with `node bin/slp.mjs init <absolute-repo>`, then rerun with
 `--apply` under the granted setup authority. Init never overwrites. Then:
 
 - Fill the frontmatter fields: `routing_intent` (pinned | inherit | empty +
-  decider + date — never restate option IDs), `communication_language`,
-  `supervisor_notebook`, `decided_by`, `decided_at`.
+  decider + date — never restate option IDs),   `supervisor_notebook`, `decided_by`, `decided_at`.
 - Record the confirmed shapes — a repo default plus exceptions, or
   per-class rows — in the Task classes and gates table, and each
   disposition's intended skills in the protocol's skills notes so Lead can

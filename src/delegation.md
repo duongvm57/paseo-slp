@@ -56,10 +56,10 @@ Peer runtime changes remain inside the project pool; quota fallback follows its 
    initialPrompt contains the neutral assignment: project/task identifiers,
    repository/workspace, role/disposition, objective or open question, owned/excluded
    scope, read/write mode, separate authority grants, known constraints/dependencies
-   (including discovered filename hazards and their recovery technique), the
-   protocol's communication language for reports and handbacks, any effort/scope
-   bound (for example, cover the top-N highest-risk references first, then
-   breadth), verification, your own agent ID as the report recipient, and handback. For
+   (including discovered filename hazards and their recovery technique), any
+   effort/scope bound (for example, cover the top-N highest-risk references
+   first, then breadth), verification, your own agent ID as the report
+   recipient, and handback. For
    review include the exact candidate; for sealed design include the report
    visibility boundary. A Peer receives only relevant repository tactics and may
    propose a different solution.

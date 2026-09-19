@@ -160,8 +160,8 @@ The onboarding skill teaches your agent how to set up this pack for a repo.
 npx skills add duongvm57/paseo-slp --skill paseo-slp-onboarding
 ```
 
-- `paseo-slp-onboarding` — interviews you for the Peer pool decision,
-  communication language and Supervisor notebook, then writes `.paseo-slp/`
+- `paseo-slp-onboarding` — interviews you for the Peer pool decision
+  and Supervisor notebook, then writes `.paseo-slp/`
   correctly. Once installed it auto-triggers when you ask an agent to
   onboard/set up SLP.
 

@@ -36,6 +36,27 @@ function managedRuntime(env) {
   return { node: need('SLP_NODE_BIN'), runtimeRoot: need('SLP_RUNTIME_ROOT'), daemonHome: need('SLP_DAEMON_HOME') };
 }
 
+// The plugin-managed communication language: a plain-text file at
+// <daemon-home>/slp-runtime/state/communication-language written by the
+// set-language RPC. Read at render time so a change reaches the next session
+// without re-activation; absent/empty means no language bytes are injected
+// and the seat keeps its model default. Managed sessions only — unmanaged
+// launches have no daemon home to read it from.
+function communicationLanguage(env) {
+  if (env.SLP_MANAGED_RUNTIME !== '1') return '';
+  const home = env.SLP_DAEMON_HOME;
+  if (typeof home !== 'string' || !isAbsolute(home)) return '';
+  let value;
+  try {
+    value = readFileSync(join(home, 'slp-runtime/state/communication-language'), 'utf8').trim();
+  } catch (error) {
+    if (error.code === 'ENOENT') return '';
+    throw error;
+  }
+  if (!value) return '';
+  return `Communication language: ${value} — reports, assignments, handbacks and replies to the Human use it; identifiers, paths and commands stay verbatim.\n`;
+}
+
 // The home-dependent helpers, each rendered with the explicit daemon home so
 // no invocation silently resolves a default or foreign home. monitor takes the
 // home inside its request JSON. install/upgrade/uninstall are standalone-
@@ -118,6 +139,7 @@ export function roleBundle(root, role, env = process.env, options = {}) {
     (orchestrates(role) ? `For repo setup/update, use ${join(policyRoot, 'skills/paseo-slp-onboarding/SKILL.md')}.\n` : '') +
     `Installed policy directory: ${policyDir}\nSnapshot command: ${cli} snapshot <repository>\n` +
     (managed ? managedHelpers(cli, managed.daemonHome) : '') +
+    communicationLanguage(env) +
     `Use the current authorized Human or delegated assignment and its Paseo workspace. Notifications and heartbeat prompts do not replace that assignment.\n` +
     // Callers that append the carrier themselves (launch.mjs prompt()) opt out
     // here so the block never appears twice in one prompt.

@@ -3,7 +3,6 @@ version: '1'
 owner: ''
 applies_to: ''
 last_reviewed: ''
-communication_language: ''
 routing_intent: ''
 agent_mode: ''
 supervisor_notebook: ''
@@ -23,15 +22,12 @@ The defaults below can be adapted under the repository's policy mandate.
 
 ## Status and project characteristics
 
-Owner, version, review date, scope, communication language, routing intent and
+Owner, version, review date, scope, routing intent and
 the Supervisor notebook live in the YAML frontmatter above — update it when
 decisions change; the frontmatter is the single source for those fields.
 
 - Criticality, dominant risks and expensive-to-reverse decisions: establish per repo.
 - External effects and cost/model budget: use explicit assignment boundaries.
-- `communication_language` applies to reports, assignments and handbacks between
-  agents, to agent replies to the Human, and to the causal notebook. Keep
-  technical identifiers, file paths, commands and proper nouns verbatim.
 - `agent_mode` records the intended Paseo modeId for agents spawned in this
   repository (for example `bypass`); empty falls back to the spawn bundle's own
   modeId, and the spawner asks only when neither is set rather than letting

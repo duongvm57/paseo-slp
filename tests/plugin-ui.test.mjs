@@ -83,6 +83,7 @@ const statusView = (over = {}) => ({
   conflicts: [],
   verifiedAt: '2026-09-18T00:00:10Z',
   retainedRuntimeCount: 2,
+  communicationLanguage: 'Vietnamese',
   liveAcceptance: 'not-established-by-this-rpc',
   ...over,
 });
@@ -279,11 +280,11 @@ test('wide status rows expose binding detail; compact omits it', () => {
   assert.deepEqual(labels(wide), [
     'State', 'Daemon home (canonical)', 'Embedded candidate', 'Active candidate', 'Binding',
     'Runtime', 'Node', 'Launch set', 'Payload', 'Baseline',
-    'Retained runtimes', 'Last verified', 'Live acceptance',
+    'Retained runtimes', 'Communication language', 'Last verified', 'Live acceptance',
   ]);
   assert.deepEqual(labels(compact), [
     'State', 'Daemon home (canonical)', 'Embedded candidate', 'Active candidate', 'Binding',
-    'Retained runtimes', 'Last verified', 'Live acceptance',
+    'Retained runtimes', 'Communication language', 'Last verified', 'Live acceptance',
   ]);
   const wideRow = label => wide.find(row => row.label === label).value;
   const compactRow = label => compact.find(row => row.label === label).value;
@@ -295,6 +296,11 @@ test('wide status rows expose binding detail; compact omits it', () => {
   assert.equal(wideRow('Embedded candidate'), `${SHA.slice(0, 12)}…`);
   assert.equal(compactRow('Embedded candidate'), `${SHA.slice(0, 8)}…`);
   assert.equal(wideRow('Retained runtimes'), '2');
+  assert.equal(wideRow('Communication language'), 'Vietnamese');
+  assert.equal(
+    statusRows(statusView({ communicationLanguage: null })).find(r => r.label === 'Communication language').value,
+    'unset (model default)',
+  );
   assert.equal(wideRow('Last verified'), '2026-09-18T00:00:10Z');
   assert.equal(wideRow('Live acceptance'), 'not established by this RPC');
   // §10: render the literal contract value, never a stronger claim.

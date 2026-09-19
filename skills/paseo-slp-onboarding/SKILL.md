@@ -56,9 +56,7 @@ for a list meant to work, picked discovered options seat by seat — or declared
 the repo deliberately without a pool (then strip the seeded seats, leaving
 `options: []`). Record the resolved intent — `pinned`, `inherit` or `empty` —
 in the protocol frontmatter `routing_intent` with who decided and when; the
-catalog file carries the option IDs. In the same pass, ask the workflow
-communication language — covering reports, assignments and handbacks between
-agents and replies to the Human — and write it into `communication_language`.
+catalog file carries the option IDs.
 Within granted setup authority, populate the choices the Human made; otherwise
 ask for the missing pool decision before delegation. Offer only providers,
 models and settings that live discovery returned — never invent IDs, capability

@@ -66,6 +66,8 @@ Three separate layers carry three separate concerns:
 │                        shims, role wrappers, transports, helpers) │
 │     launchers/<sha>/   per-provider launcher files                │
 │     state/receipt.json what the plugin believes it owns           │
+│     state/communication-language                                   │
+│                            optional injected language (toggleable) │
 │                                                                  │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -138,6 +140,7 @@ what the human sees              what the seat's context contains
 │  report về <id>"    │    +     │ supervisor role contract         │
 └─────────────────────┘          │ delegation rules                 │
                                  │ managed runtime helpers          │
+                                 │ communication language (if set)  │
                                  │ spawn kit (MCP signatures)       │
                                  │ policy locators (path + sha256)  │
                                  └──────────────────────────────────┘

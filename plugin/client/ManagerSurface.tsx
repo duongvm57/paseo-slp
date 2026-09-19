@@ -20,7 +20,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { activate, catalog, deactivate, reconcile, status, localTarget } from "../shared/contracts.ts";
+import { activate, catalog, deactivate, reconcile, status, localTarget, setLanguage } from "../shared/contracts.ts";
 import type { CatalogOptionValue, CatalogResult, FamilyName, StartResult, StatusResult, TargetValue } from "../shared/contracts.ts";
 import {
   DISABLE_REMOVE_NOTICE,
@@ -399,6 +399,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   const callDeactivate = useRpc(deactivate);
   const callLocalTarget = useRpc(localTarget);
   const callCatalog = useRpc(catalog);
+  const callSetLanguage = useRpc(setLanguage);
 
   const [detectedHome, setDetectedHome] = useState<string | null>(null);
   const [homeOverride, setHomeOverride] = useState("");
@@ -421,6 +422,10 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showMaintenance, setShowMaintenance] = useState(false);
   const [statusDetailsOpen, setStatusDetailsOpen] = useState(false);
+  const [languageOn, setLanguageOn] = useState(false);
+  const [languageValue, setLanguageValue] = useState("");
+  const [languageDirty, setLanguageDirty] = useState(false);
+  const [languageBusy, setLanguageBusy] = useState(false);
   const [store] = useState(createTargetViews);
   const [view, setView] = useState<TargetView>(emptyTargetView);
 
@@ -487,6 +492,31 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     setPrefs(current => ({ ...current, [field]: text }));
   };
   const statusView = view.status;
+
+  // Prefill the language control from status until the Human edits it —
+  // same tracking discipline as the profile form.
+  useEffect(() => {
+    if (languageDirty) return;
+    const stored = statusView?.communicationLanguage ?? null;
+    setLanguageOn(stored !== null);
+    setLanguageValue(stored ?? "");
+  }, [statusView, languageDirty]);
+
+  // Toggle off applies immediately (nothing to type); toggle on waits for
+  // the Apply press so an empty value is never written.
+  const applyLanguage = async (value: string | null) => {
+    if (!target) return;
+    setLanguageBusy(true);
+    try {
+      await callSetLanguage({ schemaVersion: 1, target, value });
+      setLanguageDirty(false);
+      void refresh(target);
+    } catch (error) {
+      update({ lastError: errorMessage(error) }, target);
+    } finally {
+      setLanguageBusy(false);
+    }
+  };
 
   // Bound state: prefill the profile editor from the live values status
   // reported — the same values the host's profile editor shows. Once the
@@ -1063,6 +1093,53 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                 </Text>
               ))}
             </View>
+          ) : null}
+        </Card>
+      ) : null}
+
+      {statusView ? (
+        <Card
+          colors={colors}
+          title="Communication language"
+          subtitle="One line injected into every managed session at entry — unset keeps each model's default."
+        >
+          <CheckRow
+            colors={colors}
+            checked={languageOn}
+            disabled={!target || languageBusy}
+            onToggle={next => {
+              setLanguageOn(next);
+              if (next) {
+                setLanguageDirty(true);
+              } else {
+                setLanguageDirty(false);
+                void applyLanguage(null);
+              }
+            }}
+            title="Inject communication language"
+            hint="Managed seats are told to use it for reports, handbacks and replies to you."
+          />
+          {languageOn ? (
+            <>
+              <Field
+                colors={colors}
+                label="Language"
+                hint="As it should appear in the instruction, e.g. Vietnamese"
+                value={languageValue}
+                onChangeText={text => {
+                  setLanguageDirty(true);
+                  setLanguageValue(text);
+                }}
+                placeholder="Vietnamese"
+                disabled={languageBusy}
+              />
+              <Button
+                colors={colors}
+                label={languageBusy ? "Saving…" : "Apply language"}
+                disabled={!target || languageBusy || languageValue.trim() === ""}
+                onPress={() => void applyLanguage(languageValue.trim())}
+              />
+            </>
           ) : null}
         </Card>
       ) : null}

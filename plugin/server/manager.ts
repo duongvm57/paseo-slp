@@ -10,13 +10,14 @@
 // RECOVERY_REQUIRED and wait for reconcile inspect/complete/restore-before.
 
 import { randomUUID } from "node:crypto";
-import { lstatSync, realpathSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   ActivateInput,
   DeactivateInput,
   OperationConflict,
   ReconcileInput,
+  SetLanguageInput,
   StatusInput,
   normalizeConflict,
   type ActivateRequest,
@@ -32,6 +33,7 @@ import {
   type PlanValue,
   type ReceiptValue,
   type ReconcileRequest,
+  type SetLanguageResult,
   type StartResult,
   type StateValue,
   type StatusRequest,
@@ -68,6 +70,21 @@ import {
 } from "./config-transaction.ts";
 
 const MAX_RPC_BYTES = 64 * 1024;
+
+// Plugin-owned mutable state, outside the immutable candidate tree: the role
+// bundle reads this file at session entry and injects the language only when
+// set. <stableRoot>/state is created lazily — set-language must work before
+// any activation has run.
+const LANGUAGE_FILE = join("state", "communication-language");
+function readLanguage(stableRoot: string): string | null {
+  try {
+    const value = readFileSync(join(stableRoot, LANGUAGE_FILE), "utf8").trim();
+    return value || null;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
 const MAX_CONFLICTS = 64;
 const POLL_PENDING_MS = 1000;
 const POLL_TERMINAL_MS = 0;
@@ -193,6 +210,8 @@ function bounded(output: StartResult | StatusResult): StartResult | StatusResult
           conflicts,
           verifiedAt: result.verifiedAt,
           retainedRuntimeCount: result.retainedRuntimeCount,
+          managedProfiles: result.managedProfiles,
+          communicationLanguage: cap(result.communicationLanguage, n),
           liveAcceptance: "not-established-by-this-rpc",
         };
       }
@@ -2446,6 +2465,7 @@ export function createManager(deps: ManagerDeps): Manager {
         ],
         verifiedAt: null,
         retainedRuntimeCount: 0,
+        communicationLanguage: null,
         liveAcceptance: "not-established-by-this-rpc",
       });
     }
@@ -2472,9 +2492,18 @@ export function createManager(deps: ManagerDeps): Manager {
         conflicts: [toConflict(error)],
         verifiedAt: null,
         retainedRuntimeCount: 0,
+        communicationLanguage: null,
         liveAcceptance: "not-established-by-this-rpc",
       });
     }
+    // Advisory field: a language read failure must not degrade the status.
+    const language = (() => {
+      try {
+        return readLanguage(ctx.stableRoot);
+      } catch {
+        return null;
+      }
+    })();
     let receipt: ReceiptValue | null;
     try {
       receipt = journal.read(ctx.stableRoot);
@@ -2491,6 +2520,7 @@ export function createManager(deps: ManagerDeps): Manager {
         conflicts: [toConflict(error)],
         verifiedAt: null,
         retainedRuntimeCount: 0,
+        communicationLanguage: language,
         liveAcceptance: "not-established-by-this-rpc",
       });
     }
@@ -2526,6 +2556,7 @@ export function createManager(deps: ManagerDeps): Manager {
         conflicts: boundConflicts(conflicts),
         verifiedAt: null,
         retainedRuntimeCount: 0,
+        communicationLanguage: language,
         liveAcceptance: "not-established-by-this-rpc",
       });
     }
@@ -2646,13 +2677,36 @@ export function createManager(deps: ManagerDeps): Manager {
       conflicts: boundConflicts(conflicts),
       verifiedAt: binding?.verifiedAt ?? null,
       retainedRuntimeCount: receipt.retained.length,
+      communicationLanguage: language,
       liveAcceptance: "not-established-by-this-rpc",
     });
+  }
+
+  // One atomic file write under plugin-owned state — no journal, no mutex:
+  // the role bundle reads it at the next session entry, and nothing else in
+  // the operation pipeline touches it.
+  async function setLanguage(input: unknown): Promise<SetLanguageResult> {
+    const parsed = SetLanguageInput.safeParse(input);
+    if (!parsed.success) {
+      throw new OperationConflict(
+        "INVALID_REQUEST",
+        `invalid set-language input: ${parsed.error.issues[0]?.message ?? "schema"}`,
+      );
+    }
+    const ctx = resolveHome(parsed.data.target);
+    const file = join(ctx.stableRoot, LANGUAGE_FILE);
+    if (parsed.data.value === null) {
+      rmSync(file, { force: true });
+      return { schemaVersion: 1, value: null };
+    }
+    mkdirSync(join(ctx.stableRoot, "state"), { recursive: true });
+    writeFileSync(file, `${parsed.data.value}\n`, "utf8");
+    return { schemaVersion: 1, value: parsed.data.value };
   }
 
   function close(): void {
     closed = true;
   }
 
-  return { activate, deactivate, reconcile, status, close };
+  return { activate, deactivate, reconcile, status, setLanguage, close };
 }

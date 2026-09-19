@@ -241,6 +241,7 @@ export function statusRows(view: StatusResult, options: { compact?: boolean } = 
   }
   rows.push(
     { label: "Retained runtimes", value: String(view.retainedRuntimeCount) },
+    { label: "Communication language", value: view.communicationLanguage ?? "unset (model default)" },
     // §9: this timestamp is the last verified check, not a live read.
     { label: "Last verified", value: view.verifiedAt ?? "never" },
     { label: "Live acceptance", value: liveAcceptanceLabel(view.liveAcceptance) },
