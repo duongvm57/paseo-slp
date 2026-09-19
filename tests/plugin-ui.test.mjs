@@ -5,6 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { buildSync } from 'esbuild';
 import {
   DISABLE_REMOVE_NOTICE,
@@ -407,26 +408,40 @@ test('disclosures carry the mandated meanings verbatim', () => {
 
 // --- client bundle check -------------------------------------------------------
 
+// Built once per test file — both the bundle-shape test and the routing-UI
+// structural test consume the same output.
+const clientBundle = (() => {
+  let text;
+  return () => {
+    if (text === undefined) {
+      const result = buildSync({
+        entryPoints: [join(root, 'plugin/index.client.tsx')],
+        bundle: true,
+        write: false,
+        format: 'esm',
+        platform: 'neutral',
+        logLevel: 'silent',
+        // Mirrors the host compiler's client externals (compiler.js): the plugin
+        // SDK specifiers plus the host-provided UI runtime.
+        external: [
+          '@getpaseo/plugin*',
+          'zod',
+          'react',
+          'react/jsx-runtime',
+          'react-native',
+          '@tanstack/react-query',
+        ],
+      });
+      text = result.outputFiles[0].text;
+    }
+    return text;
+  };
+})();
+
+const occurrences = (haystack, needle) => haystack.split(needle).length - 1;
+
 test('client entry bundles against host externals with no server-only or node code', () => {
-  const result = buildSync({
-    entryPoints: [join(root, 'plugin/index.client.tsx')],
-    bundle: true,
-    write: false,
-    format: 'esm',
-    platform: 'neutral',
-    logLevel: 'silent',
-    // Mirrors the host compiler's client externals (compiler.js): the plugin
-    // SDK specifiers plus the host-provided UI runtime.
-    external: [
-      '@getpaseo/plugin*',
-      'zod',
-      'react',
-      'react/jsx-runtime',
-      'react-native',
-      '@tanstack/react-query',
-    ],
-  });
-  const bundle = result.outputFiles[0].text;
+  const bundle = clientBundle();
   assert.ok(bundle.length > 0);
   // The surface and shared contracts were actually inlined.
   assert.ok(bundle.includes('Daemon home'));
@@ -448,4 +463,38 @@ test('client entry bundles against host externals with no server-only or node co
     );
   }
   assert.ok(!/index\.server|callPluginRpc/.test(bundle));
+});
+
+test('the routing UI is one card with one save and one divergence warning', () => {
+  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  const bundle = clientBundle();
+
+  // One consolidated "Role routing" card holds both role pickers; the old
+  // per-role card titles and the separate peer card are gone.
+  assert.equal(occurrences(source, '"Role routing"'), 1, 'exactly one Role routing card title');
+  assert.equal(occurrences(source, '"Supervisor routing"'), 0);
+  assert.equal(occurrences(source, '"Lead routing"'), 0);
+  assert.equal(occurrences(source, '"Peer routing"'), 0);
+  assert.ok(bundle.includes('Role routing'));
+
+  // One Save action — a single button label and a single dispatch site for
+  // the one set-role-routing call that carries both roles.
+  assert.equal(occurrences(source, '"Save routing"'), 1, 'exactly one Save routing button');
+  assert.equal(occurrences(source, 'callSetRoleRouting('), 1, 'one set-role-routing call site');
+  assert.equal(occurrences(source, 'saveRouting()'), 1, 'one save dispatch');
+
+  // The divergence warning renders once on the card, not once per role.
+  assert.equal(
+    occurrences(source, 'Stored routing differs from the live binding'),
+    1,
+    'exactly one divergence warning',
+  );
+
+  // The Activation card no longer exposes the pre-binding configurators;
+  // the routing card is the sole role→provider configurator in the UI
+  // (the RPC inputs stay for scripted use).
+  assert.equal(occurrences(source, 'Preferred provider family'), 0);
+  assert.equal(occurrences(source, 'Initial profiles'), 0);
+  assert.equal(occurrences(bundle, 'Preferred provider family'), 0);
+  assert.equal(occurrences(bundle, 'Initial profiles'), 0);
 });

@@ -21,6 +21,7 @@ import {
   View,
 } from "react-native";
 import { activate, catalog, deactivate, reconcile, status, localTarget, setLanguage, getRoleRouting, setRoleRouting } from "../shared/contracts.ts";
+import { FAMILY_IDS, FAMILY_LABEL, FAMILY_PICKER_ORDER, MANAGED_FAMILY_PREFIX_RE } from "../shared/families.ts";
 import type { CatalogOptionValue, CatalogResult, FamilyName, RoleRoutingValue, StartResult, StatusResult, TargetValue } from "../shared/contracts.ts";
 import {
   DISABLE_REMOVE_NOTICE,
@@ -52,9 +53,9 @@ import {
 } from "./manager-state.ts";
 import type { ReconcileAction, TargetView } from "./manager-state.ts";
 
-const FAMILIES: readonly FamilyName[] = ["codex", "pi", "devin", "claude"];
-const PROFILE_FAMILY_ORDER: readonly FamilyName[] = ["claude", "codex", "pi", "devin"];
-const FAMILY_LABEL: Record<FamilyName, string> = { codex: "Codex", pi: "Pi", devin: "Devin", claude: "Claude Code" };
+// Family knowledge derives from the shared registry (shared/families.ts):
+// FAMILY_IDS is the canonical order, FAMILY_PICKER_ORDER the picker order
+// (registry pickerRank), FAMILY_LABEL the display names — no local literals.
 const AUTHORITY = { exclusiveAdministrativeWindow: true, verifiedHostHomeMapping: true } as const;
 
 type Colors = PluginTheme["colors"];
@@ -449,8 +450,9 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   const [mappingConfirmed, setMappingConfirmed] = useState(false);
   const [adoptIdentical, setAdoptIdentical] = useState(false);
   const [nodePath, setNodePath] = useState("");
-  const [binaries, setBinaries] = useState<Record<FamilyName, string>>({ codex: "", pi: "", devin: "", claude: "" });
-  const [profileFamily, setProfileFamily] = useState<"auto" | FamilyName>("auto");
+  const [binaries, setBinaries] = useState<Record<FamilyName, string>>(
+    () => Object.fromEntries(FAMILY_IDS.map(family => [family, ""])) as Record<FamilyName, string>,
+  );
   const [catalogs, setCatalogs] = useState<Partial<Record<FamilyName, CatalogResult>>>({});
   const [catalogLoadingFor, setCatalogLoadingFor] = useState<FamilyName | null>(null);
   // Feature definitions depend on the selected model (the host requires a
@@ -676,7 +678,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
       const role = profile.id === "slp-supervisor" ? "supervisor"
         : profile.id === "slp-lead" ? "lead" : null;
       if (!role) continue;
-      const family = /^slp-(codex|pi|devin|claude)-/.exec(profile.provider ?? "")?.[1] ?? "";
+      const family = MANAGED_FAMILY_PREFIX_RE.exec(profile.provider ?? "")?.[1] ?? "";
       next[`${role}.family`] = family;
       next[`${role}.model`] = profile.model ?? "";
       next[`${role}.modeId`] = profile.modeId ?? "";
@@ -697,19 +699,19 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     });
   }, [statusView, prefsDirty]);
 
-  // Fetch the model/mode catalog for every family the form needs — the
-  // initial-family pick before binding, or each profile's provider family
-  // once bound. Cached per family; a failure caches an error result so the
-  // picker degrades to free text instead of retrying forever.
+  // Fetch the model/mode catalog for every family the form needs — each
+  // profile's provider family once bound, plus the routing card's picks.
+  // Cached per family; a failure caches an error result so the picker
+  // degrades to free text instead of retrying forever.
   const bound = statusView?.binding != null;
-  // Role routing cards add their two chosen families so their pickers are
+  // The role routing card adds its two chosen families so its pickers are
   // populated even when the profile form isn't editing that family.
   const neededFamilies: FamilyName[] = [...new Set([
-    ...(!bound
-      ? (profileFamily === "auto" ? [] : [profileFamily])
-      : (["supervisor", "lead"] as const)
+    ...(bound
+      ? (["supervisor", "lead"] as const)
           .map(role => pref(`${role}.family`))
-          .filter((family): family is FamilyName => (FAMILIES as string[]).includes(family))),
+          .filter((family): family is FamilyName => (FAMILY_IDS as readonly string[]).includes(family))
+      : []),
     routingForm.supervisor.family,
     routingForm.lead.family,
   ])];
@@ -744,9 +746,9 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
 
   // Feature definitions need a model — fetch per role's family|model|modeId.
   const featureKeyFor = (role: "supervisor" | "lead"): string | null => {
-    const family = bound ? pref(`${role}.family`) : profileFamily;
+    const family = pref(`${role}.family`);
     const model = pref(`${role}.model`).trim();
-    if (!model || !(FAMILIES as string[]).includes(family)) return null;
+    if (!model || !(FAMILY_IDS as readonly string[]).includes(family)) return null;
     return `${family}|${model}|${pref(`${role}.modeId`).trim()}`;
   };
   const neededFeatureKeys = (["supervisor", "lead"] as const)
@@ -860,19 +862,23 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   // accepted or succeeded operation's conflicts stay visible.
   const conflictList = visibleConflicts(view);
 
+  // One divergence signal for the whole routing card — the stored routing
+  // vs the live profile bindings, not per role.
+  const routingDiverged = routingDiverges(routing, statusView?.managedProfiles ?? []);
+
   // Human-supplied profile preferences — parsed into the wire shape; a
   // malformed feature-values JSON blocks the call before dispatch, never
-  // mid-operation. First activation sends only set fields; a bound apply
-  // sends the full desired state per role — empty fields become `null`,
-  // which clears the live value on the server.
-  const buildProfiles = (bound: boolean): { profiles?: Record<string, unknown>; error?: string } => {
+  // mid-operation. Only reachable while bound (the Agent profiles card):
+  // a bound apply sends the full desired state per role — empty fields
+  // become `null`, which clears the live value on the server.
+  const buildProfiles = (): { profiles?: Record<string, unknown>; error?: string } => {
     const out: Record<string, unknown> = {};
     for (const role of ["supervisor", "lead"] as const) {
       const label = role === "supervisor" ? "SLP Supervisor" : "SLP Lead";
       const entry: Record<string, unknown> = {};
       const model = pref(`${role}.model`).trim();
       const modeId = pref(`${role}.modeId`).trim();
-      const family = bound ? pref(`${role}.family`) : profileFamily;
+      const family = pref(`${role}.family`);
       const featuresRaw = pref(`${role}.features`).trim();
       let featuresJson: Record<string, unknown> = {};
       if (featuresRaw) {
@@ -888,8 +894,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
       }
       // Feature controls win over raw JSON for keys the provider declares;
       // keys the catalog doesn't know are preserved from the JSON base.
-      // Bound apply writes the full control state (what you see is written);
-      // first activation writes only touched controls — never bare defaults.
+      // Bound apply writes the full control state (what you see is written).
       const defs = featureDefsFor(role).defs;
       let features: Record<string, unknown> | undefined;
       if (defs.length > 0) {
@@ -897,38 +902,29 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
         for (const def of defs) {
           const raw = pref(`${role}.feature.${def.id}`);
           if (def.type === "toggle") {
-            if (bound || raw !== "") features[def.id] = raw === "" ? def.value : raw === "true";
+            features[def.id] = raw === "" ? def.value : raw === "true";
           } else if (raw !== "") {
             features[def.id] = raw;
           }
         }
-        if (!bound && Object.keys(features).length === 0) features = undefined;
       } else if (featuresRaw) {
         features = featuresJson;
       }
-      if (bound) {
-        if (!(FAMILIES as string[]).includes(family)) {
-          return { error: `${label}: pick a provider family` };
-        }
-        entry.family = family;
-        entry.model = model === "" ? null : model;
-        entry.modeId = modeId === "" ? null : modeId;
-        entry.featureValues = features === undefined ? null : features;
-        out[role] = entry;
-      } else {
-        if (model) entry.model = model;
-        if (modeId) entry.modeId = modeId;
-        if (features !== undefined) entry.featureValues = features;
-        if (Object.keys(entry).length > 0) out[role] = entry;
+      if (!(FAMILY_IDS as readonly string[]).includes(family)) {
+        return { error: `${label}: pick a provider family` };
       }
+      entry.family = family;
+      entry.model = model === "" ? null : model;
+      entry.modeId = modeId === "" ? null : modeId;
+      entry.featureValues = features === undefined ? null : features;
+      out[role] = entry;
     }
-    return Object.keys(out).length > 0 ? { profiles: out } : {};
+    return { profiles: out };
   };
 
   const activateInput = (includeProfiles: boolean): Parameters<typeof callActivate>[0] | { error: string } => {
     if (!target || !statusView) return { error: "No target" };
-    const bound = statusView.binding != null;
-    const profilesInput = includeProfiles ? buildProfiles(bound) : {};
+    const profilesInput = includeProfiles ? buildProfiles() : {};
     if (profilesInput.error) return { error: profilesInput.error };
     return {
       schemaVersion: 1,
@@ -939,15 +935,17 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
       adoptIdentical,
       ...(nodePath.trim() ? { nodePath: nodePath.trim() } : {}),
       binaries: Object.fromEntries(
-        FAMILIES.map(family => [family, binaries[family].trim()] as const).filter(([, path]) => path !== ""),
+        FAMILY_IDS.map(family => [family, binaries[family].trim()] as const).filter(([, path]) => path !== ""),
       ),
-      ...(!bound && profileFamily !== "auto" ? { initialProfileFamily: profileFamily } : {}),
+      // `initialProfileFamily` and pre-bind `profiles` stay RPC inputs for
+      // scripted use — the UI no longer sends either; the routing card is
+      // the single role→provider configurator.
       ...(profilesInput.profiles ? { profiles: profilesInput.profiles } : {}),
     };
   };
 
   const runActivate = () => {
-    const input = activateInput(!statusView?.binding);
+    const input = activateInput(false);
     if ("error" in input) { update({ lastError: input.error }, target!); return; }
     void runOperation(() => callActivate(input), input.operationId);
   };
@@ -991,17 +989,13 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     void runOperation(() => callDeactivate(input), input.operationId);
   };
 
-  // One role's editable profile fields, shared by the fresh-activation and
-  // bound editors. Bound mode also shows the per-role provider family —
-  // repointing it switches the profile to that family's managed provider.
-  const renderRoleFields = (
-    role: "supervisor" | "lead",
-    catalog: CatalogResult | undefined,
-    family: FamilyName,
-    showFamily = false,
-  ) => {
-    const familyState = statusView?.families.find(entry => entry.family === family);
+  // One role's editable profile fields in the bound "Agent profiles" card —
+  // the per-role provider family picker repoints the profile to that
+  // family's managed provider.
+  const renderRoleFields = (role: "supervisor" | "lead") => {
     const roleFamily = pref(`${role}.family`) as FamilyName;
+    const catalog = catalogs[roleFamily];
+    const familyState = statusView?.families.find(entry => entry.family === roleFamily);
     const liveProfile = statusView?.managedProfiles.find(
       entry => entry.id === `slp-${role}`,
     );
@@ -1017,24 +1011,22 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
             </Text>
           ) : null}
         </View>
-        {showFamily ? (
-          <View style={styles.field}>
-            <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Provider family</Text>
-            <ChipSelect
-              colors={colors}
-              value={roleFamily}
-              options={PROFILE_FAMILY_ORDER.map(entry => ({
-                label: FAMILY_LABEL[entry],
-                value: entry,
-              }))}
-              onChange={setPref(`${role}.family`)}
-              disabled={!canMutate}
-            />
-          </View>
-        ) : null}
-        {catalogLoadingFor === (showFamily ? roleFamily : family) ? (
+        <View style={styles.field}>
+          <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Provider family</Text>
+          <ChipSelect
+            colors={colors}
+            value={roleFamily}
+            options={FAMILY_PICKER_ORDER.map(entry => ({
+              label: FAMILY_LABEL[entry],
+              value: entry,
+            }))}
+            onChange={setPref(`${role}.family`)}
+            disabled={!canMutate}
+          />
+        </View>
+        {catalogLoadingFor === roleFamily ? (
           <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-            Loading {FAMILY_LABEL[showFamily ? roleFamily : family] ?? ""} catalog…
+            Loading {FAMILY_LABEL[roleFamily] ?? ""} catalog…
           </Text>
         ) : null}
         {catalog?.error ? (
@@ -1135,7 +1127,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
             disabled={!canMutate}
           />
         )}
-        {showFamily && familyState?.availability === "unavailable" ? (
+        {familyState?.availability === "unavailable" ? (
           <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
             {FAMILY_LABEL[roleFamily] ?? roleFamily} is unavailable on this daemon — the apply is rejected until it resolves.
           </Text>
@@ -1252,30 +1244,35 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
       ) : null}
 
       {statusView ? (
-        // Phase 1 role routing: one card per role. The stored routing selects
-        // which managed provider each managed profile binds to at the NEXT
-        // activation — saving never activates on its own, and a divergence
-        // between the stored routing and the live binding is surfaced as a
-        // re-activation-required notice instead.
-        <>
+        // Phase 1 role routing: ONE card holds both role pickers behind one
+        // Save — a single set-role-routing call carrying the full routing
+        // object (saveRouting always builds both roles). The stored routing
+        // selects which managed provider each managed profile binds to at
+        // the NEXT activation — saving never activates on its own, and a
+        // divergence between the stored routing and the live binding shows
+        // once on the card as a re-activation-required notice. The peer note
+        // lives inside this card because it scopes what routing does NOT
+        // configure; a separate card would orphan one line of disclosure.
+        <Card
+          colors={colors}
+          title="Role routing"
+          subtitle="Which managed provider each role's saved profile binds to — applied at the next activation, never on save."
+        >
           {(["supervisor", "lead"] as const).map(role => {
             const form = routingForm[role];
             const roleCatalog = catalogs[form.family];
             const disabled = !target || routingBusy;
-            const diverged = routingDiverges(routing, statusView.managedProfiles);
             return (
-              <Card
-                key={role}
-                colors={colors}
-                title={role === "supervisor" ? "Supervisor routing" : "Lead routing"}
-                subtitle="Which managed provider the role's saved profile binds to — applied at the next activation, never on save."
-              >
+              <View key={role} style={[styles.roleBox, { borderColor: colors.border }]}>
+                <Text style={[styles.roleTitle, { color: colors.foreground }]}>
+                  {role === "supervisor" ? "SLP Supervisor" : "SLP Lead"}
+                </Text>
                 <View style={styles.field}>
                   <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Provider family</Text>
                   <ChipSelect
                     colors={colors}
                     value={form.family}
-                    options={PROFILE_FAMILY_ORDER.map(entry => ({
+                    options={FAMILY_PICKER_ORDER.map(entry => ({
                       label: FAMILY_LABEL[entry],
                       value: entry,
                     }))}
@@ -1343,31 +1340,26 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                     disabled={disabled}
                   />
                 )}
-                {diverged ? (
-                  <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
-                    Stored routing differs from the live binding — re-activation required. Run
-                    {statusView ? ` ${activationLabel(statusView)}` : " Activate"} to apply it; nothing activates on save.
-                  </Text>
-                ) : null}
-                <Button
-                  colors={colors}
-                  label={routingBusy ? "Saving…" : "Save routing"}
-                  disabled={disabled || !routingDirty}
-                  onPress={() => void saveRouting()}
-                />
-              </Card>
+              </View>
             );
           })}
-          <Card
-            colors={colors}
-            title="Peer routing"
-            subtitle="Peers are pool-driven — each Lead delegation picks a family, so all four managed peer providers stay generated."
-          >
-            <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-              No per-peer selection: the supervisor and lead picks above are the only routed roles.
+          <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+            Peers are pool-driven — each Lead delegation picks a family, so all four managed
+            peer providers stay generated; the picks above are the only routed roles.
+          </Text>
+          {routingDiverged ? (
+            <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
+              Stored routing differs from the live binding — re-activation required. Run
+              {` ${activationLabel(statusView)}`} to apply it; nothing activates on save.
             </Text>
-          </Card>
-        </>
+          ) : null}
+          <Button
+            colors={colors}
+            label={routingBusy ? "Saving…" : "Save routing"}
+            disabled={!target || routingBusy || !routingDirty}
+            onPress={() => void saveRouting()}
+          />
+        </Card>
       ) : null}
 
       {statusView ? (
@@ -1441,40 +1433,11 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
           {EXCLUSIVE_WINDOW_NOTICE}
         </Text>
         {!statusView?.binding ? (
-          <View style={styles.field}>
-            <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Preferred provider family</Text>
-            <ChipSelect
-              colors={colors}
-              value={profileFamily}
-              options={[
-                { label: "Automatic", value: "auto" as const },
-                ...PROFILE_FAMILY_ORDER.map(family => ({ label: FAMILY_LABEL[family], value: family })),
-              ]}
-              onChange={setProfileFamily}
-              disabled={!canMutate}
-            />
-            <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-              Applied to the profiles created on first activation.
-            </Text>
-          </View>
-        ) : null}
-        {!statusView?.binding && profileFamily !== "auto" ? (
-          <View style={styles.field}>
-            <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Initial profiles</Text>
-            <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-              Optional — unset fields are assigned afterward in Settings → Agents → Agent profiles.
-            </Text>
-            {(["supervisor", "lead"] as const).map(role =>
-              renderRoleFields(role, catalogs[profileFamily], profileFamily),
-            )}
-          </View>
-        ) : null}
-        {!statusView?.binding ? (
           <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-            Activation creates the SLP Supervisor and SLP Lead agent profiles, bound to
-            the selected family (Automatic picks the first enabled, available family).
-            Model, mode, and feature values are assigned afterward in
-            Settings → Agents → Agent profiles.
+            Activation creates the SLP Supervisor and SLP Lead agent profiles, bound per
+            the stored role routing above — an unrouted role falls back to the first
+            enabled, available family. Model, mode, and feature values are assigned
+            afterward in Settings → Agents → Agent profiles.
           </Text>
         ) : null}
         <Button
@@ -1492,9 +1455,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
           title="Agent profiles"
           subtitle="The two managed profiles — applied through the same exclusive-window operation as any other change."
         >
-          {(["supervisor", "lead"] as const).map(role =>
-            renderRoleFields(role, catalogs[pref(`${role}.family`) as FamilyName], pref(`${role}.family`) as FamilyName, true),
-          )}
+          {(["supervisor", "lead"] as const).map(role => renderRoleFields(role))}
           {view.lastError ? (
             <Text style={[styles.mutedSmall, { color: colors.statusDanger }]}>{view.lastError}</Text>
           ) : null}
@@ -1548,7 +1509,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
           placeholder="/usr/bin/node"
           disabled={!canMutate}
         />
-        {FAMILIES.map(family => (
+        {FAMILY_IDS.map(family => (
           <Field
             key={family}
             colors={colors}

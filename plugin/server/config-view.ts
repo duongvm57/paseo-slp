@@ -19,28 +19,25 @@ import {
   type SnapshotValue,
 } from "../shared/contracts.ts";
 
-// Domain constants duplicated from src/profiles.mjs / src/binding.mjs — the
-// plugin bundle may not import ../src/*.mjs across the plugin boundary (§2).
-export const FAMILIES = ["codex", "pi", "devin", "claude"] as const;
-export type FamilyName = (typeof FAMILIES)[number];
-export const ROLES = ["supervisor", "lead", "peer"] as const;
-export type RoleName = (typeof ROLES)[number];
-export const OWNED_PROVIDER_IDS: string[] = FAMILIES.flatMap(family =>
-  ROLES.map(role => `slp-${family}-${role}`),
-).sort();
+// Domain constants derive from the shared family registry
+// (../shared/families.ts) — the plugin bundle may not import ../src/*.mjs
+// across the plugin boundary (§2), and there is no second literal family
+// list. The historical export names stay so consumers keep one import site.
+import {
+  FAMILY_IDS,
+  OWNED_PROVIDER_ID_RE,
+  OWNED_PROVIDER_IDS,
+  PROVIDER_EXTENDS,
+  ROLES,
+  type FamilyId,
+  type RoleName,
+} from "../shared/families.ts";
+export { OWNED_PROVIDER_IDS, PROVIDER_EXTENDS, ROLES };
+export const FAMILIES = FAMILY_IDS;
+export type FamilyName = FamilyId;
+export type { RoleName };
+
 export const OWNED_PROFILE_IDS = ["slp-supervisor", "slp-lead"];
-export const PROVIDER_EXTENDS: Record<FamilyName, string> = {
-  codex: "codex",
-  pi: "pi",
-  devin: "acp",
-  claude: "claude",
-};
-export const FAMILY_DISPLAY: Record<FamilyName, string> = {
-  codex: "Codex",
-  pi: "Pi",
-  devin: "Devin",
-  claude: "Claude Code",
-};
 export const ROLE_DISPLAY: Record<RoleName, string> = {
   supervisor: "Supervisor",
   lead: "Lead",
@@ -48,7 +45,7 @@ export const ROLE_DISPLAY: Record<RoleName, string> = {
 };
 
 export function providerExtendsForId(id: string): string | null {
-  const match = /^slp-(codex|pi|devin|claude)-(supervisor|lead|peer)$/.exec(id);
+  const match = OWNED_PROVIDER_ID_RE.exec(id);
   return match ? PROVIDER_EXTENDS[match[1] as FamilyName] : null;
 }
 

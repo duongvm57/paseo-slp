@@ -247,3 +247,73 @@ Option A management plane (exclusive window, journal, receipt, reconcile,
 immutable candidates) are unchanged. This is a distribution/UX refactor of
 how role→provider is chosen and how instructions reach three of the four
 families — not a behavior redesign.
+
+## 9. Family registry and consolidated routing surface (implemented)
+
+Post-refactor, `plugin/shared/families.ts` is the single source of truth
+for the family domain. Every family list, label map, provider-id regex,
+hook/wrapper classification, `extends` target, binary env name, zod enum
+and picker order in `plugin/` derives from that one table — no second
+literal list exists downstream. The registry is pure data plus derived
+constants with zero imports, so the client bundle can import it under the
+same host-compiler boundary as `contracts.ts` (no node builtins).
+
+Registry entry shape (chosen over the brief's minimal
+`{id, label, transport, binEnv}` sketch):
+
+```ts
+{ id, label, transport: "hook" | "wrapper", binEnv, extends, pickerRank }
+```
+
+- `extends` records the base provider a generated `slp-*` entry extends
+  (devin extends `acp`; the others extend their own id) — it was already
+  duplicated across config-view and the OwnedProvider schema domain.
+- `pickerRank` records the UI picker's display order separately from the
+  canonical declaration order, because the two orders differed before the
+  refactor and both were load-bearing.
+
+### Adding a family
+
+After this refactor the remaining steps are exactly three:
+
+1. **Registry entry** — append one entry to `FAMILIES` in
+   `plugin/shared/families.ts`. Every downstream list, regex, schema
+   enum, env map and picker derives automatically; the derivation tests
+   in `tests/plugin-families.test.mjs` verify that claim.
+2. **Executable detection** — teach the resolver the new binary:
+   `plugin/server/executables.ts` probe/recognition logic (binary name,
+   version probe, any wrapper quirks).
+3. **Payload regen** — the payload keeps its own family knowledge on
+   purpose (`bin/`, `src/` must not import the plugin registry; the
+   shipped shim validates recorded family/role sets independently). Add
+   the payload-side role wrapper/gate handling as needed, then run
+   `npm run generate:plugin-payload` so
+   `plugin/server/generated/runtime-payload.ts` is rebuilt and
+   `npm run check:plugin-payload` passes.
+
+### Either/or decisions taken
+
+- **Registry filename** — `plugin/shared/families.ts` (the brief's
+  preferred name); it sits beside `contracts.ts` under the same
+  shared-module boundary.
+- **Canonical `FAMILIES` home** — the registry itself. `launchers.ts`,
+  `executables.ts` and `config-view.ts` re-export `FAMILIES`/`ROLES`/
+  `OWNED_PROVIDER_IDS`/`PROVIDER_EXTENDS` under their historical names
+  so existing consumers keep one import site; nothing defines a literal.
+- **Peer note placement** — inside the "Role routing" card, not a
+  separate card: the note scopes what routing does not configure and a
+  separate card would orphan one line of disclosure.
+- **Routing surface shape** — one "Role routing" card carrying the
+  supervisor and lead pickers behind a single Save that issues one
+  `set-role-routing` call (the RPC payload is the full routing object
+  anyway). The divergence warning renders once on the card, not per role.
+- **"Preferred provider family" / "Initial profiles"** — removed from the
+  Activation card by explicit human decision. Routing is the sole UI
+  configurator for role→provider; the `profiles` and
+  `initialProfileFamily` RPC inputs remain supported for scripted and
+  advanced use. Accepted trade-off: the pre-binding UI no longer edits
+  `featureValues`/`thinkingOptionId` either — post-binding edits remain
+  available on the "Agent profiles" card.
+- **Payload coupling** — `bin/`/`src/` deliberately do not import the
+  registry; `npm run check:plugin-payload` verifies the embedded payload
+  stays byte-identical unless deliberately regenerated.

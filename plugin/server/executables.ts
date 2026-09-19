@@ -24,7 +24,11 @@ import type {
   ResolvedNode,
 } from "../shared/contracts.ts";
 
-export const FAMILIES: readonly FamilyName[] = ["codex", "pi", "devin", "claude"];
+import { FAMILY_IDS } from "../shared/families.ts";
+
+// The family set derives from the shared registry (families.ts) — the export
+// keeps its historical name so existing imports keep working.
+export const FAMILIES: readonly FamilyName[] = FAMILY_IDS;
 const MIN_NODE_MAJOR = 22;
 const PROBE_TIMEOUT_MS = 5000;
 const PROBE_MAX_BUFFER = 64 * 1024;

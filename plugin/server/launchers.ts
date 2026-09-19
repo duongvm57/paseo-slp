@@ -47,10 +47,13 @@ import type {
   LaunchSet,
   LaunchSetRequest,
 } from "../shared/contracts.ts";
+import { FAMILY_IDS, HOOK_FAMILY_IDS, ROLES, type RoleName } from "../shared/families.ts";
 
-export const FAMILIES: readonly FamilyName[] = ["codex", "pi", "devin", "claude"];
-export const ROLES = ["supervisor", "lead", "peer"] as const;
-type Role = (typeof ROLES)[number];
+// The family/role axes derive from the shared registry (families.ts) — the
+// exports keep their historical names so existing imports keep working.
+export const FAMILIES: readonly FamilyName[] = FAMILY_IDS;
+export { ROLES };
+type Role = RoleName;
 export const LAUNCHER_MODE = 0o755;
 export const MANIFEST_MODE = 0o644;
 const PRIVATE_DIR_MODE = 0o700;
@@ -59,9 +62,10 @@ const SHIM_RELATIVE_PATH = join("bin", "slp-shim.mjs");
 const GATE_RELATIVE_PATH = join("bin", "slp-gate.mjs");
 
 /** Phase 2: families whose launchers exec the sentinel gate instead of the
- *  shim+wrapper (see the file header). Devin is absent — its ACP adapter
- *  drops systemPrompt, so slp-devin-* keeps the full shim path. */
-export const GATE_FAMILIES: readonly FamilyName[] = ["codex", "pi", "claude"];
+ *  shim+wrapper (see the file header) — the registry's `transport === "hook"`
+ *  entries. Devin is absent — its ACP adapter drops systemPrompt, so
+ *  slp-devin-* keeps the full shim path. */
+export const GATE_FAMILIES: readonly FamilyName[] = HOOK_FAMILY_IDS;
 
 interface LaunchManifest {
   schemaVersion: 1;

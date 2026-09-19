@@ -40,8 +40,14 @@ import {
   type RoleRoutingValue,
 } from "../shared/contracts.ts";
 import {
+  FAMILY_BIN_ENV,
+  FAMILY_LABEL,
+  HOOK_FAMILY_IDS,
+  OWNED_PROVIDER_ID_RE,
+  ownedProviderId,
+} from "../shared/families.ts";
+import {
   FAMILIES,
-  FAMILY_DISPLAY,
   OWNED_PROFILE_IDS,
   OWNED_PROVIDER_IDS,
   PROVIDER_EXTENDS,
@@ -440,8 +446,6 @@ export function assertPersistedCompatible(rawJson: unknown): void {
 // label/profile conventions, duplicated per the no-cross-boundary rule)
 // ---------------------------------------------------------------------------
 
-const ownedProviderId = (family: FamilyName, role: string) => `slp-${family}-${role}`;
-
 /** Hook-injected families (settings-driven-providers.md §6 Phase 2): their
  *  provider entries are sentinel-gated thin aliases — `slp-*` identity +
  *  native `extends`, no shim, no wrapper. The alias keeps agent.provider as
@@ -456,8 +460,9 @@ const ownedProviderId = (family: FamilyName, role: string) => `slp-${family}-${r
  *  spawn unroled during a hook gap (plugin disabled or reloading), so the
  *  sentinel is mandatory. Devin is absent from this set: the ACP adapter
  *  drops systemPrompt, so slp-devin-* keeps the existing shim+wrapper
- *  launcher transport. */
-const HOOK_GATE_FAMILIES: ReadonlySet<FamilyName> = new Set(["codex", "pi", "claude"]);
+ *  launcher transport. The set is the registry's `transport === "hook"`
+ *  entries — no second literal list. */
+const HOOK_GATE_FAMILIES: ReadonlySet<FamilyName> = new Set(HOOK_FAMILY_IDS);
 
 function desiredProviderEnv(
   family: FamilyName,
@@ -465,7 +470,7 @@ function desiredProviderEnv(
 ): Record<string, string> {
   return {
     SLP_SESSION_OPEN_GRANT: "",
-    [`SLP_${family.toUpperCase()}_BIN`]: args.binaryPath ?? "",
+    [FAMILY_BIN_ENV[family]]: args.binaryPath ?? "",
     SLP_RUNTIME_ROOT: args.runtimePath,
     SLP_NODE_BIN: args.nodePath,
     SLP_DAEMON_HOME: args.daemonHome,
@@ -526,7 +531,7 @@ export function desiredProviderEntries(
       // overlays and SLP_FAMILY_BIN — the launcher's baked export is the
       // probe-time source, the env copy is the spawn-time source.
       entries[id] = {
-        extends: PROVIDER_EXTENDS[family] as OwnedProviderValue["extends"],
+        extends: PROVIDER_EXTENDS[family],
         label: `${family} — ${ROLE_DISPLAY[role]} (SLP)`,
         command: [launcherPathFor(launchSet, id)],
         env: {
@@ -543,8 +548,8 @@ export function desiredProviderEntries(
       continue;
     }
     entries[id] = {
-      extends: PROVIDER_EXTENDS[family] as OwnedProviderValue["extends"],
-      label: `SLP ${FAMILY_DISPLAY[family]} ${ROLE_DISPLAY[role]}`,
+      extends: PROVIDER_EXTENDS[family],
+      label: `SLP ${FAMILY_LABEL[family]} ${ROLE_DISPLAY[role]}`,
       command: [launcherPathFor(launchSet, id)],
       env: desiredProviderEnv(family, {
         runtimePath,
@@ -1061,7 +1066,7 @@ function validateOwnedProfilesForRebind(
     const entry = matches[0] as Record<string, unknown>;
     const provider = entry.provider;
     const providerMatch = typeof provider === "string"
-      ? /^slp-(codex|pi|devin|claude)-(supervisor|lead|peer)$/.exec(provider)
+      ? OWNED_PROVIDER_ID_RE.exec(provider)
       : null;
     if (
       providerMatch === null ||

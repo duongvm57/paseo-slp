@@ -46,6 +46,7 @@ import {
   type StatusResult,
 } from "../shared/contracts.ts";
 import { createJournal, emptyReceipt, findOperation, pendingOperation } from "./journal.ts";
+import { OWNED_PROVIDER_ID_RE } from "../shared/families.ts";
 import {
   FAMILIES,
   OWNED_PROVIDER_IDS,
@@ -1702,7 +1703,7 @@ export function createManager(deps: ManagerDeps): Manager {
             // an available same-role SLP provider.
             const provider = isRecord(current) ? current.provider : undefined;
             const match = typeof provider === "string"
-              ? /^slp-(codex|pi|devin|claude)-(supervisor|lead|peer)$/.exec(provider)
+              ? OWNED_PROVIDER_ID_RE.exec(provider)
               : null;
             const role = slot.value.id === "slp-supervisor" ? "supervisor" : "lead";
             if (

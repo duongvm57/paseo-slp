@@ -2,6 +2,7 @@
 // No react/host imports: this module is unit-tested directly under node, and
 // the client bundle check proves it pulls in no server-only or node code.
 import { AbsolutePath, Id } from "../shared/contracts.ts";
+import { OWNED_PROVIDER_ID_RE, ownedProviderId } from "../shared/families.ts";
 import type {
   ConflictValue,
   FamilyViewValue,
@@ -307,7 +308,7 @@ export function routingDiverges(
     const choice = routing[role];
     const live = managedProfiles.find(profile => profile.id === `slp-${role}`);
     if (!live) continue;
-    if (live.provider !== `slp-${choice.family}-${role}`) return true;
+    if (live.provider !== ownedProviderId(choice.family, role)) return true;
     if (choice.model !== undefined && live.model !== choice.model) return true;
     if (choice.modeId !== undefined && live.modeId !== choice.modeId) return true;
     if (choice.thinkingOptionId !== undefined && live.thinkingOptionId !== choice.thinkingOptionId) return true;
@@ -322,7 +323,7 @@ export function routingDiverges(
 /** Family parsed out of a managed `slp-<family>-<role>` provider id, or null
  *  for anything else — used to prefill routing pickers from live profiles. */
 export function familyFromProviderId(provider: string | null | undefined): string | null {
-  return /^slp-(codex|pi|devin|claude)-(?:supervisor|lead|peer)$/.exec(provider ?? "")?.[1] ?? null;
+  return OWNED_PROVIDER_ID_RE.exec(provider ?? "")?.[1] ?? null;
 }
 
 // The view patch a start response produces. Conflicts are surfaced whenever

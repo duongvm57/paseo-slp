@@ -9,6 +9,7 @@
 
 import { z } from "zod";
 import { defineRpc } from "@getpaseo/plugin";
+import { FAMILY_IDS, OWNED_PROVIDER_ID_RE, PROVIDER_EXTENDS_IDS } from "./families.ts";
 
 // ---------------------------------------------------------------------------
 // §3 wire schemas
@@ -17,7 +18,14 @@ import { defineRpc } from "@getpaseo/plugin";
 export const Sha = z.string().regex(/^[0-9a-f]{64}$/);
 export const Time = z.string().datetime({ offset: true });
 export const Id = z.string().uuid();
-export const Family = z.enum(["codex", "pi", "devin", "claude"]);
+// The family domain derives from the shared registry (families.ts) — adding a
+// family is a registry entry, not an edit here. The inferred FamilyName union
+// is unchanged (the registry ids are the previous literal enum).
+export const Family = z.enum(FAMILY_IDS);
+/** One schema keyed per registry family — keeps `binaries` shapes aligned
+ *  with the family set; the inferred type stays Record<FamilyName, …>. */
+const familyKeyed = <S extends z.ZodType>(schema: S): Record<FamilyName, S> =>
+  Object.fromEntries(FAMILY_IDS.map(id => [id, schema])) as Record<FamilyName, S>;
 export const AbsolutePath = z.string().min(1).max(4096)
   .refine(s => !s.includes("\0") && /^(\/|[A-Za-z]:[\\/]|\\\\)/.test(s));
 export const Target = z.object({
@@ -88,10 +96,7 @@ export const ActivateInput = Start.extend({
   candidateSha256: Sha,
   adoptIdentical: z.boolean().default(false),
   nodePath: AbsolutePath.optional(),
-  binaries: z.object({
-    codex: AbsolutePath.optional(), pi: AbsolutePath.optional(),
-    devin: AbsolutePath.optional(), claude: AbsolutePath.optional(),
-  }).strict().default({}),
+  binaries: z.object(familyKeyed(AbsolutePath.optional())).strict().default({}),
   initialProfileFamily: Family.optional(),
   profiles: z.object({
     supervisor: ProfilePrefs.optional(),
@@ -143,7 +148,7 @@ export const StatusOutput = z.object({
   embeddedCandidateSha256: Sha,
   binding: BindingView.nullable(),
   managedProfiles: z.array(ManagedProfileView).max(2),
-  families: z.array(FamilyView).length(4),
+  families: z.array(FamilyView).length(FAMILY_IDS.length),
   operation: OperationView.nullable(),
   conflicts: z.array(Conflict).max(64),
   verifiedAt: Time.nullable(),
@@ -292,7 +297,7 @@ export const setRoleRouting = defineRpc({ name: "set-role-routing", input: SetRo
 // ---------------------------------------------------------------------------
 
 export const Json = z.json();
-export const ProviderId = z.string().regex(/^slp-(codex|pi|devin|claude)-(supervisor|lead|peer)$/);
+export const ProviderId = z.string().regex(OWNED_PROVIDER_ID_RE);
 export const Presence = <T extends z.ZodType>(value: T) => z.discriminatedUnion("present", [
   z.object({ present: z.literal(false) }).strict(),
   z.object({ present: z.literal(true), value }).strict(),
@@ -307,7 +312,7 @@ export const Profile = z.object({
   notes: z.string().optional(),
 }).catchall(Json);
 export const OwnedProvider = z.object({
-  extends: z.enum(["codex", "pi", "acp", "claude"]),
+  extends: z.enum(PROVIDER_EXTENDS_IDS),
   label: z.string(),
   // argv of one or two absolute elements. Every generated entry is
   // single-element — the launch-set launcher argv[0] (the host's argv0
@@ -356,7 +361,7 @@ export const Binding = z.object({
   // carry the per-file kind.
   launcherFiles: z.array(LauncherFile).min(1),
   node: z.object({ path: AbsolutePath, version: z.string().min(1) }).strict(),
-  binaries: z.object({ codex: Binary, pi: Binary, devin: Binary, claude: Binary }).strict(),
+  binaries: z.object(familyKeyed(Binary)).strict(),
   baseline: z.enum(["fresh", "adopted-observed"]),
   beforeActivation: Snapshot,
   mcpBefore: z.object({ enabled: FlagBefore, injectIntoAgents: FlagBefore }).strict(),

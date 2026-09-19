@@ -41,6 +41,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { PluginBeforeRequests } from "@getpaseo/plugin/server";
+import { HOOK_PROVIDER_ID_RE, ROLES, WRAPPER_PROVIDER_ID_RE } from "../shared/families.ts";
 
 type AgentCreateRequest = PluginBeforeRequests["agent.create"];
 type SessionOpenRequest = PluginBeforeRequests["agent.session_open"];
@@ -88,9 +89,11 @@ export interface RoleInjectionDeps {
   grantToken?: (request: { agentId: string; reason: string }) => string;
 }
 
-const HOOK_FAMILY_PROVIDER = /^slp-(codex|pi|claude)-(supervisor|lead|peer)$/;
-const DEVIN_PROVIDER = /^slp-devin-(supervisor|lead|peer)$/;
-const VALID_ROLES = new Set(["supervisor", "lead", "peer"]);
+// The id classes derive from the family registry (shared/families.ts): hook
+// transport = thin alias + gate launcher; wrapper transport = devin's shim.
+const HOOK_FAMILY_PROVIDER = HOOK_PROVIDER_ID_RE;
+const DEVIN_PROVIDER = WRAPPER_PROVIDER_ID_RE;
+const VALID_ROLES = new Set<string>(ROLES);
 
 /** Resolve the role a provider id carries, or null for pass-through
  *  providers (non-slp and the devin wrapper path). Every other slp-* id must
