@@ -6,12 +6,12 @@
 // daemon, and a hard failure when no exact home is supplied.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { install, json, hash } from '../src/package.mjs';
-import { roleBundle } from '../src/role-bundle.mjs';
+import { roleBundle, policyLocators } from '../src/role-bundle.mjs';
 import { verifyProvider } from '../src/binding.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -156,8 +156,14 @@ test('role instructions carry the spawn kit and policy locators at session entry
   const lead = roleBundle(installed, 'lead', {});
   assert.match(lead.instructions, /\nSpawn kit — role-scoped Paseo MCP signatures \(approximate; verify against live mcp_list_tools\):\n/);
   assert.ok(lead.instructions.includes('- create_agent(title: string'));
-  // Declared policy absent from the install keeps its missing marker.
-  assert.ok(lead.instructions.includes(`- ${join(installed, 'docs/contract.md')} — declared but not shipped in this install`));
+  // The locator set derives from the install receipt: docs/contract.md lives
+  // outside the install unit and is never declared.
+  assert.ok(!lead.instructions.includes('docs/contract.md'));
+  // A receipt-declared policy file missing from disk keeps its missing marker
+  // instead of vanishing from the list.
+  rmSync(join(installed, 'src/references/review-gates.md'));
+  const missing = roleBundle(installed, 'lead', {});
+  assert.ok(missing.instructions.includes(`- ${join(installed, 'src/references/review-gates.md')} — declared but missing on disk`));
   const common = readFileSync(join(installed, 'src/common.md'));
   assert.ok(lead.instructions.includes(`- ${join(installed, 'src/common.md')} — ${common.length} bytes, sha256 ${hash(common)}`));
   // Session-entry caption: measured at load, never plan-time/prepare wording.
@@ -183,6 +189,64 @@ test('role instructions carry the spawn kit and policy locators at session entry
   const bare = roleBundle(installed, 'lead', {}, { carrier: false });
   assert.ok(!bare.instructions.includes('Spawn kit —'));
   assert.ok(!bare.instructions.includes('Policy locators —'));
+});
+
+test('policyLocators validates role, tolerates absent optional paths and refuses corrupt or symlinked policy', t => {
+  const dir = fixture(t), installed = join(dir, 'release');
+  install(root, installed);
+  // Role is validated at call time, not by a downstream path lookup.
+  assert.throws(() => policyLocators(installed, 'engineer'), /Unknown role/);
+  // A source checkout without a receipt scans the tree live.
+  const source = policyLocators(root, 'peer');
+  assert.ok(source.some(entry => entry.path === join(root, 'src/roles/peer.md') && entry.sha256));
+  // src/references being a plain file is an ENOTDIR absence, not a crash.
+  const bare = join(dir, 'bare');
+  mkdirSync(bare);
+  mkdirSync(join(bare, 'src'));
+  writeFileSync(join(bare, 'src/references'), 'not a directory');
+  const locators = policyLocators(bare, 'lead');
+  assert.equal(locators.length, 3);
+  assert.ok(locators.every(entry => entry.missing === true));
+  // A receipt that parses but has no candidate list is corrupt, not absent.
+  writeFileSync(join(bare, 'installed.json'), '{}\n');
+  assert.throws(() => policyLocators(bare, 'lead'), /lacks a candidate file list/);
+  writeFileSync(join(bare, 'installed.json'), 'not json');
+  assert.throws(() => policyLocators(bare, 'lead'), SyntaxError);
+  // A symlinked policy path is an integrity failure, never absence.
+  rmSync(join(installed, 'src/common.md'));
+  symlinkSync(join(installed, 'src/roles/lead.md'), join(installed, 'src/common.md'));
+  assert.throws(() => policyLocators(installed, 'lead'), /is a symlink/);
+});
+
+test('instructions <role> prints the exact bundle bytes on stdout and metadata on stderr', t => {
+  const dir = fixture(t), installed = join(dir, 'release');
+  install(root, installed);
+  const env = { PATH: process.env.PATH };
+  const run = (bin, role, extraEnv = {}) => spawnSync(process.execPath, [bin, 'instructions', role], { encoding: 'utf8', env: { ...env, ...extraEnv } });
+  // Installed unmanaged render: stdout is byte-identical to roleBundle.
+  const lead = run(join(installed, 'bin/slp.mjs'), 'lead');
+  assert.equal(lead.status, 0);
+  assert.equal(lead.stdout, roleBundle(installed, 'lead', {}).instructions);
+  assert.match(lead.stderr, /role: lead/);
+  assert.match(lead.stderr, /managed: false/);
+  // Managed render uses the exact env-provided runtime/node/home.
+  const managedEnv = { SLP_MANAGED_RUNTIME: '1', SLP_NODE_BIN: '/n/bin/node', SLP_RUNTIME_ROOT: installed, SLP_DAEMON_HOME: '/h' };
+  const managed = run(join(installed, 'bin/slp.mjs'), 'peer', managedEnv);
+  assert.equal(managed.status, 0);
+  assert.equal(managed.stdout, roleBundle(installed, 'peer', managedEnv).instructions);
+  assert.match(managed.stderr, /managed: true/);
+  // A broken managed env fails closed instead of rendering.
+  const broken = run(join(installed, 'bin/slp.mjs'), 'lead', { SLP_MANAGED_RUNTIME: '1' });
+  assert.equal(broken.status, 1);
+  // Source checkout: bytes render, stderr flags them as non-live preview.
+  const source = run(join(root, 'bin/slp.mjs'), 'peer');
+  assert.equal(source.status, 0);
+  assert.equal(source.stdout, roleBundle(root, 'peer', {}).instructions);
+  assert.match(source.stderr, /source checkout/);
+  // Unknown role fails.
+  const bad = run(join(installed, 'bin/slp.mjs'), 'bogus');
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /Unknown role/);
 });
 
 test('managed bundles carry the review-gate invariant and Lead trigger; Peer carries neither', t => {

@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { fileURLToPath } from 'node:url';
-import { resolve, isAbsolute } from 'node:path';
+import { resolve, isAbsolute, join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { identity, install, uninstall, update, verifyInstall, snapshot, readJson, json } from '../src/package.mjs';
 import { launchPlan, handoffPlan } from '../src/launch.mjs';
+import { roleBundle } from '../src/role-bundle.mjs';
 import { readCatalog } from '../src/routing.mjs';
 import { resolveHome } from '../src/managed-home.mjs';
 import { installPaseo, uninstallPaseo, upgradePaseo, initWorkspace, materializeWorkspace, installHome } from '../src/paseo-install.mjs';
@@ -38,7 +39,7 @@ try {
   if (command === 'upgrade' && !options['--from']) throw new Error('upgrade requires --from <previous-installation>');
   if (command === 'materialize' && !options['--from']) throw new Error('materialize requires --from <source-repository>');
   if (options['--reload'] && !options['--apply']) throw new Error('--reload requires --apply');
-  const targetArg = { snapshot: 'repository', verify: 'dir', prepare: 'request.json', 'prepare-handoff': 'request.json', routes: 'repository', init: 'repository', materialize: 'repository', monitor: 'request.json', notebook: 'repository' };
+  const targetArg = { snapshot: 'repository', verify: 'dir', prepare: 'request.json', 'prepare-handoff': 'request.json', routes: 'repository', init: 'repository', materialize: 'repository', monitor: 'request.json', notebook: 'repository', instructions: 'role' };
   if (targetArg[command] && !target) throw new Error(`${command} requires <${targetArg[command]}>`);
   if (target && !targetArg[command] && !['install', 'uninstall', 'upgrade'].includes(command)) throw new Error(`${command} takes no arguments`);
   let result;
@@ -53,6 +54,19 @@ try {
   else if (command === 'init') result = initWorkspace(root, target, Boolean(options['--apply']), options['--routing-from']);
   else if (command === 'materialize') result = materializeWorkspace(options['--from'], target, Boolean(options['--apply']));
   else if (command === 'monitor') result = monitor(readJson(target));
+  else if (command === 'instructions') {
+    // Raw preview: the exact bytes roleBundle would inject, unwrapped — stdout
+    // stays diffable against a live bundle; provenance goes to stderr. A
+    // managed render already reads SLP_* env (exact Node/runtime/home, and the
+    // language state file at render time) and fails closed when they are
+    // absent; a source-checkout render is a preview, never the bytes a live
+    // shim emitted.
+    const managed = process.env.SLP_MANAGED_RUNTIME === '1';
+    const installed = existsSync(join(root, 'installed.json'));
+    process.stderr.write(`instructions preview — role: ${target}, root: ${root}, managed: ${managed}\n`);
+    if (!installed) process.stderr.write('note: source checkout — these bytes come from this tree, not from a live managed shim render\n');
+    process.stdout.write(roleBundle(root, target, process.env).instructions);
+  }
   else if (command === 'notebook') result = notebook(target, options['--paseo-home']);
   else if (command === 'install' || command === 'uninstall' || command === 'upgrade') {
     if (command === 'install' && !target) target = process.env.SLP_HOME || installHome();
@@ -81,6 +95,6 @@ try {
         process.exitCode = 1;
       }
     }
-  } else throw new Error('Usage: slp.mjs identity | snapshot <repo> | install [absolute-dir] [--paseo-home <absolute-home>] [--apply] [--reload] | upgrade <absolute-new-dir> --from <previous-installation> [--apply] [--reload] | verify <dir> | uninstall <dir> [--apply] [--reload] | init <absolute-repo> [--routing-from <absolute-json>] [--apply] | routes <absolute-repo> [--paseo-home <absolute-home>] | inventory [--paseo-home <absolute-home>] | agents [--paseo-home <absolute-home>] | prepare <request.json> | prepare-handoff <request.json> | materialize <repository> --from <source-repository> [--apply] | monitor <request.json> | notebook <repository> [--paseo-home <absolute-home>]');
-  process.stdout.write(json(result));
+  } else throw new Error('Usage: slp.mjs identity | snapshot <repo> | install [absolute-dir] [--paseo-home <absolute-home>] [--apply] [--reload] | upgrade <absolute-new-dir> --from <previous-installation> [--apply] [--reload] | verify <dir> | uninstall <dir> [--apply] [--reload] | init <absolute-repo> [--routing-from <absolute-json>] [--apply] | routes <absolute-repo> [--paseo-home <absolute-home>] | inventory [--paseo-home <absolute-home>] | agents [--paseo-home <absolute-home>] | prepare <request.json> | prepare-handoff <request.json> | materialize <repository> --from <source-repository> [--apply] | monitor <request.json> | notebook <repository> [--paseo-home <absolute-home>] | instructions <role>');
+  if (result !== undefined) process.stdout.write(json(result));
 } catch (error) { console.error(error.message); process.exitCode = 1; }
