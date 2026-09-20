@@ -6,9 +6,10 @@ import type { PluginServerContribution } from "@getpaseo/plugin/server";
 import { homedir } from "node:os";
 import { realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { activate, reconcile, deactivate, status, localTarget, catalog, setLanguage, getRoleRouting, setRoleRouting } from "./shared/contracts.ts";
+import { activate, reconcile, deactivate, status, localTarget, catalog, setLanguage, getRoleRouting, setRoleRouting, getJev, setJev, setJevKey, testJev } from "./shared/contracts.ts";
 import type { CatalogRequest, FamilyName, Manager } from "./shared/contracts.ts";
 import { createManager } from "./server/manager.ts";
+import { createJev } from "./server/jev.ts";
 import { createMaterializer } from "./server/materializer.ts";
 import { embeddedPayload } from "./server/generated/runtime-payload.ts";
 import { createExecutableResolver } from "./server/executables.ts";
@@ -35,6 +36,13 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   server.handle(setLanguage, input => manager.setLanguage(input));
   server.handle(getRoleRouting, input => manager.getRoleRouting(input));
   server.handle(setRoleRouting, input => manager.setRoleRouting(input));
+  // Jev (OpenRouter Decisions) — per-daemon config/key under slp-runtime/state;
+  // test-jev is the only handler that touches the network (explicit action).
+  const jev = createJev();
+  server.handle(getJev, input => jev.getJev(input));
+  server.handle(setJev, input => jev.setJev(input));
+  server.handle(setJevKey, input => jev.setJevKey(input));
+  server.handle(testJev, input => jev.testJev(input));
   // Phase 2 (settings-driven-providers.md §6): the hook-family thin aliases
   // need the two halves the sentinel gate cannot supply — role-bundle
   // injection at agent.create and the session-open grant overlay. Both hooks

@@ -94,13 +94,23 @@ Human-approved provider/model/settings options and suitability descriptions; an
 empty init catalog is a setup scaffold, not ready for Peer delegation, and remains
 authoritative over the user-scope pool until removed.
 Lead selects a ready Peer option for each task using suitableFor, avoidFor, notes,
-priority and budget. Record the rationale, option ID/hash and actual launch bundle.
+priority and budget. Record the rationale, option ID/hash and actual launch bundle
+(under armed Jev routing the reason trail is the receipt's distribution, not prose).
 Validate against fresh provider discovery; do not inherit a saved slp-peer profile
 or Lead settings. Apply the installed orchestration session continuity policy:
 keep existing context for corrections and re-review; establish a separate session
 when a new independent seat is required. No catalog in either scope or no
 eligible runtime requires onboarding setup; a missing repository catalog falls
 back to the user-scope pool, never to another repository's catalog.
+Jev-assisted routing is a per-daemon toggle (jev.capabilities.routing), not a
+repository setting: when armed, Lead authors a routing brief and runs
+`slp route-decide` for the receipt prepare requires; a decline or transport
+failure fails closed — escalate rather than retry, and disabling is Human
+authority via the Manager Jev card. Shadow evaluation precedes arming: under an
+enabled-but-unarmed daemon route-decide still emits a receipt, Lead chooses
+independently and prepares with both, and the plan records jevChoice/declined;
+the Human pre-registers exit criteria (agreement rate + asymmetric error class)
+and arms only once the recorded pairs satisfy them.
 
 Lead uses macro skills, Supervisor observation/governance skills, Peer task micro
 skills. Configure Peer quotaFallback.enabled/optionIds in slp-routing.json; default

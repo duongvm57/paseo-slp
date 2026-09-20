@@ -212,7 +212,9 @@ repository path and workspaceId, an assignment naming scope, authority, the
 report-recipient agent ID and verification/handback expectations, plus one
 binding source. Keep each seat's full brief in its own assignmentFile — the
 prompt references it read-first and never inlines it. Before any create_agent
-call, Lead records why the chosen topology fits the assignment.
+call, Lead records why the chosen topology fits the assignment (under armed
+Jev routing that reason trail is the decision receipt's distribution, not
+prose).
 For repeated prepares, capture discovery once: `node <slp-cli> inventory
 --paseo-home <absolute-home>` prints {providers, profiles} to stdout in the
 shape prepare consumes — pass the file's absolute path as request.inventoryFile (inline arrays,

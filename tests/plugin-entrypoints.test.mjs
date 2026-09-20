@@ -139,7 +139,7 @@ async function importContribute(t) {
   return entry.default;
 }
 
-test('contribute() registers the nine RPCs plus the two before-hooks, cleanup unregisters', async t => {
+test('contribute() registers the RPCs plus the two before-hooks, cleanup unregisters', async t => {
   const contribute = await importContribute(t);
   assert.equal(typeof contribute, 'function');
 
@@ -162,12 +162,16 @@ test('contribute() registers the nine RPCs plus the two before-hooks, cleanup un
       'activate',
       'catalog',
       'deactivate',
+      'get-jev',
       'get-role-routing',
       'local-target',
       'reconcile',
+      'set-jev',
+      'set-jev-key',
       'set-language',
       'set-role-routing',
       'status',
+      'test-jev',
     ],
   );
   for (const { handler } of registrations) {

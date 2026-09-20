@@ -430,7 +430,9 @@ thấy hình dạng: mỗi ghế đặt tên theo kiểu tác vụ, `model` đ�
 khi điền từ discovery thực tế trên host.
 
 Lead đọc pool mới, ghi lý do chọn và kiểm tra option/hash bằng `prepare`
-trước khi launch. Không có pool/option hợp lệ ở cả hai scope thì hoàn thiện
+trước khi launch (khi Jev routing được arm, dấu vết lý do là phân phối ghi
+trên receipt thay vì văn xuôi — xem
+[Routing có Jev hỗ trợ](#routing-có-jev-hỗ-trợ-tùy-chọn)). Không có pool/option hợp lệ ở cả hai scope thì hoàn thiện
 onboarding; không fallback sang `slp-peer`, settings của Lead hay catalog
 repo khác. `priority` là gợi ý lựa chọn, không thay thế đánh giá suitability
 và budget.
@@ -450,6 +452,53 @@ phù hợp và nằm trong danh sách này; `prepare` nhận thêm
 pool bằng `update_agent`, không dùng provider default, và không coi model
 khác cùng tài khoản là quota mới. Nếu không còn fallback hợp lệ thì báo
 BLOCKED; giữ ownership và bằng chứng trước khi handoff.
+
+### Routing có Jev hỗ trợ (tùy chọn)
+
+Jev là một decision primitive có giới hạn — System One của TypeSafe chạy qua
+Decisions API của OpenRouter với model ghim `typesafe/jev-1.13`. Nó **không
+phải** ACP provider và không bao giờ trở thành ghế agent; nó trả lời một câu
+hỏi choice đã định kiểu trên `state` do caller cung cấp và trả về đáp án đã
+hiệu chuẩn. Nó chỉ chạy qua helper tường minh `route-decide` — không bao giờ
+trong vòng lặp nền, lịch định kỳ, hay bên trong `prepare`.
+
+Cấu hình theo từng daemon, qua card **Jev (OpenRouter)** của SLP Manager
+(`<daemonHome>/slp-runtime/state/jev.json` + `jev-openrouter.key` write-only,
+0600). Mọi toggle mặc định tắt, đánh giá tại thời điểm prepare — đổi toggle
+không đụng vào ghế đang chạy, và tắt không xóa key đã lưu. Hai chế độ:
+
+- **Shadow** (`enabled` bật, `capabilities.routing` tắt): `route-decide`
+  vẫn phát receipt nhưng lựa chọn của Lead vẫn là ràng buộc; `prepare`
+  verify receipt và ghi cả hai lựa chọn (`routing.jev.jevChoice`, `.declined`)
+  vào plan.
+- **Armed** (`enabled` và `capabilities.routing` đều bật): receipt bắt buộc
+  và ràng buộc — `route.optionId` phải khớp đáp án trên receipt.
+
+Đánh giá shadow đi trước khi arm: chạy route-decide cho mỗi delegation,
+prepare với lựa chọn của Lead kèm receipt, để các bản ghi cặp tích lũy;
+Human đăng ký trước exit criteria — agreement rate và lớp lỗi bất đối xứng —
+và chỉ arm capability khi các cặp đã ghi thỏa tiêu chí. Toggle giữ tắt cho
+tới khi có dữ liệu đó.
+
+Flow ở cả hai chế độ: Lead tự viết `brief` routing (không bao giờ là bytes
+thô của `assignmentFile`) rồi chạy `route-decide <request.json>`; helper
+tính tập ứng viên eligible một cách tất định — cùng các exclusion token mà
+`prepare` enforce — cộng thêm sentinel `no-suitable-option`, rồi phát ra
+`{optionId, catalogSha256, decision}`. `prepare` nhận `route.decision` và
+verify receipt offline (hash nội tại, model ghim, khớp catalog hash, ứng
+viên trong tập — cộng khớp đáp án khi armed); receipt được cung cấp luôn
+được verify kể cả khi Jev tắt. Receipt ghi đầy đủ đáp án, phân phối xác
+suất và confidence — confidence là bằng chứng, không bao giờ là ngưỡng
+routing. Receipt chứng minh tính nhất quán, không phải authenticity. Khi
+armed, dấu vết lý do là phân phối ghi trên receipt chứ không phải văn xuôi
+của Lead; ở chế độ shadow, lý do văn xuôi của Lead vẫn áp dụng cùng receipt.
+
+Mọi lỗi đều fail closed: thiếu config/key, OpenRouter hay TypeSafe sập,
+timeout, tập eligible rỗng, đáp án ngoài tập ứng viên hay catalog hash cũ đều
+từ chối thay vì đoán. Kết quả decline vẫn in receipt nhưng exit 1 — pool thuộc
+quyền Human nên escalate thay vì thử lại. Degradation có kiểm soát: khi còn
+bật, một outage chỉ chặn delegation phụ thuộc; Human tắt capability trong
+Manager card và phán đoán của Lead được khôi phục.
 
 ## Handoff provider của Lead
 
@@ -549,7 +598,22 @@ Một request đầy đủ gồm: `taskLabel` (mặc định tên repo), role (v
 verification/handback, cùng một binding source. Brief dài dùng
 `assignmentFile` — file riêng từng seat, được tham chiếu read-first chứ
 không inline. Trước mọi create_agent, Lead ghi lại lý do topology đã chọn
-(seat nào, pool option nào) khớp assignment.
+(seat nào, pool option nào) khớp assignment — khi Jev routing armed, dấu vết
+lý do là phân phối trên decision receipt chứ không phải văn xuôi.
+
+### `route-decide`
+
+`route-decide <request.json> [--paseo-home <absolute-home>]` là đường duy nhất
+gọi Jev — xem [Routing có Jev hỗ trợ](#routing-có-jev-hỗ-trợ-tùy-chọn) để biết
+nó là gì và áp dụng khi nào. Request mang `repository`, `role` tùy chọn (mặc
+định `peer`) và `brief` do Lead viết (string hoặc object không rỗng — context
+duy nhất Jev thấy về task; mang theo mô tả tác vụ, tín hiệu rủi ro/effort,
+ràng buộc và dependencies — brief cằn sẽ trôi về mức ngẫu nhiên). Output là `{optionId, catalogSha256, declined,
+role, decision}`; đưa `optionId`/`catalogSha256`/`decision` vào `route.*` của
+request `prepare`. Đáp án `no-suitable-option` vẫn in receipt nhưng exit 1.
+Lệnh fail closed trước cả network khi config/key Jev của daemon thiếu hoặc
+tắt, và gọi từ source checkout cần một daemon home có config đó
+(`--paseo-home` hoặc `PASEO_HOME`).
 
 ### `inventory` / `agents`
 

@@ -63,6 +63,11 @@ shapes.
    conversational replies to the Human mirror the Human's current language
    instead.
 4. Where the Supervisor notebook lives and how to retrieve it.
+5. Jev-assisted routing — optional and per-daemon, not a repo file: the SLP
+   Manager's Jev (OpenRouter) card holds the toggles and key. Default off;
+   when the Human arms it, Peer delegation requires a `route-decide` receipt
+   (see `src/references/provider-routing.md`). Onboarding does not create or
+   edit it.
 
 Present the options you actually discovered. Never invent model IDs,
 capability claims or suitability guarantees.
@@ -173,8 +178,8 @@ write. For a revision, bump the frontmatter version and refresh
 
 ## Step 4 — validate
 
-- `node bin/slp.mjs routes <absolute-repo>` → catalog hash + eligible
-  options.
+- `node bin/slp.mjs routes <absolute-repo>` → catalog hash + the raw catalog
+  (eligibility is judged per option against `enabled`/`availability`/`roles`).
 - For each intended option, run `prepare` with `role: "peer"`, the
   repository/workspace, a short assignment and
   `route: {optionId, catalogSha256}`; verify the emitted provider/model/

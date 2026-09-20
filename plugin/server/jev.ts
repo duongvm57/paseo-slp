@@ -1,0 +1,264 @@
+// plugin/server/jev.ts — Jev per-daemon state, key lifecycle and live probe.
+//
+// Same class of operation as set-language/set-role-routing: plugin-owned files
+// under <stableRoot>/state, no journal, no mutex, no authority gate. Two files:
+//   state/jev.json             config + toggles (0600, atomic write)
+//   state/jev-<kind>.key       provider key (0600, atomic write)
+// The key is the only credential SLP holds: it is never journaled, never
+// echoed back — every view reports `hasKey` only. Toggling a capability off
+// never removes the stored key.
+//
+// Parity note: validation mirrors src/jev.mjs (readJevConfig/readJevKey) —
+// absent config = unconfigured (Jev OFF), corrupt config = error surfaced,
+// key group/other-accessible = reported. Keep the two validators aligned.
+// test-jev is the ONLY Jev RPC that touches the network (explicit human
+// action — GET {baseUrl}/api/v1/auth/key); the fetch seam is injectable.
+
+import { lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import {
+  GetJevInput,
+  JevConfig,
+  OperationConflict,
+  SetJevInput,
+  SetJevKeyInput,
+  TestJevInput,
+  type GetJevResult,
+  type JevConfigValue,
+  type JevViewValue,
+  type SetJevResult,
+  type SetJevKeyResult,
+  type TestJevResult,
+} from "../shared/contracts.ts";
+
+const JEV_FILE = join("state", "jev.json");
+const keyFileName = (kind: string) => join("state", `jev-${kind}.key`);
+const DEFAULT_KIND = "openrouter";
+
+// Remote-controlled text (auth/key labels, API error strings) is untrusted:
+// scrub credential-shaped substrings and bound length before it reaches RPC
+// details shown in the Manager UI. Mirrors src/jev.mjs sanitizeRemoteText —
+// keep the pattern sets AND the flag-preserving rebuild identical: the
+// bearer pattern is /i, so rebuilding with 'g' alone would miss lowercase
+// `bearer <token>`.
+const remoteCredentialPatterns = [
+  /\bsk-or-[A-Za-z0-9_-]{12,}/,
+  /\bsk-[A-Za-z0-9_-]{20,}/,
+  /Bearer\s+[A-Za-z0-9._~+/=-]{16,}/i,
+  /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/,
+  /\bAKIA[0-9A-Z]{16}\b/,
+  /\bgh[pousr]_[A-Za-z0-9]{20,}/,
+  /\bxox[baprs]-[A-Za-z0-9-]{10,}/,
+  /\bAIza[0-9A-Za-z_-]{35}\b/,
+  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}\b/,
+];
+const sanitizeRemoteText = (value: string, maxLength = 200): string => {
+  let text = String(value);
+  for (const pattern of remoteCredentialPatterns) {
+    const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
+    text = text.replace(new RegExp(pattern.source, flags), "<redacted>");
+  }
+  return text.slice(0, maxLength);
+};
+
+export interface JevDeps {
+  now?: () => Date;
+  uuid?: () => string;
+  fetchImpl?: typeof fetch;
+}
+
+// Same home verification as manager.ts resolveHome (§8.1): canonical realpath,
+// a real directory, a readable regular config.json, and a real slp-runtime
+// directory (a symlinked stableRoot would redirect credential writes outside
+// the canonical home).
+function resolveHome(target: { hostId: string; daemonHome: string }): { canonicalHome: string; stableRoot: string } {
+  let canonicalHome: string;
+  try {
+    canonicalHome = realpathSync(target.daemonHome);
+  } catch {
+    throw new OperationConflict("HOME_UNVERIFIED", `daemon home does not resolve: ${target.daemonHome}`, { path: target.daemonHome });
+  }
+  if (!lstatSync(canonicalHome).isDirectory()) {
+    throw new OperationConflict("HOME_UNVERIFIED", "daemon home is not a directory", { path: canonicalHome });
+  }
+  const configPath = join(canonicalHome, "config.json");
+  let configStat;
+  try {
+    configStat = lstatSync(configPath);
+  } catch {
+    throw new OperationConflict("HOME_UNVERIFIED", "daemon home lacks a readable regular config.json", { path: configPath });
+  }
+  if (!configStat.isFile()) {
+    throw new OperationConflict("HOME_UNVERIFIED", "daemon home lacks a readable regular config.json", { path: configPath });
+  }
+  const stableRoot = join(canonicalHome, "slp-runtime");
+  try {
+    const rootStat = lstatSync(stableRoot);
+    if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
+      throw new OperationConflict("HOME_UNVERIFIED", "slp-runtime exists but is not a real directory", { path: stableRoot });
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  return { canonicalHome, stableRoot };
+}
+
+// Absent file = unconfigured (null); corrupt or schema-mismatched content is
+// evidence — surfaced as an error string, never silently treated as OFF.
+function readConfig(stableRoot: string): { config: JevConfigValue | null; error: string | null } {
+  const file = join(stableRoot, JEV_FILE);
+  let raw: string;
+  try {
+    raw = readFileSync(file, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { config: null, error: null };
+    throw error;
+  }
+  try {
+    const parsed = JevConfig.safeParse(JSON.parse(raw));
+    return parsed.success
+      ? { config: parsed.data, error: null }
+      : { config: null, error: `jev.json failed schema validation: ${parsed.error.issues[0]?.message ?? "schema"}` };
+  } catch (error) {
+    return { config: null, error: `jev.json is not valid JSON: ${(error as Error).message}` };
+  }
+}
+
+function keyProbe(stableRoot: string, kind: string): { hasKey: boolean; keyPermissionsOk: boolean | null } {
+  try {
+    const stat = lstatSync(join(stableRoot, keyFileName(kind)));
+    return { hasKey: stat.isFile(), keyPermissionsOk: stat.isFile() ? (stat.mode & 0o077) === 0 : null };
+  } catch {
+    return { hasKey: false, keyPermissionsOk: null };
+  }
+}
+
+function view(stableRoot: string): JevViewValue {
+  const { config, error } = readConfig(stableRoot);
+  const probe = keyProbe(stableRoot, config?.provider.kind ?? DEFAULT_KIND);
+  if (config === null) {
+    // A file that exists but fails validation is configured-but-broken, not
+    // unconfigured — the error field carries the evidence.
+    return { configured: error !== null, enabled: null, capabilities: null, provider: null, ...probe, error };
+  }
+  return {
+    configured: true,
+    enabled: config.enabled,
+    capabilities: config.capabilities,
+    provider: config.provider,
+    ...probe,
+    error,
+  };
+}
+
+// Atomic 0600 write, same shape as set-role-routing's temp+rename.
+function writePrivate(stableRoot: string, relative: string, bytes: string, uuid: () => string): void {
+  const dir = join(stableRoot, "state");
+  const file = join(stableRoot, relative);
+  mkdirSync(dir, { recursive: true });
+  const temp = `${file}.${uuid()}.tmp`;
+  try {
+    writeFileSync(temp, bytes, { mode: 0o600 });
+    renameSync(temp, file);
+  } catch (error) {
+    rmSync(temp, { force: true });
+    throw error;
+  }
+}
+
+export function createJev(deps: JevDeps = {}) {
+  const uuid = deps.uuid ?? randomUUID;
+  const fetchImpl = deps.fetchImpl ?? fetch;
+  const now = () => (deps.now ?? (() => new Date()))().getTime();
+
+  async function getJev(input: unknown): Promise<GetJevResult> {
+    const parsed = GetJevInput.safeParse(input);
+    if (!parsed.success) {
+      throw new OperationConflict("INVALID_REQUEST", `invalid get-jev input: ${parsed.error.issues[0]?.message ?? "schema"}`);
+    }
+    const ctx = resolveHome(parsed.data.target);
+    return { schemaVersion: 1, jev: view(ctx.stableRoot) };
+  }
+
+  async function setJev(input: unknown): Promise<SetJevResult> {
+    const parsed = SetJevInput.safeParse(input);
+    if (!parsed.success) {
+      throw new OperationConflict("INVALID_REQUEST", `invalid set-jev input: ${parsed.error.issues[0]?.message ?? "schema"}`);
+    }
+    const ctx = resolveHome(parsed.data.target);
+    writePrivate(ctx.stableRoot, JEV_FILE, `${JSON.stringify(parsed.data.jev, null, 2)}\n`, uuid);
+    return { schemaVersion: 1, jev: view(ctx.stableRoot) };
+  }
+
+  // `key` writes the file; `null` removes it. The value is written and
+  // forgotten — never returned, never journaled.
+  async function setJevKey(input: unknown): Promise<SetJevKeyResult> {
+    const parsed = SetJevKeyInput.safeParse(input);
+    if (!parsed.success) {
+      throw new OperationConflict("INVALID_REQUEST", `invalid set-jev-key input: ${parsed.error.issues[0]?.message ?? "schema"}`);
+    }
+    const ctx = resolveHome(parsed.data.target);
+    const { config } = readConfig(ctx.stableRoot);
+    const file = keyFileName(config?.provider.kind ?? DEFAULT_KIND);
+    if (parsed.data.key === null) {
+      rmSync(join(ctx.stableRoot, file), { force: true });
+    } else {
+      if (/\s/.test(parsed.data.key)) {
+        throw new OperationConflict("INVALID_REQUEST", "key must not contain whitespace");
+      }
+      writePrivate(ctx.stableRoot, file, `${parsed.data.key}\n`, uuid);
+    }
+    return { schemaVersion: 1, hasKey: parsed.data.key !== null };
+  }
+
+  // Live probe of the stored key against OpenRouter's key-info endpoint.
+  // Returns ok:false + detail on any failure — never throws on network/API
+  // errors, and never includes key material in the detail string.
+  async function testJev(input: unknown): Promise<TestJevResult> {
+    const parsed = TestJevInput.safeParse(input);
+    if (!parsed.success) {
+      throw new OperationConflict("INVALID_REQUEST", `invalid test-jev input: ${parsed.error.issues[0]?.message ?? "schema"}`);
+    }
+    const ctx = resolveHome(parsed.data.target);
+    const { config, error } = readConfig(ctx.stableRoot);
+    const fail = (detail: string, latencyMs = 0): TestJevResult => ({ schemaVersion: 1, ok: false, detail, latencyMs });
+    if (config === null) return fail(error ?? "Jev is not configured for this daemon");
+    const probe = keyProbe(ctx.stableRoot, config.provider.kind);
+    if (!probe.hasKey) return fail("no key stored — set the OpenRouter key first");
+    if (probe.keyPermissionsOk === false) return fail("key file is group/other-accessible — chmod 600 the jev key file");
+    let key: string;
+    try {
+      key = readFileSync(join(ctx.stableRoot, keyFileName(config.provider.kind)), "utf8").trim();
+    } catch (readError) {
+      return fail(`key file unreadable: ${(readError as Error).message}`);
+    }
+    const started = now();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    try {
+      // The probe lives under /api/v1 on the origin regardless of whether the
+      // configured baseUrl carries the /api/v1 prefix — resolve from origin so
+      // the prefixed form does not double-prefix.
+      const probeUrl = `${new URL(config.provider.baseUrl).origin}/api/v1/auth/key`;
+      const response = await fetchImpl(probeUrl, {
+        headers: { authorization: `Bearer ${key}` },
+        signal: controller.signal,
+      });
+      const latencyMs = now() - started;
+      if (!response.ok) return fail(`OpenRouter answered HTTP ${response.status}`, latencyMs);
+      const body: unknown = await response.json();
+      const label = typeof body === "object" && body !== null && typeof (body as { data?: { label?: unknown } }).data?.label === "string"
+        ? (body as { data: { label: string } }).data.label
+        : null;
+      return { schemaVersion: 1, ok: true, detail: label ? `key accepted (label ${sanitizeRemoteText(label, 120)})` : "key accepted", latencyMs };
+    } catch (networkError) {
+      return fail(`request failed: ${sanitizeRemoteText((networkError as Error).message)}`, now() - started);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  return { getJev, setJev, setJevKey, testJev };
+}
+export type Jev = ReturnType<typeof createJev>;

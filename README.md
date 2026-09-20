@@ -452,7 +452,9 @@ seat names a kind of work, and `model` stays blank until filled from live
 discovery on the host.
 
 The Lead reads the current pool, records its choice rationale and validates
-option/hash via `prepare` before launching. With no valid pool/option at
+option/hash via `prepare` before launching (when Jev routing is armed, the
+rationale trail is the receipt's recorded distribution instead — see
+[Jev-assisted routing](#jev-assisted-routing-optional)). With no valid pool/option at
 either scope, finish onboarding first; there is no fallback to `slp-peer`, to
 the Lead's own settings, or to another repo's catalog. `priority` is a
 selection hint, not a replacement for suitability and budget judgment.
@@ -473,6 +475,53 @@ switch models outside the pool via `update_agent`, do not use a provider
 default, and do not treat another model on the same account as fresh quota.
 When no valid fallback remains, report BLOCKED; keep ownership and evidence
 before handing off.
+
+### Jev-assisted routing (optional)
+
+Jev is a bounded decision primitive — TypeSafe's System One served through
+OpenRouter's Decisions API with the pinned model `typesafe/jev-1.13`. It is
+**not** an ACP provider and never becomes an agent seat; it answers one typed
+choice question over a caller-supplied state and returns a calibrated answer.
+It runs only through the explicit `route-decide` helper — never in a
+background loop, a schedule, or inside `prepare`.
+
+Configuration is per daemon, via the SLP Manager's **Jev (OpenRouter)** card
+(`<daemonHome>/slp-runtime/state/jev.json` + a write-only `jev-openrouter.key`,
+0600). All toggles default off, evaluated at preparation time — toggling
+never mutates running seats, and disabling keeps the stored key. Two modes:
+
+- **Shadow** (`enabled` on, `capabilities.routing` off): `route-decide`
+  emits a receipt but the Lead's own pick stays binding; `prepare` verifies
+  the receipt and records both picks (`routing.jev.jevChoice`, `.declined`)
+  in the plan.
+- **Armed** (`enabled` and `capabilities.routing` both on): the receipt is
+  required and binding — `route.optionId` must equal its choice.
+
+Shadow evaluation precedes arming: run route-decide on each delegation,
+prepare with the Lead's pick plus the receipt, and let the paired records
+accumulate; the Human pre-registers exit criteria — agreement rate and the
+asymmetric error class — and arms the capability only once the pairs satisfy
+them. The toggle stays off until that data exists.
+
+The flow in either mode: the Lead authors a routing `brief` (never raw
+`assignmentFile` bytes) and runs `route-decide <request.json>`; the helper
+computes the eligible candidate set deterministically — the same exclusion
+tokens `prepare` enforces — plus an explicit `no-suitable-option` sentinel,
+and emits `{optionId, catalogSha256, decision}`. `prepare` takes
+`route.decision` and verifies it offline (internal hash, pinned model,
+catalog hash, candidate membership — plus answer match when armed); a
+supplied receipt is verified even with Jev off. The receipt records the full
+answer, probabilities and confidence — confidence is evidence, never a
+routing threshold. Receipts prove consistency, not authenticity. In armed
+mode the reason trail is that recorded distribution, not Lead prose; in
+shadow mode the Lead's prose rationale still applies alongside the receipt.
+
+Every failure is closed: missing config/key, an OpenRouter or TypeSafe
+outage, timeout, empty eligible set, out-of-set choice or stale catalog hash
+all refuse rather than guess. A decline emits its receipt and exits nonzero —
+the pool is Human-owned, so escalate rather than retry. Controlled
+degradation: while armed an outage blocks only the dependent delegation; the
+Human disables the capability in the Manager card and Lead judgment resumes.
 
 ## Lead provider handoff
 
@@ -579,7 +628,25 @@ an `assignment` naming scope, authority, the report-recipient agent ID and
 the verification/handback expectations, plus one binding source. For longer
 briefs use `assignmentFile` — a separate file per seat, referenced read-first
 rather than inlined. Before any create_agent call, Lead records why the chosen
-topology (which seats, which pool options) fits the assignment.
+topology (which seats, which pool options) fits the assignment — under armed
+Jev routing that reason trail is the decision receipt's distribution, not
+prose.
+
+### `route-decide`
+
+`route-decide <request.json> [--paseo-home <absolute-home>]` is the only path
+that calls Jev — see [Jev-assisted routing](#jev-assisted-routing-optional)
+for what it is and when it applies. The request carries `repository`, an
+optional `role` (default `peer`) and a Lead-authored `brief` (nonempty string
+or object — the only task context Jev sees; carry the task description,
+risk/effort signals, constraints and dependencies — a starved brief drifts
+toward chance-level answers). Output is `{optionId,
+catalogSha256, declined, role, decision}`; feed `optionId`/`catalogSha256`/
+`decision` into `route.*` of a `prepare` request. A `no-suitable-option`
+answer still prints its receipt but exits 1. The command fails closed before
+any network when the daemon's Jev config or key is missing/disabled, and a
+source checkout invocation needs a daemon home carrying that config (`--paseo-home`
+or `PASEO_HOME`).
 
 ### `inventory` / `agents`
 

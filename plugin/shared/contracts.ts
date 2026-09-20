@@ -215,6 +215,89 @@ export const SetRoleRoutingOutput = z.object({
   schemaVersion: z.literal(1),
   routing: RoleRouting,
 }).strict();
+/** Jev provider block stored at slp-runtime/state/jev.json — v1 OpenRouter
+ *  only. The model must be a pinned `<owner>/jev-<version>` id; aliases
+ *  (~typesafe/jev-latest, jev-latest, jev-preview) drift and are rejected.
+ *  baseUrl accepts the bare origin or the documented prefixed form …/api/v1
+ *  (parity with src/jev.mjs readJevConfig); absent → the default origin. */
+export const JevProvider = z.object({
+  kind: z.literal("openrouter"),
+  baseUrl: z.string().min(1).max(512)
+    .refine(s => {
+      try {
+        const u = new URL(s);
+        const path = u.pathname.replace(/\/+$/, "");
+        return u.protocol === "https:" && (path === "" || path === "/api/v1") && u.search === "" && u.hash === "";
+      } catch { return false; }
+    })
+    .default("https://openrouter.ai"),
+  model: z.string().regex(/^[a-z0-9-]+\/jev-\d+\.\d+(\.\d+)?$/),
+}).strict();
+/** Per-daemon Jev config — all toggles default off; capabilities is a bool
+ *  record so a future capability arrives without a schema bump (a missing
+ *  capability defaults to off, matching src/jev.mjs). Stored as
+ *  jev.json (0600); the key lives in a separate jev-<kind>.key file. */
+export const JevConfig = z.object({
+  schemaVersion: z.literal(1),
+  enabled: z.boolean(),
+  capabilities: z.object({ routing: z.boolean().default(false) }).catchall(z.boolean()),
+  provider: JevProvider,
+}).strict();
+/** Wire view of the Jev setup — hasKey only; the key material never leaves
+ *  the daemon home. */
+export const JevView = z.object({
+  configured: z.boolean(),
+  enabled: z.boolean().nullable(),
+  capabilities: z.record(z.string(), z.boolean()).nullable(),
+  provider: JevProvider.nullable(),
+  hasKey: z.boolean(),
+  keyPermissionsOk: z.boolean().nullable(),
+  error: z.string().nullable(),
+}).strict();
+export const GetJevInput = z.object({
+  schemaVersion: z.literal(1),
+  target: Target,
+}).strict();
+export const GetJevOutput = z.object({
+  schemaVersion: z.literal(1),
+  jev: JevView,
+}).strict();
+/** Plugin-owned state mutation, same class as set-role-routing: writes
+ *  slp-runtime/state/jev.json atomically (0600). Toggling off never removes
+ *  the stored key. */
+export const SetJevInput = z.object({
+  schemaVersion: z.literal(1),
+  target: Target,
+  jev: JevConfig,
+}).strict();
+export const SetJevOutput = z.object({
+  schemaVersion: z.literal(1),
+  jev: JevView,
+}).strict();
+/** Key lifecycle: `key` writes jev-openrouter.key (0600, atomic); `null`
+ *  removes it. The key value itself is never echoed back or journaled. */
+export const SetJevKeyInput = z.object({
+  schemaVersion: z.literal(1),
+  target: Target,
+  key: z.string().min(1).max(512).nullable(),
+}).strict();
+export const SetJevKeyOutput = z.object({
+  schemaVersion: z.literal(1),
+  hasKey: z.boolean(),
+}).strict();
+/** Live key probe: GET {baseUrl}/api/v1/auth/key with the stored key. This is
+ *  the only Jev RPC that touches the network — an explicit human action, not
+ *  a poll. */
+export const TestJevInput = z.object({
+  schemaVersion: z.literal(1),
+  target: Target,
+}).strict();
+export const TestJevOutput = z.object({
+  schemaVersion: z.literal(1),
+  ok: z.boolean(),
+  detail: z.string().max(512).nullable(),
+  latencyMs: z.number().nonnegative(),
+}).strict();
 export const LocalTargetInput = z.object({
   schemaVersion: z.literal(1),
 }).strict();
@@ -304,6 +387,10 @@ export const catalog = defineRpc({ name: "catalog", input: CatalogInput, output:
 export const setLanguage = defineRpc({ name: "set-language", input: SetLanguageInput, output: SetLanguageOutput });
 export const getRoleRouting = defineRpc({ name: "get-role-routing", input: GetRoleRoutingInput, output: GetRoleRoutingOutput });
 export const setRoleRouting = defineRpc({ name: "set-role-routing", input: SetRoleRoutingInput, output: SetRoleRoutingOutput });
+export const getJev = defineRpc({ name: "get-jev", input: GetJevInput, output: GetJevOutput });
+export const setJev = defineRpc({ name: "set-jev", input: SetJevInput, output: SetJevOutput });
+export const setJevKey = defineRpc({ name: "set-jev-key", input: SetJevKeyInput, output: SetJevKeyOutput });
+export const testJev = defineRpc({ name: "test-jev", input: TestJevInput, output: TestJevOutput });
 
 // ---------------------------------------------------------------------------
 // §7 receipt / operation-intent journal schemas (server-internal; the client
@@ -470,6 +557,17 @@ export type GetRoleRoutingRequest = z.infer<typeof GetRoleRoutingInput>;
 export type GetRoleRoutingResult = z.infer<typeof GetRoleRoutingOutput>;
 export type SetRoleRoutingRequest = z.infer<typeof SetRoleRoutingInput>;
 export type SetRoleRoutingResult = z.infer<typeof SetRoleRoutingOutput>;
+export type JevProviderValue = z.infer<typeof JevProvider>;
+export type JevConfigValue = z.infer<typeof JevConfig>;
+export type JevViewValue = z.infer<typeof JevView>;
+export type GetJevRequest = z.infer<typeof GetJevInput>;
+export type GetJevResult = z.infer<typeof GetJevOutput>;
+export type SetJevRequest = z.infer<typeof SetJevInput>;
+export type SetJevResult = z.infer<typeof SetJevOutput>;
+export type SetJevKeyRequest = z.infer<typeof SetJevKeyInput>;
+export type SetJevKeyResult = z.infer<typeof SetJevKeyOutput>;
+export type TestJevRequest = z.infer<typeof TestJevInput>;
+export type TestJevResult = z.infer<typeof TestJevOutput>;
 export type StartResult = z.infer<typeof StartOutput>;
 export type StatusResult = z.infer<typeof StatusOutput>;
 export type BindingViewValue = z.infer<typeof BindingView>;

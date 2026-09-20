@@ -193,7 +193,8 @@ Verify the workspace's actual path equals fixtureRoot on the target host.
 Create only Supervisor using its saved profile through Paseo create_agent. Record
 profile bytes, exact request/response and actual runtime settings. Supervisor
 refreshes slp-lead before delegation. Lead reads routes, chooses a Peer option with
-its rationale, validates a fresh hash via prepare, and creates the Peer from that
+its rationale (under armed Jev routing the reason trail is the decision receipt's
+distribution), validates a fresh hash via prepare, and creates the Peer from that
 bundle. Profile inventories cannot override the Peer pool. U2 traces profiles for
 Supervisor/Lead and project option/hash/settings for Peer, including both families
 when mixed-peer is selected.

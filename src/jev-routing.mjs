@@ -1,0 +1,116 @@
+// src/jev-routing.mjs — first Jev consumer: seat-selection routing decisions.
+//
+// Jev runs ONLY through the explicit `route-decide` helper command — never in
+// a background loop, a schedule, or inside prepare (prepare stays offline and
+// merely verifies the receipt this module's output carries).
+//
+// Deterministic eligibility (optionExclusions, shared with catalogBinding)
+// runs BEFORE any model call: Jev may only pick inside the eligible candidate
+// set plus the explicit no-suitable-option sentinel. The state sent to Jev is
+// the Lead-authored routing brief plus a bounded option surface — never raw
+// assignmentFile bytes (the package passes assignments by pointer; shipping
+// their bytes to a SaaS self-contradicts), and never catalog `notes` (they
+// are Vietnamese; Jev is English-primary). `priority` is also withheld: its
+// direction is undocumented (spec §3 residue) and Human-owned. The brief is
+// the entire evidence surface — starve it and answers drift toward chance.
+//
+// Brief guidance (procedural, not a hard schema): a useful brief carries the
+// task description, risk/effort signals, constraints and dependencies — the
+// same evidence a Lead would weigh. `brief: "x"` validates but starves the
+// model, which is exactly the failure mode shadow evaluation exists to
+// measure before the capability may be armed.
+
+import { lstatSync } from 'node:fs';
+import { isAbsolute } from 'node:path';
+import { readCatalog, optionExclusions, eligibleOptions, paseoHome,
+  ROUTE_DECISION_QUESTION, ROUTE_DECLINE_CANDIDATE } from './routing.mjs';
+import { resolveJev, askJev, JevError } from './jev.mjs';
+import { roles } from './profiles.mjs';
+
+const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+const jevError = (code, message, details) => new JevError(code, message, details);
+
+const describeOption = option =>
+  `${option.provider} ${option.model}; suitable for: ${option.suitableFor.join(', ') || 'unspecified'}; avoid for: ${option.avoidFor.join(', ') || 'none'}`;
+
+// route-decide <request.json>: { repository, role? (default peer), brief,
+// paseoHome? }. `brief` is the Lead-authored routing brief — a nonempty string
+// or object; it is the only task context Jev sees (carry task description,
+// risk/effort signals, constraints, dependencies — see module header). Returns
+// { schemaVersion, optionId, catalogSha256, declined, role, decision } where
+// `decision` is the Jev receipt prepare later verifies offline.
+//
+// Mode: resolveJev gates on `enabled` alone with allowShadow — an enabled
+// daemon whose routing capability is not yet armed runs shadow evaluation
+// (receipt emitted, context.armed=false, Lead still chooses; prepare records
+// both picks). Armed requires capabilities.routing=true and makes the receipt
+// binding at plan time.
+export async function routeDecide(request, { home, fetchImpl, now } = {}) {
+  if (!record(request)) throw jevError('jev-request-invalid', 'route-decide request must be a JSON object');
+  const repository = request.repository;
+  let repoStat;
+  try {
+    repoStat = typeof repository === 'string' && isAbsolute(repository) ? lstatSync(repository) : null;
+  } catch {
+    repoStat = null;
+  }
+  if (!repoStat?.isDirectory()) {
+    throw jevError('jev-request-invalid', 'route-decide requires an absolute repository directory');
+  }
+  const role = request.role ?? 'peer';
+  if (!roles.includes(role)) throw jevError('jev-request-invalid', `route-decide role must be one of ${roles.join(', ')}`);
+  const brief = request.brief;
+  const briefOk = (typeof brief === 'string' && brief.trim().length > 0) || (record(brief) && Object.keys(brief).length > 0) || (Array.isArray(brief) && brief.length > 0);
+  if (!briefOk) throw jevError('jev-request-invalid', 'route-decide requires brief — a nonempty Lead-authored routing brief (never assignmentFile bytes)');
+
+  const daemonHome = home ?? request.paseoHome ?? paseoHome();
+  const { provider, key, armed } = resolveJev(daemonHome, 'routing', { allowShadow: true });
+  const catalog = readCatalog(repository, daemonHome);
+
+  const eligible = eligibleOptions(catalog, role);
+  if (eligible.length === 0) {
+    const reasons = catalog.options
+      .map(option => `${option.id}: ${optionExclusions(option, role).join(', ') || 'eligible'}`)
+      .join('; ');
+    throw jevError('jev-no-candidates', `No eligible routing options for ${role} — every catalog option is excluded (${reasons})`);
+  }
+  if (eligible.some(option => option.id === ROUTE_DECLINE_CANDIDATE)) {
+    throw jevError('jev-request-invalid', `Catalog option id "${ROUTE_DECLINE_CANDIDATE}" collides with the Jev decline sentinel`);
+  }
+  const candidates = eligible.map(option => option.id);
+  const state = {
+    task: brief,
+    role,
+    options: eligible.map(option => ({
+      id: option.id, provider: option.provider, model: option.model,
+      suitableFor: option.suitableFor, avoidFor: option.avoidFor,
+    })),
+  };
+  const questions = {
+    [ROUTE_DECISION_QUESTION]: {
+      type: 'choice',
+      instructions: 'Choose exactly one criteria key as the seat for this task. Judge the task brief against each option\'s provider, model and suitability fields. Answer no-suitable-option when none of the listed options fits.',
+      criteria: {
+        ...Object.fromEntries(eligible.map(option => [option.id, describeOption(option)])),
+        [ROUTE_DECLINE_CANDIDATE]: 'None of the listed options is a suitable seat for this task — decline rather than guess',
+      },
+    },
+  };
+  const context = {
+    capability: 'routing', role, armed,
+    catalogSha256: catalog.sha256,
+    candidates,
+    declineCandidate: ROUTE_DECLINE_CANDIDATE,
+  };
+  const { answers, receipt } = await askJev({ provider, key, state, questions, context }, { fetchImpl, now });
+  const choice = answers[ROUTE_DECISION_QUESTION].choice;
+  const declined = choice === ROUTE_DECLINE_CANDIDATE;
+  return {
+    schemaVersion: 1,
+    optionId: declined ? null : choice,
+    catalogSha256: catalog.sha256,
+    declined,
+    role,
+    decision: receipt,
+  };
+}

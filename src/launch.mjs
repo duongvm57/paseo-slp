@@ -338,6 +338,7 @@ export function requestSchema(handoff = false) {
         'route.optionId': 'an option id from the routes output',
         'route.catalogSha256': 'the sha256 routes returned — stale or missing fails',
         'route.disposition': 'peer only — the bounded specialism (engineer, architect, reviewer, scout, …)',
+        'route.decision': 'Jev receipt from `route-decide` — verified when supplied (shadow mode records jevChoice/declined in the plan), and REQUIRED + binding when the daemon arms jev.capabilities.routing (a bare optionId then fails)',
         providers: 'live list_providers array; the option’s canonical slp-<family>-<role> wrapper must be observed',
       },
       'explicit binding — supervisor/lead': {
@@ -348,6 +349,7 @@ export function requestSchema(handoff = false) {
       'The planner emits a plan only — it never creates agents or mutates host state.',
       'prepare --check <request.json> reports each stage failure; prepare <request.json> --emit create prints only the create_agent argument record.',
       'Peer launches only through the project pool option: an explicit binding is refused, and profiles may accompany the request for discovery but never select the runtime.',
+      'Jev routing mode is per-daemon and evaluated at plan time for both prepare and prepare-handoff (they share the plan builder): a route.decision receipt is always verified, is required whenever jev.capabilities.routing is armed, and only then binds route.optionId to the receipt choice — an enabled-but-unarmed daemon verifies and records both picks (shadow evaluation). prepare never calls the network — receipts are produced only by the explicit route-decide helper command.',
     ],
     examples: {
       supervisor: {

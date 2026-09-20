@@ -201,6 +201,9 @@ Six rules fall out of the role model and shape everything below:
 │     state/role-routing.json                                      │
 │                            optional supervisor/lead family+model  │
 │                            picks (settings-driven generation)     │
+│     state/jev.json       optional Jev decision-primitive toggles  │
+│     state/jev-*.key      per-daemon provider key (0600,           │
+│                          write-only; status reports hasKey only)  │
 │                                                                  │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -431,6 +434,11 @@ still be executing from them.
 
 - The plugin installs and manages; it does **not** orchestrate. No
   agent-facing tools, no `create_agent`, no delegation logic.
+- Jev is an explicit helper primitive, not an agent feature: the
+  `route-decide` CLI is the only call path (no loops, schedules or
+  prepare-time calls), its key lives in per-daemon state, and routing
+  stays deterministic — prepare verifies the receipt offline and fails
+  closed on any config/transport/validation error.
 - No background watchers — status is computed when asked.
 - The Supervisor/Lead/Peer intelligence is **policy text + Paseo
   primitives**, not code in the plugin. The plugin's correctness job ends

@@ -5,6 +5,7 @@ import { hash } from './package.mjs';
 import { families, roles, providerId } from './profiles.mjs';
 import { settingIdPattern, unsafeModelPattern, rejectRouteKeys, verifyProvider,
   runtimeSettingKeys, profileRouteKeys, swe2ModelPattern } from './binding.mjs';
+import { readJevConfig, verifyReceipt } from './jev.mjs';
 
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const nonempty = value => typeof value === 'string' && value.trim().length > 0;
@@ -74,14 +75,77 @@ export function readCatalog(repository, home = paseoHome()) {
   return { ...validateCatalog(JSON.parse(bytes)), path, scope, sha256: hash(bytes) };
 }
 
+// Deterministic eligibility — one predicate, two consumers (view and
+// enforcement): catalogBinding refuses on these tokens and jev-routing builds
+// its candidate set from the empty-token set. Closed vocabulary, never a
+// fused sentence: `disabled`, `availability:<state>`, `role-not-listed`.
+export function optionExclusions(option, role) {
+  const excluded = [];
+  if (!option.enabled) excluded.push('disabled');
+  if (option.availability !== 'ready') excluded.push(`availability:${option.availability}`);
+  if (!option.roles.includes(role)) excluded.push('role-not-listed');
+  return excluded;
+}
+
+export const eligibleOptions = (catalog, role) => catalog.options.filter(option => optionExclusions(option, role).length === 0);
+
+// The routing-decision contract shared with jev-routing.mjs: exactly one
+// choice question; its answer is an eligible option id or the decline
+// sentinel — an explicit "no suitable option" outcome recorded on the receipt.
+export const ROUTE_DECISION_QUESTION = 'route_option';
+export const ROUTE_DECLINE_CANDIDATE = 'no-suitable-option';
+
 // Lead chooses the option, not an enum/disposition-to-profile mapping.
+// Jev routing has two live modes (per-daemon jev.enabled + capabilities.routing):
+//   - ARMED (capabilities.routing===true): a route.decision receipt is
+//     REQUIRED and binding — route.optionId must equal the receipt choice; a
+//     decline receipt fails closed (escalate, do not retry).
+//   - SHADOW (enabled but capability not armed): a supplied receipt is still
+//     verified for consistency — hash, capability, catalog hash, the exact
+//     route_option question set, context.role, candidate membership — but the
+//     Lead's route.optionId decides; the plan records BOTH picks (jevChoice,
+//     declined) so agreement rate and asymmetric error classes can be measured
+//     before the Human arms the capability.
+// Verification is offline consistency (internal hash, catalog hash, candidate
+// membership) — consistency, not cryptographic authenticity.
 export function catalogBinding(repository, role, providers, route, home) {
   if (Object.hasOwn(route, 'catalogFile')) throw new Error('Routing is repository-scoped; use repository/.paseo-slp/slp-routing.json, not route.catalogFile');
   const catalog = readCatalog(repository, home);
   if (route.catalogSha256 !== catalog.sha256) throw new Error('Routing catalog changed or hash missing; read routes again before selecting');
+  const decision = route.decision;
+  const jevConfig = readJevConfig(home ?? paseoHome());
+  const jevMode = jevConfig !== null && jevConfig.enabled === true && jevConfig.capabilities.routing === true;
+  let jevChoice;
+  let jevDeclined = false;
+  if (decision != null) {
+    verifyReceipt(decision);
+    if (decision.context?.capability !== 'routing') throw new Error('Jev decision receipt is not a routing decision');
+    if (decision.context.catalogSha256 !== catalog.sha256) throw new Error('Jev decision receipt was issued against a different catalog — run route-decide again');
+    const questionNames = Object.keys(decision.questions);
+    if (questionNames.length !== 1 || questionNames[0] !== ROUTE_DECISION_QUESTION) {
+      throw new Error(`Jev routing decision receipt must carry exactly the ${ROUTE_DECISION_QUESTION} question`);
+    }
+    if (decision.context.role !== role) throw new Error(`Jev decision receipt was issued for a different role — run route-decide for ${role}`);
+    if (jevConfig !== null && decision.model !== jevConfig.provider.model) {
+      throw new Error('Jev decision receipt was issued by a different model than the configured provider — run route-decide again');
+    }
+    jevChoice = decision.answers[ROUTE_DECISION_QUESTION]?.choice;
+    if (typeof jevChoice !== 'string') throw new Error(`Jev decision receipt lacks a ${ROUTE_DECISION_QUESTION} choice answer`);
+    jevDeclined = jevChoice === ROUTE_DECLINE_CANDIDATE;
+    if (jevDeclined && jevMode) throw new Error('Jev declined to route: the receipt records "no suitable option" — the pool is Human-owned, escalate rather than retry');
+  } else if (jevMode) {
+    throw new Error('Jev routing mode is on for this daemon: prepare requires a route.decision receipt — run slp route-decide to obtain one (the Human can disable Jev routing to restore Lead judgment)');
+  }
   const option = catalog.options.find(item => item.id === route.optionId);
   if (!option) throw new Error(`Unknown routing option ${route.optionId}`);
-  if (!option.enabled || option.availability !== 'ready' || !option.roles.includes(role)) throw new Error(`Routing option ${option.id} is disabled, unavailable or excluded for ${role}`);
+  const excluded = optionExclusions(option, role);
+  if (excluded.length) throw new Error(`Routing option ${option.id} excluded for ${role}: ${excluded.join(', ')}`);
+  if (decision != null) {
+    if (!Array.isArray(decision.context.candidates) || !decision.context.candidates.includes(option.id)) {
+      throw new Error(`Routing option ${option.id} was not a Jev candidate in the receipt — run route-decide again`);
+    }
+    if (jevMode && jevChoice !== option.id) throw new Error(`route.optionId ${route.optionId} does not match the Jev receipt choice ${jevChoice}`);
+  }
   rejectRouteKeys(route, [...profileRouteKeys, ...runtimeSettingKeys],
     key => `Routing option settings are complete; conflicting route.${key}`);
   if (Object.hasOwn(route, 'quotaFallbackFrom')) {
@@ -93,8 +157,10 @@ export function catalogBinding(repository, role, providers, route, home) {
   }
   const provider = providerId(role, option.provider);
   verifyProvider(providers, provider, () => option.provider, provider);
+  const jev = { required: jevMode, decision: decision != null ? 'verified' : 'none' };
+  if (decision != null) Object.assign(jev, { jevChoice, declined: jevDeclined });
   return {
     binding: { provider, model: option.model, modeId: option.modeId, thinkingOptionId: option.thinkingOptionId, features: structuredClone(option.features ?? {}) },
-    routing: { catalogFile: catalog.path, catalogScope: catalog.scope, catalogSha256: catalog.sha256, optionId: option.id, ...(route.quotaFallbackFrom ? { quotaFallbackFrom: route.quotaFallbackFrom } : {}) },
+    routing: { catalogFile: catalog.path, catalogScope: catalog.scope, catalogSha256: catalog.sha256, optionId: option.id, jev, ...(route.quotaFallbackFrom ? { quotaFallbackFrom: route.quotaFallbackFrom } : {}) },
   };
 }

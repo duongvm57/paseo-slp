@@ -441,11 +441,11 @@ test('quota edits invalidate prepared selections and fresh selection can use ano
   catalog.options[0].availability = 'quota-exhausted';
   writeFileSync(path, json(catalog));
   assert.throws(() => launch({ route: stale }), /catalog changed/);
-  assert.throws(() => launch({ route: route('luna-code') }), /disabled, unavailable/);
+  assert.throws(() => launch({ route: route('luna-code') }), /availability:quota-exhausted/);
   assert.equal(launch({ route: route('glm-design') }).create.provider, 'slp-pi-peer/opencode/glm-5.3-flash');
   catalog.options[2].enabled = false;
   writeFileSync(path, json(catalog));
-  assert.throws(() => launch({ route: route('glm-design') }), /disabled, unavailable/);
+  assert.throws(() => launch({ route: route('glm-design') }), /excluded for peer: disabled/);
   assert.throws(() => launch({ route: route('missing') }), /Unknown routing option/);
   assert.throws(() => launch({ role: 'supervisor', route: route('luna-reason') }), /excluded/);
   assert.throws(() => launch({ route: { ...route('luna-reason'), thinkingOptionId: 'low' } }), /conflicting/);
@@ -595,7 +595,7 @@ test('quota fallback stays within the authorized project pool and preserves comp
   const stale=route('glm-design').catalogSha256;
   catalog.options.find(o=>o.id==='glm-design').availability='quota-exhausted';writeFileSync(path,json(catalog));
   assert.throws(()=>launch({catalogSha256:stale}),/changed or hash missing/);
-  assert.throws(()=>launch(),/unavailable/);
+  assert.throws(()=>launch(),/availability:quota-exhausted/);
   for(const fallback of [{enabled:true,optionIds:['outside-pool']},{enabled:true,optionIds:[]},{enabled:true,optionIds:['glm-design','glm-design']},{enabled:'true',optionIds:['glm-design']},{enabled:true,optionIds:['glm-design'],model:'gpt-5.6-sol'}]) {
     assert.throws(()=>validateCatalog({...catalog,quotaFallback:fallback}),/quotaFallback/);
   }

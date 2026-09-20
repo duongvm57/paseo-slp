@@ -22,7 +22,9 @@ Local installation/transport checks do not constitute workflow acceptance.
 | src/references/anti-patterns.md | All 20 guide §9 hypotheses with evidence, questions and bounded responses; reached on audit/drift triggers. |
 | src/references/provider-routing.md | Supervisor/Lead profile selection, Peer pool selection, validation and handoff procedure. |
 | src/references/review-gates.md | Review gate structure: parallel axis-split seats (Spec vs Standards, optional cross-family), smell baseline, neutral briefs, non-merged aggregation. |
-| src/routing.mjs | Resolve the repository catalog, falling back to the user-scope catalog when absent; bind a Lead-selected option with fresh hash and availability checks. |
+| src/routing.mjs | Resolve the repository catalog, falling back to the user-scope catalog when absent; bind a Lead-selected option with fresh hash and availability checks. `optionExclusions` is the single eligibility predicate — closed-vocabulary tokens (`disabled`, `availability:<state>`, `role-not-listed`) shared by enforcement and Jev candidate generation. `catalogBinding` verifies a supplied Jev receipt offline and requires one when the daemon arms `jev.capabilities.routing`. |
+| src/jev.mjs | Jev (TypeSafe System One) bounded-decision transport — never an ACP provider. Per-daemon config/key resolution (fail closed, all toggles default off), OpenRouter Decisions API calls to the pinned `typesafe/jev-1.13` with ~5s timeout and at most one bounded retry, typed-answer validation, credential-shaped-string redaction before send, and decision-receipt build/verify. Receipts prove consistency, not authenticity; confidence is recorded, never a threshold. |
+| src/jev-routing.mjs | First Jev consumer: `route-decide` computes the deterministic eligible set from `optionExclusions` plus the `no-suitable-option` sentinel, sends the Lead-authored brief as state (never raw assignmentFile bytes; catalog `notes`/`priority` withheld) and emits the option id plus receipt. Decline exits nonzero. Runs only on explicit invocation — no loops, schedules or prepare-time calls. |
 | skills/paseo-slp-onboarding/SKILL.md | Installable repo tactics and Peer pool setup, with Supervisor/Lead profile verification; project/global installation is independent from repo config initialization. |
 | src/templates/workspace-protocol.md | Repository tactics template with risk classes, routing, monitoring and proof gates; the `agent_mode` frontmatter field records the intended spawn mode for direct launches (empty falls back to the bundle's `modeId`, then asks); explicit init preserves existing files. |
 | src/binding.mjs | Every rule a Binding must satisfy: setting patterns, the route override deny-lists and the single provider-health check. Imports nothing from the package. |
@@ -34,8 +36,8 @@ Local installation/transport checks do not constitute workflow acceptance.
 | src/monitor.mjs | On-demand signal scan over daemon-owned agent state plus each declared worktree's git status; emits `{agentId, kind, evidence, observedAt}` candidates (attention, follow-up-round, idle-dirty, scope-drift, test-mirror, file-churn, tool-mix, correction-cadence) only for new fingerprints when a stateFile checkpoint is supplied — that checkpoint is the only write. Never a verdict, daemon or rendered-log parse; broken cwd becomes an evidence gap. An opt-in `devinSessionsDb` request field probes the devin CLI sessions.db read-only for devin-family agents (joined by `persistence.nativeHandle` = `sessions.id`; a missing or unmatched handle is a gap — never a cwd guess) to derive tool-mix and correction-cadence candidates; every failure is an evidence gap, not a crash. |
 | src/notebook.mjs | Read-only locator for a repository's active governance notebook: resolves the repository's git common dir — the property linking a worktree back to its repository — then lists Supervisor agents (provider containing `supervisor`, or a Supervisor-titled state file) whose `cwd` shares it. Output is candidates only, sorted by lastActivityAt, each with notebook path and `notebookExists`; broken agent cwds become gaps. Never copies or mutates notebook content, and picks no authoritative candidate — governance stays per-checkout. |
 | src/package.mjs | Package identity, exclusive staging, integrity checks and stable Git work snapshot; untracked nested Git work-tree roots are snapshotted recursively under `nested`, sub-repos can carry their own `nested`, and index gitlinks record `{path, kind:"gitlink", indexOid, headOid, state}` with non-clean states listed in top-level `incomplete`. |
-| src/runtime-state.mjs | Read-only plugin-state probes (H13 workaround): `localTarget` mirrors the plugin's daemon-home detection; `runtimeStatus` recomputes the file-derivable parts of the daemon `status` view — receipt, owned providers/profiles, runtime and launcher integrity, config-drift presence — and reports daemon-only views (live conflicts, family availability) as gaps, never guesses. Fails closed on corrupt plugin state. Mutation RPCs are Human-authority and are not exposed. Retire when the host ships `paseo plugin invoke` or MCP `invoke_plugin_rpc`. |
-| bin/slp.mjs | Install/upgrade/preview, verify/uninstall, init, materialize, routes, prepare/handoff, inventory, agents, monitor, notebook, identity, snapshot, instructions (raw session-entry bundle bytes on stdout, provenance on stderr), status and local-target (read-only plugin-state probes) entrypoints. |
+| src/runtime-state.mjs | Read-only plugin-state probes (H13 workaround): `localTarget` mirrors the plugin's daemon-home detection; `runtimeStatus` recomputes the file-derivable parts of the daemon `status` view — receipt, owned providers/profiles, runtime and launcher integrity, config-drift presence — and reports daemon-only views (live conflicts, family availability) as gaps, never guesses. The Jev probe reports `hasKey`/`keyPermissionsOk` only — key material never enters output. Fails closed on corrupt plugin state. Mutation RPCs are Human-authority and are not exposed. Retire when the host ships `paseo plugin invoke` or MCP `invoke_plugin_rpc`. |
+| bin/slp.mjs | Install/upgrade/preview, verify/uninstall, init, materialize, routes, prepare/handoff, inventory, agents, monitor, notebook, identity, snapshot, instructions (raw session-entry bundle bytes on stdout, provenance on stderr), route-decide (the only path that calls Jev — explicit invocation, network, emits a receipt; prepare and prepare --check stay offline), status and local-target (read-only plugin-state probes) entrypoints. |
 | skills/paseo-slp-e2e/SKILL.md | Single-session full-suite execution procedure; requires the source checkout and authorized Paseo actors. |
 | e2e/evidence.mjs | One contract per evidence kind: what may enter the ledger and what discharges the kind's requirement at seal. |
 | e2e/criteria.mjs | U1–U7 as code, each naming the evidence kinds that can support it; the mapping a reviewer previously held in their head. |
@@ -181,6 +183,34 @@ a saved slp-peer limits the pool. No catalog in either scope, or an
 empty/no-eligible pool, blocks Peer creation until setup is completed — never a
 saved profile, another repository's catalog or inherited Lead settings. An empty
 repository catalog remains authoritative and disables the fallback.
+
+Jev-assisted routing is an opt-in per-daemon capability, configured under
+<daemonHome>/slp-runtime/state/jev.json with the OpenRouter key beside it
+(write-only, 0600; status surfaces hasKey only). Jev is a bounded decision
+primitive over OpenRouter's Decisions API (pinned typesafe/jev-1.13), never
+an ACP provider or agent seat, and runs only through the explicit
+route-decide helper — no loops, schedules or prepare-time calls; prepare and
+prepare --check remain offline and merely verify the supplied receipt. Two
+modes: shadow (enabled without capabilities.routing — route-decide emits a
+receipt, the Lead still chooses, the plan records both picks for agreement
+measurement) and armed (capabilities.routing=true — the receipt is required
+and binding, including optionId matching the recorded choice); when supplied
+a receipt is always verified, toggles apply at preparation time and never
+mutate running seats. Shadow evaluation precedes arming: the Human
+pre-registers exit criteria (agreement rate and the asymmetric error class)
+and arms only once the recorded pairs satisfy them. In armed mode the
+suitability reason trail is the receipt's recorded distribution, not Lead
+prose. Eligibility stays deterministic and precomputed (the same
+optionExclusions tokens enforcement uses), Jev may only pick inside the
+eligible set plus the explicit no-suitable-option sentinel, and every
+configuration, transport, validation or receipt error fails closed. An
+OpenRouter/TypeSafe outage therefore blocks only the dependent Peer
+delegation while armed — controlled degradation is the Human disabling the
+capability and Lead judgment resuming; disabling keeps the stored key.
+Confidence lands on the receipt as evidence, never as a routing threshold,
+and receipts prove consistency, not cryptographic authenticity. Accepted
+risk (recorded): the key file is 0600 inside the daemon home, yet any
+same-user process can read it — daemon-home integrity is the boundary.
 
 prepare accepts repository, workspaceId, assignment and role. Supervisor/Lead use
 fresh profiles/providers; Peer uses providers and route.optionId/catalogSha256.

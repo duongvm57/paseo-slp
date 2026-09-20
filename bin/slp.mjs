@@ -7,6 +7,7 @@ import { identity, install, uninstall, update, verifyInstall, snapshot, readJson
 import { launchPlan, handoffPlan, launchCheck, requestSchema } from '../src/launch.mjs';
 import { roleBundle } from '../src/role-bundle.mjs';
 import { readCatalog } from '../src/routing.mjs';
+import { routeDecide } from '../src/jev-routing.mjs';
 import { resolveHome } from '../src/managed-home.mjs';
 import { installPaseo, uninstallPaseo, upgradePaseo, initWorkspace, materializeWorkspace, installHome } from '../src/paseo-install.mjs';
 import { inventory } from '../src/inventory.mjs';
@@ -42,14 +43,14 @@ try {
       target = key;
     } else throw new Error(`Unknown flag ${key}`);
   }
-  const commandFlags = { install: ['--paseo-home', '--apply', '--reload'], uninstall: ['--apply', '--reload'], upgrade: ['--from', '--apply', '--reload'], init: ['--routing-from', '--apply'], materialize: ['--from', '--apply'], routes: ['--paseo-home'], inventory: ['--paseo-home'], agents: ['--paseo-home'], monitor: [], notebook: ['--paseo-home'], prepare: ['--check', '--emit', '--schema'], 'prepare-handoff': ['--check', '--emit', '--schema'], status: ['--paseo-home'], 'local-target': ['--paseo-home'] };
+  const commandFlags = { install: ['--paseo-home', '--apply', '--reload'], uninstall: ['--apply', '--reload'], upgrade: ['--from', '--apply', '--reload'], init: ['--routing-from', '--apply'], materialize: ['--from', '--apply'], routes: ['--paseo-home'], inventory: ['--paseo-home'], agents: ['--paseo-home'], monitor: [], notebook: ['--paseo-home'], prepare: ['--check', '--emit', '--schema'], 'prepare-handoff': ['--check', '--emit', '--schema'], 'route-decide': ['--paseo-home'], status: ['--paseo-home'], 'local-target': ['--paseo-home'] };
   for (const key of Object.keys(options)) if (!commandFlags[command]?.includes(key)) throw new Error(`${key} is not valid for ${command}`);
   const prepareModes = ['--check', '--emit', '--schema'].filter(key => options[key]);
   if (prepareModes.length > 1) throw new Error(`${prepareModes.join(' and ')} are separate modes — pick one`);
   if (command === 'upgrade' && !options['--from']) throw new Error('upgrade requires --from <previous-installation>');
   if (command === 'materialize' && !options['--from']) throw new Error('materialize requires --from <source-repository>');
   if (options['--reload'] && !options['--apply']) throw new Error('--reload requires --apply');
-  const targetArg = { snapshot: 'repository', verify: 'dir', prepare: 'request.json', 'prepare-handoff': 'request.json', routes: 'repository', init: 'repository', materialize: 'repository', monitor: 'request.json', notebook: 'repository', instructions: 'role' };
+  const targetArg = { snapshot: 'repository', verify: 'dir', prepare: 'request.json', 'prepare-handoff': 'request.json', routes: 'repository', init: 'repository', materialize: 'repository', monitor: 'request.json', notebook: 'repository', instructions: 'role', 'route-decide': 'request.json' };
   if (targetArg[command] && !target && !options['--schema']) throw new Error(`${command} requires <${targetArg[command]}>`);
   if (target && !targetArg[command] && !['install', 'uninstall', 'upgrade'].includes(command)) throw new Error(`${command} takes no arguments`);
   let result;
@@ -72,6 +73,13 @@ try {
       // initialPrompt, title, settings and workspaceId pass through untrimmed.
       result = options['--emit'] ? planned.create : planned;
     }
+  }
+  else if (command === 'route-decide') {
+    // Explicit helper invocation only — Jev is never called from prepare, a
+    // schedule or a background loop. A decline is a successful decision run
+    // whose answer is "no suitable option": emit the receipt and exit 1.
+    result = await routeDecide(readJson(target), { home: options['--paseo-home'] });
+    if (result.declined) process.exitCode = 1;
   }
   else if (command === 'routes') result = readCatalog(target, options['--paseo-home']);
   else if (command === 'inventory') result = inventory(options['--paseo-home']);
@@ -122,6 +130,6 @@ try {
         process.exitCode = 1;
       }
     }
-  } else throw new Error('Usage: slp.mjs identity | snapshot <repo> | install [absolute-dir] [--paseo-home <absolute-home>] [--apply] [--reload] | upgrade <absolute-new-dir> --from <previous-installation> [--apply] [--reload] | verify <dir> | uninstall <dir> [--apply] [--reload] | init <absolute-repo> [--routing-from <absolute-json>] [--apply] | routes <absolute-repo> [--paseo-home <absolute-home>] | inventory [--paseo-home <absolute-home>] | agents [--paseo-home <absolute-home>] | prepare <request.json> [--check | --emit create | --schema] | prepare-handoff <request.json> [--check | --emit create | --schema] | materialize <repository> --from <source-repository> [--apply] | monitor <request.json> | notebook <repository> [--paseo-home <absolute-home>] | instructions <role> | status [--paseo-home <absolute-home>] | local-target [--paseo-home <absolute-home>]');
+  } else throw new Error('Usage: slp.mjs identity | snapshot <repo> | install [absolute-dir] [--paseo-home <absolute-home>] [--apply] [--reload] | upgrade <absolute-new-dir> --from <previous-installation> [--apply] [--reload] | verify <dir> | uninstall <dir> [--apply] [--reload] | init <absolute-repo> [--routing-from <absolute-json>] [--apply] | routes <absolute-repo> [--paseo-home <absolute-home>] | inventory [--paseo-home <absolute-home>] | agents [--paseo-home <absolute-home>] | prepare <request.json> [--check | --emit create | --schema] | prepare-handoff <request.json> [--check | --emit create | --schema] | materialize <repository> --from <source-repository> [--apply] | monitor <request.json> | route-decide <request.json> [--paseo-home <absolute-home>] | notebook <repository> [--paseo-home <absolute-home>] | instructions <role> | status [--paseo-home <absolute-home>] | local-target [--paseo-home <absolute-home>]');
   if (result !== undefined) process.stdout.write(json(result));
 } catch (error) { console.error(error.message); process.exitCode = 1; }
