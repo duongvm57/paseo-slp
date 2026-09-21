@@ -95,15 +95,21 @@ bản — nằm ở link kiến trúc phía trên.
 Package phân phối dưới dạng Paseo plugin. Cài lên daemon chạy công việc:
 
 ```bash
-# Từ Git source — plugin nằm trong thư mục plugin/ của repo:
-paseo plugin install <git-source>:plugin --ref <ref>
+# Pin vào một release — plugin nằm trong thư mục plugin/ của repo:
+paseo plugin install duongvm57/paseo-slp:plugin --ref v0.2.0
+
+# Bám nhánh main thay vì pin release:
+paseo plugin install duongvm57/paseo-slp:plugin --ref main
 
 # Từ checkout local (development):
 paseo plugin install /absolute/path/to/paseo-slp/plugin
 ```
 
-`<git-source>` là mọi thứ `git clone` chấp nhận — ví dụ URL GitHub của repo
-hoặc `file:///absolute/path/to/paseo-slp` cho clone local. Daemon checkout
+`duongvm57/paseo-slp` là dạng rút gọn của GitHub; tham số source nhận mọi
+thứ `git clone` chấp nhận, kể cả URL HTTPS/SSH đầy đủ hoặc
+`file:///absolute/path/to/paseo-slp` cho clone local. Hậu tố `:plugin` chọn
+thư mục con. `--ref` là tag hoặc commit thì pin checkout; là branch thì bám
+nhánh và dịch chuyển khi `paseo plugin update`. Daemon checkout
 ref vào thư mục quản lý `$PASEO_HOME/plugins/paseo-slp/<id>/` rồi chạy bước
 `build` trong manifest (`npm install` trong `plugin/`) trước khi nạp. Kiểm
 tra bằng `paseo plugin ls` — plugin phải đạt trạng thái `running`.
