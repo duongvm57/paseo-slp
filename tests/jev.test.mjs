@@ -23,7 +23,7 @@ function fixture(t) {
   return { dir, installed: join(dir, 'installed'), repo: join(dir, 'repo'), home: join(dir, 'home') };
 }
 
-const testCatalog = () => ({ version: 1, policy: 'Test pool.', quotaFallback: { enabled: false, optionIds: [] }, options: [
+const testCatalog = () => ({ version: 1, policy: 'Test pool.', quotaFallback: { enabled: false, optionId: null }, options: [
   { id: 'luna-code', provider: 'codex', roles: ['peer'], model: 'gpt-5.6-luna', enabled: true, availability: 'ready', priority: 20, suitableFor: ['coding'], avoidFor: [], notes: 'coding seat' },
   { id: 'luna-reason', provider: 'codex', roles: ['peer'], model: 'gpt-5.6-luna', enabled: true, availability: 'ready', priority: 10, suitableFor: ['reasoning'], avoidFor: [], notes: 'reasoning seat', thinkingOptionId: 'xhigh' },
   { id: 'paused-seat', provider: 'codex', roles: ['peer'], model: 'gpt-5.6-luna', enabled: true, availability: 'paused', priority: 30, suitableFor: ['coding'], avoidFor: [], notes: 'paused seat' },

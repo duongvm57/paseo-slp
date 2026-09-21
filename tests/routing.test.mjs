@@ -30,7 +30,7 @@ const providers = ['slp-codex-peer', 'slp-pi-peer', 'slp-devin-peer', 'slp-claud
 const request = { role: 'peer', repository: root, workspaceId: 'workspace', assignment: 'Inspect cancellation ownership; no code writes.', profiles, providers };
 // Test pool fixture — independent of examples/, which is a documentation
 // skeleton and must never contain launchable model names.
-const testCatalog = () => ({ version: 1, policy: 'Test pool.', quotaFallback: { enabled: false, optionIds: [] }, options: [
+const testCatalog = () => ({ version: 1, policy: 'Test pool.', quotaFallback: { enabled: false, optionId: null }, options: [
   { id: 'luna-code', provider: 'codex', roles: ['peer'], model: 'gpt-5.6-luna', thinkingOptionId: 'medium', enabled: true, availability: 'unknown', suitableFor: ['coding'], avoidFor: [], notes: 'coding seat' },
   { id: 'luna-reason', provider: 'codex', roles: ['peer'], model: 'gpt-5.6-luna', thinkingOptionId: 'high', enabled: true, availability: 'unknown', suitableFor: ['reasoning'], avoidFor: [], notes: 'reasoning seat' },
   { id: 'glm-design', provider: 'pi', roles: ['peer'], model: 'opencode/glm-5.3-flash', thinkingOptionId: 'medium', enabled: true, availability: 'unknown', suitableFor: ['architect'], avoidFor: [], notes: 'pi seat' },
@@ -607,14 +607,14 @@ test('quota fallback stays within the authorized project pool and preserves comp
   assert.throws(()=>launch(), /disabled or target/);
   delete catalog.quotaFallback; writeFileSync(path,json(catalog));
   assert.throws(()=>launch(), /disabled or target/);
-  catalog.quotaFallback={enabled:true,optionIds:['glm-design']};writeFileSync(path,json(catalog));
+  catalog.quotaFallback={enabled:true,optionId:'glm-design'};writeFileSync(path,json(catalog));
   const plan=launch();
   execFileSync('git',['init','-q',dir]);
   const handoff = {previousAgentId:'old-peer',reason:'quota',authority:'project quotaFallback',state:'read-only findings retained',previousOwner:{settled:true,evidence:'host idle and no writes'},resources:[]};
   const next = handoffPlan(installed,{...request,profiles:undefined,repository:dir,route:{...route('glm-design'),quotaFallbackFrom:'luna-code'},handoff});
   assert.equal(next.routing.quotaFallbackFrom,'luna-code');
   assert.equal(next.create.provider,plan.create.provider);
-  assert.throws(()=>handoffPlan(installed,{...request,profiles:undefined,repository:dir,route:{...route('luna-reason'),quotaFallbackFrom:'luna-code'},handoff}),/not authorized/);
+  assert.throws(()=>handoffPlan(installed,{...request,profiles:undefined,repository:dir,route:{...route('luna-reason'),quotaFallbackFrom:'luna-code'},handoff}),/not the designated option/);
   assert.equal(plan.create.provider,'slp-pi-peer/opencode/glm-5.3-flash');
   assert.equal(plan.routing.quotaFallbackFrom,'luna-code');
   assert.deepEqual(plan.create.settings,{thinkingOptionId:'medium',features:{}});
@@ -627,7 +627,7 @@ test('quota fallback stays within the authorized project pool and preserves comp
   catalog.options.find(o=>o.id==='glm-design').availability='quota-exhausted';writeFileSync(path,json(catalog));
   assert.throws(()=>launch({catalogSha256:stale}),/changed or hash missing/);
   assert.throws(()=>launch(),/availability:quota-exhausted/);
-  for(const fallback of [{enabled:true,optionIds:['outside-pool']},{enabled:true,optionIds:[]},{enabled:true,optionIds:['glm-design','glm-design']},{enabled:'true',optionIds:['glm-design']},{enabled:true,optionIds:['glm-design'],model:'gpt-5.6-sol'}]) {
+  for(const fallback of [{enabled:true,optionId:'outside-pool'},{enabled:true,optionId:null},{enabled:'true',optionId:'glm-design'},{enabled:true,optionId:'glm-design',model:'gpt-5.6-sol'},{enabled:true,optionIds:['outside-pool']},{enabled:true,optionIds:['glm-design','glm-design']},{enabled:true,optionId:'glm-design',optionIds:['glm-design']}]) {
     assert.throws(()=>validateCatalog({...catalog,quotaFallback:fallback}),/quotaFallback/);
   }
 });

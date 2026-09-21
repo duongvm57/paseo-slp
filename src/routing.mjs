@@ -11,7 +11,7 @@ import { catalogTokenConflicts, seatTokenConflict, ROUTING_VOCABULARY_VERSION } 
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const nonempty = value => typeof value === 'string' && value.trim().length > 0;
 const statuses = ['ready', 'quota-exhausted', 'paused', 'unknown'];
-export const emptyCatalog = () => ({ version: 1, policy: 'Human maintains model suitability and quota. Lead chooses within the current assignment budget.', quotaFallback: { enabled: false, optionIds: [] }, options: [] });
+export const emptyCatalog = () => ({ version: 1, policy: 'Human maintains model suitability and quota. Lead chooses within the current assignment budget.', quotaFallback: { enabled: false, optionId: null }, options: [] });
 
 export function validateCatalog(catalog) {
   if (!record(catalog) || catalog.version !== 1 || !nonempty(catalog.policy) || !Array.isArray(catalog.options)) throw new Error('Routing catalog requires version=1, policy and options[]');
@@ -38,15 +38,28 @@ export function validateCatalog(catalog) {
     if (!nonempty(option.notes)) throw new Error(`Routing option ${option.id}: suitability notes required`);
   }
   if (catalog.quotaFallback != null) {
+    // Legacy migration (wave 6): the ordered optionIds list predates the
+    // single designated-option contract. A stored list of ≤1 unambiguously
+    // maps to optionId (0 → null, 1 → that id); a longer list is an
+    // ambiguous choice the Human must make — fail closed, never take-first.
     const fallback = catalog.quotaFallback;
-    if (!record(fallback) || typeof fallback.enabled !== 'boolean'
-        || !Array.isArray(fallback.optionIds)
-        || fallback.optionIds.some(id => !ids.has(id))
-        || new Set(fallback.optionIds).size !== fallback.optionIds.length
-        || Object.keys(fallback).some(key => !['enabled', 'optionIds'].includes(key))) {
-      throw new Error('quotaFallback requires enabled and unique optionIds from this pool');
+    if (record(fallback) && Object.hasOwn(fallback, 'optionIds')) {
+      if (Object.hasOwn(fallback, 'optionId')) throw new Error('quotaFallback carries both optionId and legacy optionIds — remove the legacy key');
+      if (!Array.isArray(fallback.optionIds) || fallback.optionIds.some(id => typeof id !== 'string')) {
+        throw new Error('quotaFallback optionIds must be a string list');
+      }
+      if (fallback.optionIds.length > 1) {
+        throw new Error(`quotaFallback lists ${fallback.optionIds.length} options — the designated-option model requires exactly one; edit the pool to choose it`);
+      }
+      catalog.quotaFallback = { enabled: fallback.enabled, optionId: fallback.optionIds[0] ?? null };
     }
-    if (fallback.enabled && fallback.optionIds.length === 0) throw new Error('Enabled quotaFallback needs pool optionIds');
+    const normalized = catalog.quotaFallback;
+    if (!record(normalized) || typeof normalized.enabled !== 'boolean'
+        || (normalized.optionId !== null && (typeof normalized.optionId !== 'string' || !ids.has(normalized.optionId)))
+        || Object.keys(normalized).some(key => !['enabled', 'optionId'].includes(key))) {
+      throw new Error('quotaFallback requires enabled and optionId naming a seat in this pool');
+    }
+    if (normalized.enabled && normalized.optionId === null) throw new Error('Enabled quotaFallback needs a designated pool option');
   }
   return catalog;
 }
@@ -182,8 +195,8 @@ export function catalogBinding(repository, role, providers, route, home) {
   if (Object.hasOwn(route, 'quotaFallbackFrom')) {
     const from = catalog.options.find(item => item.id === route.quotaFallbackFrom);
     if (!from || from.id === option.id || !from.roles.includes(role)) throw new Error('Quota fallback requires a different source option for this role');
-    if (catalog.quotaFallback?.enabled !== true || !catalog.quotaFallback.optionIds.includes(option.id)) {
-      throw new Error('Quota fallback is disabled or target option is not authorized');
+    if (catalog.quotaFallback?.enabled !== true || catalog.quotaFallback.optionId !== option.id) {
+      throw new Error('Quota fallback is disabled or target option is not the designated option');
     }
   }
   const provider = providerId(role, option.provider);

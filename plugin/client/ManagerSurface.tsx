@@ -1026,14 +1026,14 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
       ),
     }));
 
-  // Renaming a seat also remaps its quota-fallback reference — a dangling id
-  // would only surface as a build error later.
+  // Renaming a seat also retargets the quota-fallback designation — a dangling
+  // id would only surface as a build error later.
   const setSeatId = (index: number) => (value: string) =>
     updatePool(form => {
       const oldId = form.seats[index]?.id;
       const seats = form.seats.map((seat, i) => (i === index ? { ...seat, id: value } : seat));
-      const quotaFallbackIds = form.quotaFallbackIds.map(id => (id === oldId ? value.trim() : id));
-      return { ...form, seats, quotaFallbackIds };
+      const quotaFallbackId = form.quotaFallbackId === oldId ? value.trim() : form.quotaFallbackId;
+      return { ...form, seats, quotaFallbackId };
     });
 
   // Family switch on a seat re-validates dependents against the NEW family's
@@ -1140,7 +1140,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     setStandardAppliedId(seatId);
   };
 
-  // Removing a seat drops its fallback references too — a stale id would
+  // Removing a seat drops its fallback designation too — a stale id would
   // fail the build. Every index-keyed piece of editor state is cleared
   // because removal shifts the seats after it — a stale index would bind the
   // convert dialog, the token lookup or the standard-applied marker onto the
@@ -1150,7 +1150,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     updatePool(form => ({
       ...form,
       seats: form.seats.filter((_, i) => i !== index),
-      quotaFallbackIds: form.quotaFallbackIds.filter(id => id !== removedId),
+      quotaFallbackId: form.quotaFallbackId === removedId ? "" : form.quotaFallbackId,
     }));
     setOpenSeat(null);
     setConvertSeatIndex(null);
@@ -1160,13 +1160,8 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     setStandardAppliedId(current => (current === removedId ? null : current));
   };
 
-  const toggleFallbackId = (seatId: string, next: boolean) =>
-    updatePool(form => ({
-      ...form,
-      quotaFallbackIds: next
-        ? [...form.quotaFallbackIds, seatId]
-        : form.quotaFallbackIds.filter(id => id !== seatId),
-    }));
+  const setFallbackId = (seatId: string) =>
+    updatePool(form => ({ ...form, quotaFallbackId: seatId }));
 
   // Save dispatches the same poolBuild the gate compared — whole-file write
   // guarded by the sha256 get-peer-pool returned. A build error is surfaced
@@ -2563,7 +2558,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                             convertId,
                             poolForm.seats.filter((_, i) => i !== index).map(other => other.id.trim()),
                           );
-                          const remapped = poolForm.quotaFallbackIds.includes(seat.id.trim());
+                          const remapped = poolForm.quotaFallbackId === seat.id;
                           return (
                             <>
                               {idError !== null ? (
@@ -2571,8 +2566,8 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                               ) : null}
                               <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
                                 {remapped
-                                  ? `quotaFallback will be remapped in this draft: ${seat.id.trim()} → ${convertId.trim() || "?"}`
-                                  : "No quotaFallback references to remap."}
+                                  ? `quotaFallback will be retargeted in this draft: ${seat.id.trim()} → ${convertId.trim() || "?"}`
+                                  : "No quotaFallback designation to retarget."}
                               </Text>
                               <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
                                 Custom seats do not receive package token updates; references
@@ -2769,25 +2764,27 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
               checked={poolForm.quotaFallbackEnabled}
               onToggle={next => updatePool(form => ({ ...form, quotaFallbackEnabled: next }))}
               title="Quota fallback"
-              hint="When a picked seat's provider reports quota exhaustion, the Lead may retry one of these seats in order"
+              hint="When a picked seat's provider reports quota exhaustion, the Lead may make one retry on the designated seat"
               disabled={poolLocked}
             />
             {poolForm.quotaFallbackEnabled ? (
               poolForm.seats.length === 0 ? (
                 <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
-                  Add seats before enabling a fallback order.
+                  Add seats before designating a fallback option.
                 </Text>
               ) : (
-                poolForm.seats.map((seat, index) => (
-                  <CheckRow
-                    key={`${index}:${seat.id}`}
+                <>
+                  <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                    Designated fallback seat:
+                  </Text>
+                  <ChipSelect<string>
                     colors={colors}
-                    checked={poolForm.quotaFallbackIds.includes(seat.id)}
-                    onToggle={next => toggleFallbackId(seat.id, next)}
-                    title={seat.id || "(unnamed seat)"}
+                    value={poolForm.quotaFallbackId}
+                    options={poolForm.seats.map(seat => ({ label: seat.id || "(unnamed seat)", value: seat.id }))}
+                    onChange={setFallbackId}
                     disabled={poolLocked}
                   />
-                ))
+                </>
               )
             ) : null}
           </View>

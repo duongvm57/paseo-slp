@@ -273,10 +273,26 @@ export const PeerPoolOption = z.object({
 export const PeerPool = z.object({
   version: z.literal(1),
   policy: z.string().refine(poolNonempty),
-  quotaFallback: z.object({
+  quotaFallback: z.preprocess((value, ctx) => {
+    // Wave-6 migration: the legacy ordered optionIds list predates the
+    // single designated-option contract. ≤1 unambiguously maps to optionId
+    // (0 → null, 1 → that id); a longer list is an ambiguous choice — fail
+    // closed with a clear reason, never take-first.
+    if (value !== null && typeof value === "object" && !Array.isArray(value)
+        && Object.hasOwn(value, "optionIds") && !Object.hasOwn(value, "optionId")) {
+      const { optionIds, ...rest } = value as Record<string, unknown> & { optionIds: unknown };
+      if (Array.isArray(optionIds) && optionIds.every(id => typeof id === "string")) {
+        if (optionIds.length > 1) {
+          ctx.addIssue({ code: "custom", path: ["optionIds"], message: `quotaFallback lists ${optionIds.length} options — the designated-option model requires exactly one; edit the pool to choose it` });
+        }
+        return { ...rest, optionId: (optionIds[0] as string | undefined) ?? null };
+      }
+    }
+    return value;
+  }, z.object({
     enabled: z.boolean(),
-    optionIds: z.array(z.string()),
-  }).strict().nullish(),
+    optionId: z.string().nullable(),
+  }).strict().nullish()),
   options: z.array(PeerPoolOption),
 }).passthrough().superRefine((pool, ctx) => {
   const ids = new Set<string>();
@@ -288,16 +304,11 @@ export const PeerPool = z.object({
   });
   const fallback = pool.quotaFallback;
   if (fallback != null) {
-    if (new Set(fallback.optionIds).size !== fallback.optionIds.length) {
-      ctx.addIssue({ code: "custom", path: ["quotaFallback", "optionIds"], message: "quotaFallback optionIds must be unique" });
+    if (fallback.optionId !== null && !ids.has(fallback.optionId)) {
+      ctx.addIssue({ code: "custom", path: ["quotaFallback", "optionId"], message: `quotaFallback option ${fallback.optionId} is not in this pool` });
     }
-    fallback.optionIds.forEach((id, index) => {
-      if (!ids.has(id)) {
-        ctx.addIssue({ code: "custom", path: ["quotaFallback", "optionIds", index], message: `quotaFallback option ${id} is not in this pool` });
-      }
-    });
-    if (fallback.enabled && fallback.optionIds.length === 0) {
-      ctx.addIssue({ code: "custom", path: ["quotaFallback", "optionIds"], message: "enabled quotaFallback needs pool optionIds" });
+    if (fallback.enabled && fallback.optionId === null) {
+      ctx.addIssue({ code: "custom", path: ["quotaFallback", "optionId"], message: "enabled quotaFallback needs a designated pool option" });
     }
   }
 });

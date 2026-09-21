@@ -63,7 +63,7 @@ const seat = (id, over = {}) => ({
   id, provider: 'codex', roles: ['peer'], model: 'gpt-5.6-luna', enabled: true,
   availability: 'ready', suitableFor: [], avoidFor: [], notes: 'n', ...over,
 });
-const pool = options => ({ version: 1, policy: 'Test pool.', quotaFallback: { enabled: false, optionIds: [] }, options });
+const pool = options => ({ version: 1, policy: 'Test pool.', quotaFallback: { enabled: false, optionId: null }, options });
 const jevHome = home => {
   mkdirSync(join(home, 'slp-runtime', 'state'), { recursive: true });
   writeFileSync(join(home, 'config.json'), json({ version: 1 }));
@@ -458,17 +458,20 @@ test('customSeatIdError refuses reserved names, duplicates and bad syntax', () =
   assert.equal(customSeatIdError('security-review-2', ['security-review']), null);
 });
 
-test('convertSeatToCustom renames and remaps quotaFallback in one draft edit', () => {
+test('convertSeatToCustom renames and retargets quotaFallback in one draft edit', () => {
   const form = {
     ...emptyPeerPoolForm(),
     seats: [seatForm({ id: 'security-review', custom: false }), seatForm({ id: 'helper-seat' })],
-    quotaFallbackIds: ['helper-seat', 'security-review'],
+    quotaFallbackId: 'security-review',
   };
   const next = convertSeatToCustom(form, 0, 'sec-custom');
   assert.equal(next.seats[0].id, 'sec-custom');
   assert.equal(next.seats[0].custom, true);
-  assert.deepEqual(next.quotaFallbackIds, ['helper-seat', 'sec-custom'], 'order preserved, reference remapped');
+  assert.equal(next.quotaFallbackId, 'sec-custom', 'designation retargeted to the new id');
   assert.equal(next.seats[1].id, 'helper-seat', 'unrelated seats untouched');
+  // A designation on another seat is not moved by the conversion.
+  const other = convertSeatToCustom({ ...form, quotaFallbackId: 'helper-seat' }, 0, 'sec-custom');
+  assert.equal(other.quotaFallbackId, 'helper-seat');
 });
 
 test('rename/convert keeps passthrough fields via the load-time storedId', () => {

@@ -556,7 +556,8 @@ export interface PeerPoolForm {
   policy: string;
   seats: PeerSeatForm[];
   quotaFallbackEnabled: boolean;
-  quotaFallbackIds: string[];
+  /** The single designated fallback seat id — "" when unset. */
+  quotaFallbackId: string;
 }
 
 /** One-entry-per-line text → the option's string list: trimmed, blanks
@@ -598,7 +599,7 @@ export function emptyPeerPoolForm(): PeerPoolForm {
     policy: "Human maintains model suitability and quota. Lead chooses within the current assignment budget.",
     seats: [],
     quotaFallbackEnabled: false,
-    quotaFallbackIds: [],
+    quotaFallbackId: "",
   };
 }
 
@@ -609,7 +610,7 @@ export function peerPoolForm(pool: PeerPoolValue | null): PeerPoolForm {
     policy: pool.policy,
     seats: pool.options.map(peerSeatForm),
     quotaFallbackEnabled: pool.quotaFallback?.enabled === true,
-    quotaFallbackIds: [...(pool.quotaFallback?.optionIds ?? [])],
+    quotaFallbackId: pool.quotaFallback?.optionId ?? "",
   };
 }
 
@@ -694,15 +695,15 @@ export const formSeatConflict = (seat: PeerSeatForm): SeatTokenConflict | null =
     : null;
 
 /** "Convert this seat to a custom seat" (§7.4.D): rename the seat to a custom id
- *  and remap every in-pool reference (quotaFallback order preserved) in the
- *  same draft edit — one action, one Save, no dangling reference. The caller
- *  validates newId with customSeatIdError first. */
+ *  and retarget the in-pool quotaFallback designation in the same draft edit —
+ *  one action, one Save, no dangling reference. The caller validates newId with
+ *  customSeatIdError first. */
 export function convertSeatToCustom(form: PeerPoolForm, index: number, newId: string): PeerPoolForm {
   const oldId = form.seats[index]?.id;
   const seats = form.seats.map((seat, i) =>
     i === index ? { ...seat, id: newId.trim(), custom: true } : seat);
-  const quotaFallbackIds = form.quotaFallbackIds.map(id => (id === oldId ? newId.trim() : id));
-  return { ...form, seats, quotaFallbackIds };
+  const quotaFallbackId = form.quotaFallbackId === oldId ? newId.trim() : form.quotaFallbackId;
+  return { ...form, seats, quotaFallbackId };
 }
 
 /** §7.4.C import gate: legacy data exists, the stored pool is absent AND the
@@ -821,20 +822,18 @@ export function buildPeerPool(
     ids.add(built.option.id);
     options.push(built.option);
   }
-  const seen = new Set<string>();
-  for (const id of form.quotaFallbackIds) {
-    if (seen.has(id)) return { error: `quotaFallback optionIds must be unique (${id} listed twice)` };
-    seen.add(id);
-    if (!ids.has(id)) return { error: `quotaFallback option "${id}" is not a pool seat` };
+  const fallbackId = form.quotaFallbackId.trim();
+  if (fallbackId !== "" && !ids.has(fallbackId)) {
+    return { error: `quotaFallback option "${fallbackId}" is not a pool seat` };
   }
-  if (form.quotaFallbackEnabled && form.quotaFallbackIds.length === 0) {
-    return { error: "an enabled quota fallback needs at least one seat selected" };
+  if (form.quotaFallbackEnabled && fallbackId === "") {
+    return { error: "an enabled quota fallback needs a designated seat" };
   }
   return {
     pool: {
       version: 1,
       policy,
-      quotaFallback: { enabled: form.quotaFallbackEnabled, optionIds: [...form.quotaFallbackIds] },
+      quotaFallback: { enabled: form.quotaFallbackEnabled, optionId: fallbackId === "" ? null : fallbackId },
       options,
     } as PeerPoolValue,
   };

@@ -898,7 +898,7 @@ test('archetype seats parse as pool options and stay parked', () => {
       policy: 'test',
       seats: PEER_SEAT_ARCHETYPES.map(peerSeatFromArchetype),
       quotaFallbackEnabled: false,
-      quotaFallbackIds: [],
+      quotaFallbackId: "",
     },
     () => [],
   );
@@ -910,7 +910,7 @@ test('peerPoolForm round-trips a stored pool and seeds defaults when absent', ()
   const stored = {
     version: 1,
     policy: 'p',
-    quotaFallback: { enabled: true, optionIds: ['a'] },
+    quotaFallback: { enabled: true, optionId: 'a' },
     options: [{
       id: 'a', provider: 'codex', roles: ['peer'], model: 'm', enabled: true,
       availability: 'ready', modeId: 'full', thinkingOptionId: 'high',
@@ -920,7 +920,7 @@ test('peerPoolForm round-trips a stored pool and seeds defaults when absent', ()
   const form = peerPoolForm(stored);
   assert.equal(form.policy, 'p');
   assert.equal(form.quotaFallbackEnabled, true);
-  assert.deepEqual(form.quotaFallbackIds, ['a']);
+  assert.equal(form.quotaFallbackId, 'a');
   assert.equal(form.seats.length, 1);
   const seat = form.seats[0];
   assert.equal(seat.family, 'codex');
@@ -944,13 +944,17 @@ test('buildPeerPool rejects the constraints validateCatalog enforces', () => {
     enabled: true, features: '', feature: {},
     suitableFor: 'work', avoidFor: 'none', notes: 'n', ...over,
   });
-  const base = { policy: 'p', seats: [seat('a')], quotaFallbackEnabled: false, quotaFallbackIds: [] };
+  const base = { policy: 'p', seats: [seat('a')], quotaFallbackEnabled: false, quotaFallbackId: "" };
   assert.ok('error' in buildPeerPool({ ...base, seats: [seat('a'), seat('a')] }, () => []));
-  assert.match(buildPeerPool({ ...base, quotaFallbackIds: ['ghost'] }, () => []).error, /not a pool seat/);
+  assert.match(buildPeerPool({ ...base, quotaFallbackId: 'ghost' }, () => []).error, /not a pool seat/);
   assert.match(
     buildPeerPool({ ...base, quotaFallbackEnabled: true }, () => []).error,
-    /at least one seat/,
+    /designated seat/,
   );
+  // A designation kept while disabled survives the build as optionId.
+  const kept = buildPeerPool({ ...base, quotaFallbackId: 'a' }, () => []);
+  assert.ok('pool' in kept, `disabled designation must build: ${kept.error}`);
+  assert.deepEqual(kept.pool.quotaFallback, { enabled: false, optionId: 'a' });
   assert.match(buildPeerPool({ ...base, seats: [seat('Bad Id')] }, () => []).error, /must match/);
   assert.match(buildPeerPool({ ...base, seats: [seat('a', { enabled: true, family: '' })] }, () => []).error, /provider family/);
   assert.match(buildPeerPool({ ...base, seats: [seat('a', { enabled: true, model: '' })] }, () => []).error, /needs a model/);
@@ -1007,9 +1011,12 @@ test('the Peer pool card authors the pool through catalog-backed pickers', () =>
   assert.ok(peerCard.includes('sent to Jev'), 'Jev-facing prose is labelled');
   assert.ok(peerCard.includes('Jev never sees this'), 'local-only prose is labelled');
 
-  // Quota fallback: a toggle plus per-seat membership checkboxes.
+  // Quota fallback: a toggle plus ONE designated-seat picker (wave 6 —
+  // single optionId, no ordered list and no per-seat checkboxes).
   assert.ok(peerCard.includes('quotaFallbackEnabled'), 'fallback toggle present');
-  assert.ok(peerCard.includes('toggleFallbackId'), 'fallback membership is per-seat');
+  assert.ok(peerCard.includes('setFallbackId'), 'single designated-seat picker');
+  assert.ok(peerCard.includes('Designated fallback seat'), 'designated-seat label');
+  assert.ok(!peerCard.includes('toggleFallbackId'), 'no ordered multi-select remains');
 
   // Jev banner when the routing capability is armed.
   assert.ok(

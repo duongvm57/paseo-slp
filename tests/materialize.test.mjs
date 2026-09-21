@@ -68,7 +68,7 @@ test('materialize copies catalog bytes verbatim so a pinned route hash stays val
   // A valid catalog with unusual formatting: odd indentation, a CRLF-free
   // compact style and non-canonical key order — reserialization would change
   // every byte and the sha256.
-  const raw = '{\n  "options": [],\n\t"policy": "test pool",\n  "version": 1,\n  "quotaFallback": {"enabled":false,"optionIds":[]}\n}\n\n\n';
+  const raw = '{\n  "options": [],\n\t"policy": "test pool",\n  "version": 1,\n  "quotaFallback": {"enabled":false,"optionId":null}\n}\n\n\n';
   const sourceCatalog = join(source, '.paseo-slp/slp-routing.json');
   writeFileSync(sourceCatalog, raw);
   const applied = materializeWorkspace(source, target, true);

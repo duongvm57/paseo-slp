@@ -396,7 +396,7 @@ const writeFile = (path, text) => {
 const poolFixture = {
   version: 1,
   policy: 'Peers pick the cheapest live seat that fits the work.',
-  quotaFallback: { enabled: true, optionIds: ['peer-eng'] },
+  quotaFallback: { enabled: true, optionId: 'peer-eng' },
   options: [{
     id: 'peer-eng',
     provider: 'codex',
@@ -490,25 +490,29 @@ test('legacy slp-routing.json is offered for import and never modified', async t
   const home = makeHome(t);
   const manager = createManager(makeDeps());
   const legacyFile = legacyPoolPath(home);
+  // The on-disk legacy shape carries the wave-5 optionIds list; reads
+  // normalize it to the single-option contract (wave-6 migration, ≤1).
   const legacyPool = {
     ...poolFixture,
     quotaFallback: { enabled: true, optionIds: ['peer-legacy'] },
     options: [{ ...poolFixture.options[0], id: 'peer-legacy' }],
   };
+  const migratedPool = { ...legacyPool, quotaFallback: { enabled: true, optionId: 'peer-legacy' } };
 
   writeFile(legacyFile, `${JSON.stringify(legacyPool)}\n`);
   const before = readFileSync(legacyFile, 'utf8');
 
-  // Absent peer-pool.json but present legacy file → legacy pool readable.
+  // Absent peer-pool.json but present legacy file → legacy pool readable,
+  // in its migrated optionId shape.
   const read = await getPool(manager, home);
   assert.equal(read.pool, null);
-  assert.deepEqual(read.legacy, legacyPool);
+  assert.deepEqual(read.legacy, migratedPool);
   assert.equal(read.legacyError, null);
 
   // Saving the pool writes only state/peer-pool.json; legacy bytes untouched.
-  await setPool(manager, home, legacyPool, null);
+  await setPool(manager, home, migratedPool, null);
   assert.equal(readFileSync(legacyFile, 'utf8'), before, 'legacy file is read-only');
-  assert.deepEqual((await getPool(manager, home)).pool, legacyPool);
+  assert.deepEqual((await getPool(manager, home)).pool, migratedPool);
 
   // A malformed legacy file surfaces as legacyError, not as the pool error.
   writeFile(legacyFile, '{ not json');
@@ -527,7 +531,7 @@ test('set-peer-pool rejects malformed input and unknown keys', async t => {
     ['missing pool', { schemaVersion: 1, target, expectedSha256: null }],
     ['pool wrong version', { schemaVersion: 1, target, pool: { ...poolFixture, version: 2 }, expectedSha256: null }],
     ['empty policy', { schemaVersion: 1, target, pool: { ...poolFixture, policy: '' }, expectedSha256: null }],
-    ['quotaFallback unknown key', { schemaVersion: 1, target, pool: { ...poolFixture, quotaFallback: { enabled: true, optionIds: ['peer-eng'], bogus: 1 } }, expectedSha256: null }],
+    ['quotaFallback unknown key', { schemaVersion: 1, target, pool: { ...poolFixture, quotaFallback: { enabled: true, optionId: 'peer-eng', bogus: 1 } }, expectedSha256: null }],
     ['unknown option provider', { schemaVersion: 1, target, pool: { ...poolFixture, options: [{ ...poolFixture.options[0], provider: 'gpt' }] }, expectedSha256: null }],
     ['non-string expectedSha256', { schemaVersion: 1, target, pool: poolFixture, expectedSha256: 7 }],
     ['wrong schemaVersion', { schemaVersion: 2, target, pool: poolFixture, expectedSha256: null }],
@@ -576,8 +580,11 @@ test('plugin PeerPool schema and package validateCatalog agree on every verdict'
     ['explicit nulls on nullish keys', pool({ quotaFallback: null, options: [opt({ modeId: null, thinkingOptionId: null, features: null })] }), true],
     ['devin enabled + swe-2 model', pool({ options: [opt({ provider: 'devin', model: 'swe-2-max' })] }), true],
     ['devin disabled + non-swe-2 model', pool({ options: [opt({ provider: 'devin', model: 'other', enabled: false })] }), true],
-    ['quotaFallback disabled + empty optionIds', pool({ quotaFallback: { enabled: false, optionIds: [] } }), true],
-    ['quotaFallback enabled + known ids', pool({ quotaFallback: { enabled: true, optionIds: ['peer-eng'] } }), true],
+    ['quotaFallback disabled + null optionId', pool({ quotaFallback: { enabled: false, optionId: null } }), true],
+    ['quotaFallback disabled + designated id kept', pool({ quotaFallback: { enabled: false, optionId: 'peer-eng' } }), true],
+    ['quotaFallback enabled + designated id', pool({ quotaFallback: { enabled: true, optionId: 'peer-eng' } }), true],
+    ['legacy optionIds [] migrates to null', pool({ quotaFallback: { enabled: false, optionIds: [] } }), true],
+    ['legacy optionIds [one] migrates to that id', pool({ quotaFallback: { enabled: true, optionIds: ['peer-eng'] } }), true],
     ['empty options list', pool({ options: [] }), true],
     ['empty suitableFor/avoidFor arrays', pool({ options: [opt({ suitableFor: [], avoidFor: [] })] }), true],
 
@@ -596,10 +603,16 @@ test('plugin PeerPool schema and package validateCatalog agree on every verdict'
     ['suitableFor whitespace element', pool({ options: [opt({ suitableFor: [' '] })] }), false],
     ['avoidFor whitespace element', pool({ options: [opt({ avoidFor: [' ', 'ok'] })] }), false],
     ['duplicate option ids', pool({ options: [seat, seat] }), false],
-    ['quotaFallback unknown id', pool({ quotaFallback: { enabled: false, optionIds: ['peer-ghost'] } }), false],
-    ['quotaFallback duplicate ids', pool({ quotaFallback: { enabled: false, optionIds: ['peer-eng', 'peer-eng'] } }), false],
-    ['quotaFallback enabled + empty ids', pool({ quotaFallback: { enabled: true, optionIds: [] } }), false],
-    ['quotaFallback extra key', pool({ quotaFallback: { enabled: false, optionIds: [], bogus: 1 } }), false],
+    ['quotaFallback unknown designated id', pool({ quotaFallback: { enabled: false, optionId: 'peer-ghost' } }), false],
+    ['quotaFallback enabled + null optionId', pool({ quotaFallback: { enabled: true, optionId: null } }), false],
+    ['quotaFallback extra key', pool({ quotaFallback: { enabled: false, optionId: null, bogus: 1 } }), false],
+    ['quotaFallback optionId non-string', pool({ quotaFallback: { enabled: false, optionId: 7 } }), false],
+    ['legacy optionIds >1 fails closed', pool({ quotaFallback: { enabled: true, optionIds: ['peer-eng', 'peer-eng'] } }), false],
+    ['legacy optionIds + optionId together rejected', pool({ quotaFallback: { enabled: false, optionId: 'peer-eng', optionIds: ['peer-eng'] } }), false],
+    ['legacy optionIds unknown id still rejected', pool({ quotaFallback: { enabled: false, optionIds: ['peer-ghost'] } }), false],
+    ['legacy optionIds enabled + empty still rejected', pool({ quotaFallback: { enabled: true, optionIds: [] } }), false],
+    ['legacy optionIds non-array rejected', pool({ quotaFallback: { enabled: false, optionIds: 'peer-eng' } }), false],
+    ['legacy optionIds non-string element rejected', pool({ quotaFallback: { enabled: false, optionIds: [7] } }), false],
 
     // Read-direction mismatches — the wire must accept what the package reads.
     ['modeId null reads fine', pool({ options: [opt({ modeId: null })] }), true],
@@ -622,8 +635,9 @@ test('plugin PeerPool schema and package validateCatalog agree on every verdict'
     ['id bad pattern', pool({ options: [opt({ id: 'Peer_X' })] }), false],
     ['id empty', pool({ options: [opt({ id: '' })] }), false],
     ['id is the Jev decline sentinel', pool({ options: [opt({ id: 'no-suitable-option' })] }), false],
-    ['optionIds non-string element', pool({ quotaFallback: { enabled: false, optionIds: [7] } }), false],
     ['quotaFallback array', pool({ quotaFallback: [] }), false],
+    ['quotaFallback empty object', pool({ quotaFallback: {} }), false],
+    ['quotaFallback string', pool({ quotaFallback: 'peer-eng' }), false],
     ['suitableFor non-array', pool({ options: [opt({ suitableFor: 'x' })] }), false],
     ['non-record catalog', 'x', false],
     ['null catalog', null, false],
@@ -663,4 +677,31 @@ test('legacy fs failure degrades to legacyError; pool fs failure throws IO_FAILU
   // unreadable file as absent.
   const writeErr = await setPool(manager, home, poolFixture, null).catch(e => e);
   assert.equal(writeErr?.code, 'IO_FAILURE');
+});
+
+test('legacy optionIds migrates to a single optionId — ≤1 normalizes, >1 fails closed', () => {
+  const seat = {
+    id: 'peer-eng', provider: 'codex', roles: ['peer'], model: 'gpt-5-codex',
+    enabled: true, availability: 'ready', suitableFor: ['bounded coding'],
+    avoidFor: [], notes: 'Local-only note.',
+  };
+  const base = { version: 1, policy: 'Peers pick the cheapest live seat that fits.', options: [seat] };
+  for (const optionIds of [[], ['peer-eng']]) {
+    const legacy = { ...base, quotaFallback: { enabled: optionIds.length === 1, optionIds } };
+    const expected = { enabled: optionIds.length === 1, optionId: optionIds[0] ?? null };
+    // Package validator: normalizes the catalog in place.
+    const catalog = validateCatalog(structuredClone(legacy));
+    assert.deepEqual(catalog.quotaFallback, expected, `package migration of ${JSON.stringify(optionIds)}`);
+    // Wire schema: same normalization on parse output.
+    const parsed = PeerPool.safeParse(legacy);
+    assert.equal(parsed.success, true, `wire migration of ${JSON.stringify(optionIds)}`);
+    assert.deepEqual(parsed.data.quotaFallback, expected);
+  }
+  // More than one legacy entry is ambiguous — both sides fail closed rather
+  // than silently take-first.
+  const ambiguous = { ...base, quotaFallback: { enabled: true, optionIds: ['peer-eng', 'peer-eng'] } };
+  assert.throws(() => validateCatalog(structuredClone(ambiguous)), /exactly one/);
+  const wire = PeerPool.safeParse(ambiguous);
+  assert.equal(wire.success, false);
+  assert.match(JSON.stringify(wire.error.issues), /exactly one/);
 });

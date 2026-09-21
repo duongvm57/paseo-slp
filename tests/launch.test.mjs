@@ -24,7 +24,7 @@ const providers = [{ id: 'slp-devin-peer', enabled: true, status: 'available' }]
 function catalogFixture(dir) {
   mkdirSync(join(dir, '.paseo-slp'), { recursive: true });
   writeFileSync(join(dir, '.paseo-slp/slp-routing.json'), json({
-    version: 1, policy: 'Test pool.', quotaFallback: { enabled: false, optionIds: [] },
+    version: 1, policy: 'Test pool.', quotaFallback: { enabled: false, optionId: null },
     options: [{ id: 'devin-peer', provider: 'devin', roles: ['peer'], model: 'swe-2-high',
       modeId: 'bypass', features: { auto_accept: true }, enabled: true, availability: 'ready',
       priority: 10, suitableFor: ['coding'], avoidFor: [], notes: 'test seat' }],
