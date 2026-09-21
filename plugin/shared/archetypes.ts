@@ -1,15 +1,21 @@
-// plugin/shared/archetypes.ts — the seat archetypes the Peer-pool editor's
-// "Add seat" picker seeds from. Pure data — the shared-module boundary allows
-// only zod/react/@getpaseo/plugin imports, and this file needs none.
+// plugin/shared/archetypes.ts — the 12 standard Peer seat archetypes the
+// Manager's "Thêm ghế chuẩn" picker seeds from. Pure data; token content comes
+// from shared/routing-vocabulary.ts, the mirror of the package's canonical
+// vocabulary (src/routing-vocabulary.mjs, docs/spec/routing-criteria.md §6).
 //
-// Every archetype ships a parked seat: blank provider, blank model,
-// enabled:false, availability:"ready" (the only state the form writes) and
-// roles:["peer"] — the Human fills provider/model from live catalog
-// discovery before enabling. suitableFor/avoidFor are the fields Jev sees;
-// notes stays local (Vietnamese-allowed — Jev never receives it). Ids are
-// seat names for KINDS of work, not dispositions: disposition is an open
-// vocabulary the assignment supplies, so this list is a starting set the
-// Human reshapes freely.
+// The package owns the meaning of these standard seats: suitableFor/avoidFor
+// are the closed 16-token `axis:value` set, read-only on the form, and notes
+// are the package-provided explanation (local only — Jev never receives
+// notes). The id set is reserved (§7.2): an option on one of these ids is a
+// standard seat whose tokens must equal the packaged set; every other id is
+// a custom seat with free strings. Every archetype ships a parked seat:
+// blank provider, blank model, enabled:false, availability:"ready" (the only
+// state the form writes) and roles:["peer"] — the Human fills
+// provider/model/thinking from live catalog discovery before enabling. Ids
+// are seat names for KINDS of work, not dispositions: disposition is an open
+// vocabulary the assignment supplies.
+
+import { STANDARD_SEAT_TOKENS } from "./routing-vocabulary.ts";
 
 export interface SeatArchetype {
   id: string;
@@ -23,65 +29,41 @@ export interface SeatArchetype {
   notes: string;
 }
 
-const seat = (id: string, suitableFor: string[], avoidFor: string[], notes: string): SeatArchetype => ({
+const seat = (id: keyof typeof STANDARD_SEAT_TOKENS, notes: string): SeatArchetype => ({
   id,
   provider: "",
   roles: ["peer"],
   model: "",
   enabled: false,
   availability: "ready",
-  suitableFor,
-  avoidFor,
+  suitableFor: [...STANDARD_SEAT_TOKENS[id].suitableFor],
+  avoidFor: [...STANDARD_SEAT_TOKENS[id].avoidFor],
   notes,
 });
 
 export const PEER_SEAT_ARCHETYPES: readonly SeatArchetype[] = [
   seat("lightweight-recon",
-    ["recon", "inventory", "triage", "read-only-reporting", "summarize"],
-    ["writes", "design", "review"],
-    "Cheap/fast seat: read-only exploration and reporting where a small or low-effort model is enough. Fill provider and model from discovery."),
+    "Package-managed seat: collects and summarizes against already-clear requirements — inventory, extraction, triage by an existing rubric. Fill provider and model from discovery; a cheap model is usually enough."),
   seat("standard-coding",
-    ["implementation", "bounded-fix", "tests", "refactor", "mechanical-change"],
-    ["open-design", "deep-debugging", "contract-analysis"],
-    "Default work seat: a coding-capable model at normal effort for well-bounded implementation tasks."),
+    "Package-managed seat: produces software changes or test sets under settled acceptance — the default work seat. Deciding a new contract or investigating an open mechanism belongs to a more suitable seat."),
   seat("deep-reasoning",
-    ["architecture", "design", "contract-analysis", "falsification", "deep-debugging", "review"],
-    ["routine-inventory", "mechanical-change"],
-    "Heavy seat: a stronger model or a higher reasoning effort for design, root-cause work and review where mistakes are expensive."),
+    "Package-managed seat: judgment-heavy reasoning, design and verification — pick a stronger model or higher reasoning effort. Warns on fully rule-following (mechanical) work to avoid spending a heavy runtime."),
   seat("independent-second-opinion",
-    ["independent-review", "second-opinion", "audit", "falsification"],
-    [],
-    "Deliberately a different provider family than the implementation seats, so a reviewer is not the same model grading itself. Pick any available non-default family."),
+    "Package-managed seat: an independent verdict on an existing candidate or proposal. Independence is checked against the writer per assignment — prefer a different provider family than the implementation seats."),
   seat("autonomous-long-running",
-    ["long-running-task", "autonomous-execution", "multi-step-workflow"],
-    ["quick-lookup"],
-    "Seat for long autonomous runs. A Devin-family seat requires a swe-2 model id — fill the exact variant from discovery."),
+    "Package-managed seat: work that must pass checkpoints and continue after each intermediate result (staged flow). A Devin-family seat requires a swe-2 model id — fill the exact variant from discovery."),
   seat("test-authoring",
-    ["test-writing", "case-design", "spec-to-testcases", "edge-case-hunting"],
-    ["implementation", "architecture"],
-    "Seat that writes and runs tests against a frozen candidate — the QC checker role, not the implementer."),
+    "Package-managed seat: builds test sets from existing acceptance or verifies a frozen candidate through tests — the QC checker, not the implementer."),
   seat("spec-docs-writing",
-    ["documentation", "spec-writing", "changelog", "user-facing-prose", "translation"],
-    ["implementation", "debugging"],
-    "Tech-writer seat: prose quality and accuracy matter more than deep codebase reasoning."),
+    "Package-managed seat: documentation and specs recording existing decisions — prose quality and accuracy are the product. Work that must itself decide software behavior routes by that technical obligation first."),
   seat("security-review",
-    ["security-review", "threat-model", "auth-surface-audit", "secrets-hygiene", "dependency-review"],
-    ["feature-implementation", "mechanical-change"],
-    "Adversarial review seat: strong reasoning plus a security lens for auth boundaries, injection and data exposure."),
+    "Package-managed seat: builds threat models or verifies security on a candidate — auth boundaries, abuse cases, secrets, dependency risk. Fixing the product is a separate change assignment."),
   seat("debugging-root-cause",
-    ["root-cause-analysis", "regression-hunt", "flaky-test", "performance-regression", "heisenbug"],
-    ["greenfield-implementation", "prose-writing"],
-    "Diagnosis seat: patience and evidence discipline for bugs whose mechanism is unknown — reproduces before touching code."),
+    "Package-managed seat: answers failure-mechanism questions with evidence — reproduces before touching code. The post-cause fix is a separate change assignment."),
   seat("mechanical-refactor",
-    ["large-mechanical-refactor", "codemod", "rename-sweep", "api-migration", "deprecation-cleanup"],
-    ["design-decisions", "novel-logic"],
-    "Throughput seat: wide, repetitive, well-specified change where consistency matters more than judgment."),
+    "Package-managed seat: code transformations under a complete rule — codemods, rename sweeps, migrations whose mapping already decides behavior. Work still needing logic choices or open questions prefers another seat."),
   seat("research-spike",
-    ["research-spike", "feasibility-probe", "api-survey", "technology-comparison", "throwaway-prototype"],
-    ["production-implementation"],
-    "Scout seat: time-boxed exploration that ends in a report or throwaway code — never the production implementation."),
+    "Package-managed seat: feasibility or technology-choice questions answered by survey and experiment — ends in a report or throwaway code, never the production change."),
   seat("data-migration",
-    ["data-migration", "schema-evolution", "backfill", "etl-transform", "format-conversion"],
-    ["interactive-feature-work"],
-    "Data/migration seat: careful ordered transforms with rollback evidence and validation gates between steps."),
+    "Package-managed seat: data and persisted-schema transformations — one-step conversions and multi-checkpoint backfills with rollback evidence and validation gates between steps."),
 ];

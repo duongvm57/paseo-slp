@@ -6,6 +6,7 @@ import { families, roles, providerId } from './profiles.mjs';
 import { settingIdPattern, unsafeModelPattern, rejectRouteKeys, verifyProvider,
   runtimeSettingKeys, profileRouteKeys, swe2ModelPattern } from './binding.mjs';
 import { readJevConfig, verifyReceipt } from './jev.mjs';
+import { catalogTokenConflicts, seatTokenConflict, ROUTING_VOCABULARY_VERSION } from './routing-vocabulary.mjs';
 
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const nonempty = value => typeof value === 'string' && value.trim().length > 0;
@@ -76,7 +77,14 @@ export function readCatalog(repository, home = paseoHome()) {
   }
   if (!fileStat.isFile()) throw new Error(`${scope === 'repository' ? 'Repository' : 'User-scope'} Peer pool must be a regular file`);
   const bytes = readFileSync(path, 'utf8');
-  return { ...validateCatalog(JSON.parse(bytes)), path, scope, sha256: hash(bytes) };
+  const catalog = validateCatalog(JSON.parse(bytes));
+  // §7.2 semantic report: an option on a reserved standard-seat id whose
+  // tokens diverge from the package set is a Token conflict — reported on
+  // every read so the routing/prepare path surfaces it before that seat is
+  // used as a standard seat. It is a content error, not a schema rejection:
+  // validateCatalog stays shape-only so custom seats keep free strings.
+  const tokenConflicts = catalogTokenConflicts(catalog);
+  return { ...catalog, path, scope, sha256: hash(bytes), tokenConflicts };
 }
 
 // Deterministic eligibility — one predicate, two consumers (view and
@@ -125,6 +133,12 @@ export function catalogBinding(repository, role, providers, route, home) {
     verifyReceipt(decision);
     if (decision.context?.capability !== 'routing') throw new Error('Jev decision receipt is not a routing decision');
     if (decision.context.catalogSha256 !== catalog.sha256) throw new Error('Jev decision receipt was issued against a different catalog — run route-decide again');
+    // The receipt is bound to the vocabulary version it was issued under —
+    // a semantic change to the token set ships as a new version, and a stale
+    // receipt must not route under a different meaning (§7.2, §9).
+    if (decision.context.vocabularyVersion !== ROUTING_VOCABULARY_VERSION) {
+      throw new Error(`Jev decision receipt was issued under vocabulary ${decision.context.vocabularyVersion ?? 'none'} — the package now speaks ${ROUTING_VOCABULARY_VERSION}; run route-decide again`);
+    }
     const questionNames = Object.keys(decision.questions);
     if (questionNames.length !== 1 || questionNames[0] !== ROUTE_DECISION_QUESTION) {
       throw new Error(`Jev routing decision receipt must carry exactly the ${ROUTE_DECISION_QUESTION} question`);
@@ -144,6 +158,13 @@ export function catalogBinding(repository, role, providers, route, home) {
   }
   const option = catalog.options.find(item => item.id === route.optionId);
   if (!option) throw new Error(`Unknown routing option ${route.optionId}`);
+  // A conflicted seat is neither a valid standard seat nor a valid custom one
+  // (the reserved-name registry refuses custom ids on it) — refuse it here
+  // rather than routing on divergent tokens while the reader believes it is
+  // the standard set (§7.2).
+  if (seatTokenConflict(option)) {
+    throw new Error(`Routing option ${option.id} is a Token conflict — it carries the reserved standard-seat id but its suitability tokens differ from the package set. Resolve it in the SLP Manager surface (use the standard set or convert the seat to a custom id) before routing.`);
+  }
   const excluded = optionExclusions(option, role);
   if (excluded.length) throw new Error(`Routing option ${option.id} excluded for ${role}: ${excluded.join(', ')}`);
   if (decision != null) {

@@ -25,6 +25,8 @@ import { readCatalog, optionExclusions, eligibleOptions, paseoHome,
   ROUTE_DECISION_QUESTION, ROUTE_DECLINE_CANDIDATE } from './routing.mjs';
 import { resolveJev, askJev, JevError } from './jev.mjs';
 import { roles } from './profiles.mjs';
+import { JEV_SUITABILITY_GUIDANCE, ROUTING_VOCABULARY_VERSION,
+  seatTokenConflict } from './routing-vocabulary.mjs';
 
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const jevError = (code, message, details) => new JevError(code, message, details);
@@ -76,11 +78,20 @@ export async function routeDecide(request, { home, fetchImpl, now } = {}) {
   if (eligible.some(option => option.id === ROUTE_DECLINE_CANDIDATE)) {
     throw jevError('jev-request-invalid', `Catalog option id "${ROUTE_DECLINE_CANDIDATE}" collides with the Jev decline sentinel`);
   }
-  const candidates = eligible.map(option => option.id);
+  // A seat under a reserved standard id whose tokens diverge from the package
+  // set is in Token conflict — it is neither a valid standard seat nor a
+  // valid custom one, so it cannot be a candidate; it is reported here and
+  // refused again at prepare (catalogBinding) if picked anyway.
+  const conflicted = eligible.filter(option => seatTokenConflict(option));
+  const usable = eligible.filter(option => !seatTokenConflict(option));
+  if (usable.length === 0) {
+    throw jevError('jev-no-candidates', `No eligible routing options for ${role} — every eligible option is in Token conflict (${conflicted.map(option => option.id).join(', ')}); resolve the conflicts in the SLP Manager surface`);
+  }
+  const candidates = usable.map(option => option.id);
   const state = {
     task: brief,
     role,
-    options: eligible.map(option => ({
+    options: usable.map(option => ({
       id: option.id, provider: option.provider, model: option.model,
       suitableFor: option.suitableFor, avoidFor: option.avoidFor,
     })),
@@ -88,9 +99,9 @@ export async function routeDecide(request, { home, fetchImpl, now } = {}) {
   const questions = {
     [ROUTE_DECISION_QUESTION]: {
       type: 'choice',
-      instructions: 'Choose exactly one criteria key as the seat for this task. Judge the task brief against each option\'s provider, model and suitability fields. Answer no-suitable-option when none of the listed options fits.',
+      instructions: `Choose exactly one criteria key as the seat for this task. Judge the task brief against each option's provider, model and suitability fields. ${JEV_SUITABILITY_GUIDANCE} Answer no-suitable-option when none of the listed options fits.`,
       criteria: {
-        ...Object.fromEntries(eligible.map(option => [option.id, describeOption(option)])),
+        ...Object.fromEntries(usable.map(option => [option.id, describeOption(option)])),
         [ROUTE_DECLINE_CANDIDATE]: 'None of the listed options is a suitable seat for this task — decline rather than guess',
       },
     },
@@ -100,6 +111,8 @@ export async function routeDecide(request, { home, fetchImpl, now } = {}) {
     catalogSha256: catalog.sha256,
     candidates,
     declineCandidate: ROUTE_DECLINE_CANDIDATE,
+    vocabularyVersion: ROUTING_VOCABULARY_VERSION,
+    tokenConflicts: conflicted.map(option => option.id),
   };
   const { answers, receipt } = await askJev({ provider, key, state, questions, context }, { fetchImpl, now });
   const choice = answers[ROUTE_DECISION_QUESTION].choice;
@@ -110,6 +123,7 @@ export async function routeDecide(request, { home, fetchImpl, now } = {}) {
     catalogSha256: catalog.sha256,
     declined,
     role,
+    tokenConflicts: conflicted.map(option => option.id),
     decision: receipt,
   };
 }

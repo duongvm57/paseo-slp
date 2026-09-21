@@ -53,6 +53,7 @@ import {
 } from "../shared/contracts.ts";
 import { createJournal, emptyReceipt, findOperation, pendingOperation } from "./journal.ts";
 import { OWNED_PROVIDER_ID_RE } from "../shared/families.ts";
+import { catalogTokenConflicts } from "../shared/routing-vocabulary.ts";
 import {
   FAMILIES,
   OWNED_PROVIDER_IDS,
@@ -2868,6 +2869,18 @@ export function createManager(deps: ManagerDeps): Manager {
     }
     const ctx = resolveHome(parsed.data.target);
     const file = join(ctx.stableRoot, PEER_POOL_FILE);
+    // Semantic gate (§7.2), shared with the form build and the routing-read
+    // path: a seat on a reserved standard id whose tokens diverge from the
+    // package set is a Token conflict — never stored as a valid standard
+    // seat. The conflict survives in the file only when it arrived by import
+    // or package upgrade; every write must resolve it first.
+    const conflicts = catalogTokenConflicts(parsed.data.pool);
+    if (conflicts.length > 0) {
+      throw new OperationConflict(
+        "INVALID_REQUEST",
+        `peer pool has unresolved Token conflicts on standard seats: ${conflicts.map(c => c.id).join(", ")} — resolve each seat in the Manager surface (use the standard set or convert to a custom id)`,
+      );
+    }
     // CAS gate first: the on-disk bytes must hash to the token the writer
     // read. An unreadable pool fails loud rather than comparing against null.
     const actualSha256 = readPeerPoolFile(file, false).sha256;
