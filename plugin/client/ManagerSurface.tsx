@@ -58,6 +58,7 @@ import {
   formSeatConflict,
   isDaemonHome,
   legacyImportAllowed,
+  lineList,
   newOperationId,
   operationPending,
   operationRows,
@@ -1101,8 +1102,10 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   };
 
   // Removing a seat drops its fallback references too — a stale id would
-  // fail the build. The open-editor index is cleared because removal shifts
-  // the seats after it.
+  // fail the build. Every index-keyed piece of editor state is cleared
+  // because removal shifts the seats after it — a stale index would bind the
+  // convert dialog, the token lookup or the standard-applied marker onto the
+  // WRONG seat.
   const removeSeat = (index: number) => () => {
     const removedId = poolForm.seats[index]?.id;
     updatePool(form => ({
@@ -1111,6 +1114,11 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
       quotaFallbackIds: form.quotaFallbackIds.filter(id => id !== removedId),
     }));
     setOpenSeat(null);
+    setConvertSeatIndex(null);
+    setConvertId("");
+    setTokenLookupSeat(null);
+    setTokenLookupToken(null);
+    setStandardAppliedId(current => (current === removedId ? null : current));
   };
 
   const toggleFallbackId = (seatId: string, next: boolean) =>
@@ -2056,8 +2064,6 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
             const managed = seatManagement(seat) === "package-managed";
             const conflict = managed ? formSeatConflict(seat) : null;
             const standardTokens = managed ? STANDARD_SEAT_TOKENS[seat.id.trim()] : undefined;
-            const seatTokenLines = (text: string) =>
-              text.split("\n").map(line => line.trim()).filter(line => line !== "");
             // One token row: the exact token text, its axis in muted parens,
             // an optional +/− conflict mark, and a press that opens the
             // definition lookup at that token.
@@ -2404,6 +2410,14 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                           }}
                         />
                       </View>
+                      {managed ? (
+                        // §7.4.B "Record at Avoid" — advisory, not a runtime
+                        // prohibition; shown once for both avoid lists,
+                        // conflict view included.
+                        <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                          avoidFor là cảnh báo tư vấn — advisory only; it does not block a runtime permission.
+                        </Text>
+                      ) : null}
                       {conflict && standardTokens ? (
                         // §7.4.D — both versions at exact values; the stored
                         // side marks tokens the standard set would drop (−),
@@ -2418,20 +2432,20 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                             Nội dung đang lưu/được import
                           </Text>
                           <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>suitableFor</Text>
-                          {tokenRows(seatTokenLines(seat.suitableFor), token =>
+                          {tokenRows(lineList(seat.suitableFor), token =>
                             standardTokens.suitableFor.includes(token) ? null : "−")}
                           <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>avoidFor</Text>
-                          {tokenRows(seatTokenLines(seat.avoidFor), token =>
+                          {tokenRows(lineList(seat.avoidFor), token =>
                             standardTokens.avoidFor.includes(token) ? null : "−")}
                           <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>
                             Bộ chuẩn của package
                           </Text>
                           <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>suitableFor</Text>
                           {tokenRows([...standardTokens.suitableFor], token =>
-                            seatTokenLines(seat.suitableFor).includes(token) ? null : "+")}
+                            lineList(seat.suitableFor).includes(token) ? null : "+")}
                           <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>avoidFor</Text>
                           {tokenRows([...standardTokens.avoidFor], token =>
-                            seatTokenLines(seat.avoidFor).includes(token) ? null : "+")}
+                            lineList(seat.avoidFor).includes(token) ? null : "+")}
                           <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
                             <Button
                               colors={colors}
@@ -2453,9 +2467,9 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                         // opens its definition.
                         <>
                           <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>suitableFor</Text>
-                          {tokenRows(seatTokenLines(seat.suitableFor))}
+                          {tokenRows(lineList(seat.suitableFor))}
                           <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>avoidFor</Text>
-                          {tokenRows(seatTokenLines(seat.avoidFor))}
+                          {tokenRows(lineList(seat.avoidFor))}
                         </>
                       ) : (
                         // Custom seats keep free-form strings — the seat's
@@ -2481,6 +2495,19 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                             disabled={disabled}
                             multiline
                           />
+                          {// §7.4.F — entered strings are pressable: a
+                           // standard token opens its packaged definition, a
+                           // free/legacy string resolves to "Nội dung riêng"
+                           // instead of borrowing a near-match's meaning.
+                          lineList(seat.suitableFor).length + lineList(seat.avoidFor).length > 0 ? (
+                            <>
+                              <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                                Tra cứu từng chuỗi đã nhập — press a string to look it up:
+                              </Text>
+                              {tokenRows(lineList(seat.suitableFor))}
+                              {tokenRows(lineList(seat.avoidFor))}
+                            </>
+                          ) : null}
                         </>
                       )}
                     </View>

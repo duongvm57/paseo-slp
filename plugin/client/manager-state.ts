@@ -1,7 +1,7 @@
 // Pure view-state helpers for the SLP manager surface (spec §3, §9–§11).
 // No react/host imports: this module is unit-tested directly under node, and
 // the client bundle check proves it pulls in no server-only or node code.
-import { AbsolutePath, Id } from "../shared/contracts.ts";
+import { AbsolutePath, Id, ROUTE_DECLINE_OPTION_ID } from "../shared/contracts.ts";
 import { OWNED_PROVIDER_ID_RE, ownedProviderId } from "../shared/families.ts";
 import { isStandardSeatId, seatTokenConflict } from "../shared/routing-vocabulary.ts";
 import type { SeatTokenConflict } from "../shared/routing-vocabulary.ts";
@@ -532,9 +532,13 @@ export const PEER_SEAT_ID = /^[a-z][a-z0-9-]*$/;
  *  it records that the row was created as a Custom seat so an id typed onto a
  *  reserved standard name is a reserved-name error, not a silent flip to
  *  Package-managed (§7.2: the id set decides management, and the form never
- *  auto-converts a Custom row mid-edit). It is never written to the pool. */
+ *  auto-converts a Custom row mid-edit). It is never written to the pool.
+ *  `storedId` is the id the row carried when the pool snapshot loaded — a
+ *  rename/convert changes `id` but keeps `storedId`, so buildPeerSeat still
+ *  spreads the stored option's passthrough fields the form does not model. */
 export interface PeerSeatForm {
   id: string;
+  storedId?: string;
   family: FamilyName | "";
   model: string;
   modeId: string;
@@ -557,7 +561,7 @@ export interface PeerPoolForm {
 
 /** One-entry-per-line text → the option's string list: trimmed, blanks
  *  dropped. Entries themselves may contain commas ("reads, triages"). */
-const lineList = (text: string): string[] =>
+export const lineList = (text: string): string[] =>
   text.split("\n").map(line => line.trim()).filter(line => line !== "");
 
 /** Stored option → form seat (the Load path). Stored `features` seed both
@@ -583,6 +587,7 @@ export function peerSeatForm(option: PeerPoolOptionValue): PeerSeatForm {
     // A stored seat on a reserved standard id is package-managed (possibly in
     // Token conflict); every other stored id is a custom seat.
     custom: !isStandardSeatId(option.id),
+    storedId: option.id,
   };
 }
 
@@ -628,23 +633,14 @@ export function peerSeatFromArchetype(archetype: SeatArchetype): PeerSeatForm {
   };
 }
 
-/** First unused seat id for an archetype — `-2`, `-3`… suffixes keep the id
- *  unique and valid under PEER_SEAT_ID. */
-export function uniqueSeatId(base: string, existing: readonly string[]): string {
-  const taken = new Set(existing);
-  if (!taken.has(base)) return base;
-  for (let n = 2; ; n++) {
-    const candidate = `${base}-${n}`;
-    if (!taken.has(candidate)) return candidate;
-  }
-}
-
 /** Suggested unused custom id for a base name — `<base>-2`, `-3`… — that can
- *  never land on a reserved standard id (§7.2). */
+ *  never land on a reserved standard id (§7.2). An empty or invalid base
+ *  falls back to "seat" so the suggestion is always a valid custom id. */
 export function suggestCustomSeatId(base: string, existing: readonly string[]): string {
   const taken = new Set(existing);
+  const stem = PEER_SEAT_ID.test(base.trim()) ? base.trim() : "seat";
   for (let n = 2; ; n++) {
-    const candidate = `${base}-${n}`;
+    const candidate = `${stem}-${n}`;
     if (!taken.has(candidate) && !isStandardSeatId(candidate)) return candidate;
   }
 }
@@ -671,6 +667,9 @@ export function customSeatIdError(id: string, existing: readonly string[]): stri
   const trimmed = id.trim();
   if (!PEER_SEAT_ID.test(trimmed)) {
     return `id must match ${PEER_SEAT_ID} (lowercase letters, digits, dashes)`;
+  }
+  if (trimmed === ROUTE_DECLINE_OPTION_ID) {
+    return `"${trimmed}" is reserved for the Jev decline sentinel — no seat may take it`;
   }
   if (isStandardSeatId(trimmed)) {
     return `"${trimmed}" is a reserved standard-seat id — pick a custom id such as "${suggestCustomSeatId(trimmed, existing)}"`;
@@ -738,6 +737,9 @@ export function buildPeerSeat(
   // disabled flag: a Custom row may never carry a reserved standard name, and
   // a Package-managed row may never store tokens diverging from the package
   // set (that state is a Token conflict to resolve, not valid content).
+  if (id === ROUTE_DECLINE_OPTION_ID) {
+    return { error: `${label}: "${id}" is reserved for the Jev decline sentinel — no seat may take it` };
+  }
   if (isStandardSeatId(id) && form.custom === true) {
     return { error: `${label}: "${id}" is a reserved standard-seat id — pick a custom id such as "${suggestCustomSeatId(id, [])}"` };
   }
@@ -810,7 +812,10 @@ export function buildPeerPool(
   const ids = new Set<string>();
   const options: PeerPoolOptionValue[] = [];
   for (const [index, seat] of form.seats.entries()) {
-    const built = buildPeerSeat(seat, storedOptions?.get(seat.id.trim()), defsFor(seat));
+    // Look the stored option up by the id the row had at load (storedId),
+    // not the edited id — a rename/convert must keep passthrough fields the
+    // form does not model (§7.4.D).
+    const built = buildPeerSeat(seat, storedOptions?.get(seat.storedId ?? seat.id.trim()), defsFor(seat));
     if ("error" in built) return { error: built.error, seatIndex: index };
     if (ids.has(built.option.id)) return { error: `duplicate seat id "${built.option.id}"`, seatIndex: index };
     ids.add(built.option.id);

@@ -10,7 +10,6 @@ import { buildSync } from 'esbuild';
 import {
   DISABLE_REMOVE_NOTICE,
   EXCLUSIVE_WINDOW_NOTICE,
-  PEER_SEAT_ID,
   RESTORATION_NOTICE,
   RETAINED_RUNTIME_NOTICE,
   STATUS_POLL_MS,
@@ -49,7 +48,6 @@ import {
   routingDiverges,
   startPatch,
   shortenSha,
-  uniqueSeatId,
   visibleConflicts,
   stateHint,
   statusRows,
@@ -970,15 +968,6 @@ test('buildPeerPool rejects the constraints validateCatalog enforces', () => {
   const withPriority = buildPeerSeat(seat('a'), { ...seat('a'), provider: 'codex', roles: ['peer'], availability: 'ready', suitableFor: ['w'], avoidFor: [], notes: 'n', priority: 9 }, []);
   assert.ok('option' in withPriority);
   assert.ok(!('priority' in withPriority.option), 'priority must not survive a save');
-});
-
-test('uniqueSeatId suffixes collisions and stays a valid id', () => {
-  assert.equal(uniqueSeatId('peer-coding', []), 'peer-coding');
-  assert.equal(uniqueSeatId('peer-coding', ['peer-coding']), 'peer-coding-2');
-  assert.equal(uniqueSeatId('peer-coding', ['peer-coding', 'peer-coding-2']), 'peer-coding-3');
-  for (const id of [uniqueSeatId('a', ['a']), uniqueSeatId('a', ['a', 'a-2'])]) {
-    assert.match(id, PEER_SEAT_ID);
-  }
 });
 
 test('the Peer pool card authors the pool through catalog-backed pickers', () => {
