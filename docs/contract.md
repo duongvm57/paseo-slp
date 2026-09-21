@@ -305,8 +305,9 @@ record it as an evidence gap instead of claiming full-candidate coverage.
 Listed directories that are not repositories remain unsupported. Before/after
 snapshots detect drift while Peer is paused, not transient or malicious writes.
 
-Peer quota fallback is configured by catalog quotaFallback.enabled and optionIds.
-Missing/disabled means stop; targets must be existing eligible pool bundles.
+Peer quota fallback is configured by catalog quotaFallback.enabled and optionId —
+one designated option, not an ordered list. Missing/disabled means stop; the
+target must be an existing eligible pool bundle.
 prepare validates route.quotaFallbackFrom against this authorization and fresh hash.
 Raw Paseo create/update calls remain host capabilities: the package supplies policy
 and validation, not a host security boundary. Evidence must verify actual settings

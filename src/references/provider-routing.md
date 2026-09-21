@@ -146,14 +146,14 @@ integrity as the security boundary.
 
 ## Peer quota fallback
 
-The catalog's quotaFallback is { enabled: boolean, optionIds: [pool option IDs] }.
-Absent or disabled means stop the quota-blocked branch. Enabled authorizes Lead to
-choose a suitable target only from that list and the current project pool, within
-assignment budget. The list is an allowlist, not a command to try every option.
+The catalog's quotaFallback is { enabled: boolean, optionId: pool option ID | null } —
+one designated option, not an ordered list. Absent or disabled means stop the
+quota-blocked branch. Enabled authorizes Lead to retry exactly the designated
+option, within assignment budget — one attempt, not a search over candidates.
 
 On a real quota error, record the source option, failed operation and provider error.
-Refresh routes and live capabilities. Select a different enabled/ready Peer option
-allowed by quotaFallback; reject any target whose runtime/account is known to share
+Refresh routes and live capabilities. The designated option must be a different
+enabled/ready Peer option; reject it when its runtime/account is known to share
 the exhausted quota. A different model on the same provider is not proof of fresh quota.
 Use prepare with route.optionId, route.catalogSha256 and route.quotaFallbackFrom
 (the failed option ID). Missing authorization, no viable target or a repeated quota

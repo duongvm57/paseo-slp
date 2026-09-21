@@ -1,7 +1,7 @@
 Delegation procedure (Supervisor and Lead only):
 
 Read references/provider-routing.md before every delegation, quota fallback or runtime settings change.
-Peer runtime changes remain inside the project pool; quota fallback follows its quotaFallback setting.
+Peer runtime changes remain inside the project pool; quota fallback follows its quotaFallback setting — one designated option, one retry.
 
 Before any delegation tool call, classify the situation — the assignment
 decides it, not the convenience of an existing session — and record a short

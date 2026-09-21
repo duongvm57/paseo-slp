@@ -196,10 +196,11 @@ decision itself. Every option has:
   custom seats keep free-form lists Jev can read;
   notes: concrete guidance/tradeoffs for Lead, held back from Jev.
 
-Configure quotaFallback: { enabled: false, optionIds: [] } by default. Enable it
-only under Human fallback authority; optionIds must reference existing pool options.
-Choose allowed fallback options by suitability and budget, not provider model lists.
-Preserve existing fallback preferences on updates. Missing settings mean no fallback.
+Configure quotaFallback: { enabled: false, optionId: null } by default. Enable it
+only under Human fallback authority; optionId must designate one existing pool
+option — a single designated fallback, not an ordered list. Choose it by
+suitability and budget, not provider model lists. Preserve the existing
+designation on updates. Missing settings mean no fallback.
 
 The catalog envelope is version: 1, a nonempty policy describing selection/budget
 boundaries, and options: an array of these bundles. Lead chooses an option per

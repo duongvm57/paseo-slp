@@ -112,7 +112,7 @@ the Human pre-registers exit criteria (agreement rate + asymmetric error class)
 and arms only once the recorded pairs satisfy them.
 
 Lead uses macro skills, Supervisor observation/governance skills, Peer task micro
-skills. Configure Peer quotaFallback.enabled/optionIds in the pool; default
+skills. Configure Peer quotaFallback.enabled/optionId in the pool; default
 disabled, targets restricted to existing eligible pool options. Record allowed pool
 maintenance, cost limits and
 settlement boundaries. Provider changes for existing work require a new-session
