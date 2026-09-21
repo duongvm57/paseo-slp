@@ -331,8 +331,13 @@ Init không ghi catalog routing. Khi repo chưa có
 `.paseo-slp/slp-routing.json`, runtime đọc pool user-scope do plugin sở hữu
 `$PASEO_HOME/slp-runtime/state/peer-pool.json` (mặc định `~/.paseo`) — thẻ
 Peer pool trong SLP Manager là writer duy nhất của nó, seed ghế từ danh sách
-archetype và lấy model/mode từ catalog provider đang chạy. Catalog trong
-repo là pin có chủ đích, chỉ được tạo bởi `init --routing-from` (bên dưới).
+archetype và lấy model/mode từ catalog provider đang chạy. Mỗi ghế trong 12
+ghế chuẩn đặt tên cho một loại công việc và mang bộ token `axis:value` do
+package sở hữu (id dành riêng, read-only trên form — xem
+`docs/spec/routing-criteria.md`); ghế custom tự do nội dung, còn
+provider/`model` để trống tới khi chọn từ catalog đang chạy trên host.
+Catalog trong repo là pin có chủ đích, chỉ được tạo bởi `init --routing-from`
+(bên dưới).
 
 File cũ `$PASEO_HOME/slp-routing.json` từ bản trước không bao giờ bị xóa tự
 động: thẻ Peer pool cho phép import một lần sang `peer-pool.json`.
