@@ -25,7 +25,7 @@ function fixture(t) {
 
 const testCatalog = () => ({ version: 1, policy: 'Test pool.', quotaFallback: { enabled: false, optionIds: [] }, options: [
   { id: 'luna-code', provider: 'codex', roles: ['peer'], model: 'gpt-5.6-luna', enabled: true, availability: 'ready', priority: 20, suitableFor: ['coding'], avoidFor: [], notes: 'coding seat' },
-  { id: 'luna-reason', provider: 'codex', roles: ['peer'], model: 'gpt-5.6-luna', enabled: true, availability: 'ready', priority: 10, suitableFor: ['reasoning'], avoidFor: [], notes: 'reasoning seat' },
+  { id: 'luna-reason', provider: 'codex', roles: ['peer'], model: 'gpt-5.6-luna', enabled: true, availability: 'ready', priority: 10, suitableFor: ['reasoning'], avoidFor: [], notes: 'reasoning seat', thinkingOptionId: 'xhigh' },
   { id: 'paused-seat', provider: 'codex', roles: ['peer'], model: 'gpt-5.6-luna', enabled: true, availability: 'paused', priority: 30, suitableFor: ['coding'], avoidFor: [], notes: 'paused seat' },
   { id: 'off-seat', provider: 'codex', roles: ['peer'], model: 'gpt-5.6-luna', enabled: false, availability: 'ready', priority: 40, suitableFor: ['coding'], avoidFor: [], notes: 'disabled seat' },
   { id: 'lead-only', provider: 'codex', roles: ['lead'], model: 'gpt-5.6-luna', enabled: true, availability: 'ready', priority: 50, suitableFor: ['review'], avoidFor: [], notes: 'lead seat' },
@@ -183,10 +183,16 @@ test('route-decide asks Jev over the eligible set and returns a verifiable recei
   const criteria = body.questions[ROUTE_DECISION_QUESTION].criteria;
   assert.deepEqual(Object.keys(criteria), ['luna-code', 'luna-reason', ROUTE_DECLINE_CANDIDATE]);
   assert.deepEqual(result.decision.context.candidates, ['luna-code', 'luna-reason']);
-  // notes (Vietnamese) and priority never enter the state.
+  // notes (Vietnamese) and priority never enter the state; thinkingOptionId
+  // ships on every option — explicit null when the catalog omits it.
   for (const option of body.state.options) {
-    assert.deepEqual(Object.keys(option), ['id', 'provider', 'model', 'suitableFor', 'avoidFor']);
+    assert.deepEqual(Object.keys(option), ['id', 'provider', 'model', 'thinkingOptionId', 'suitableFor', 'avoidFor']);
   }
+  assert.equal(body.state.options.find(o => o.id === 'luna-code').thinkingOptionId, null, 'absent → explicit null');
+  assert.equal(body.state.options.find(o => o.id === 'luna-reason').thinkingOptionId, 'xhigh', 'catalog value ships verbatim');
+  assert.match(criteria['luna-code'], /thinking: provider default/, 'criteria prose renders null as provider default');
+  assert.match(criteria['luna-reason'], /thinking: xhigh/, 'criteria prose renders the catalog thinking id');
+  assert.match(body.questions[ROUTE_DECISION_QUESTION].instructions, /thinking option/, 'instructions name the thinking field');
   assert.equal(body.state.task.task, 'implement the jev transport');
   assert.equal(verifyReceipt(result.decision), true);
   assert.equal(result.decision.model, 'typesafe/jev-1.13');

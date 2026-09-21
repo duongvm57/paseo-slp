@@ -587,6 +587,21 @@ test('the Jev guidance states the vocabulary rules, not just the word list', () 
     assert.ok(JEV_SUITABILITY_GUIDANCE.includes(phrase), `guidance states tie-break: ${phrase}`);
   }
   assert.ok(!JEV_SUITABILITY_GUIDANCE.includes('model size'), 'no unratified metadata in the tie-break');
+  // Wave 2 — the thinking surface is real data now: the guidance must explain
+  // what thinkingOptionId means, that null is provider-baked thinking, that
+  // all-null seats tie, and that an unclear provider order falls back to id.
+  for (const phrase of [
+    'thinkingOptionId',
+    'no separate thinking knob',
+    'baked into the model',
+    'all-null seats tie',
+    'thinking order is unclear',
+  ]) {
+    assert.ok(JEV_SUITABILITY_GUIDANCE.includes(phrase), `guidance explains the thinking surface: ${phrase}`);
+  }
+  // No price field was added — "no reliable price exists" remains a
+  // theoretical earlier tier only, not shipped metadata.
+  assert.ok(!JEV_SUITABILITY_GUIDANCE.includes('option.price'), 'no price field promised');
   // §1/§9 — the glossary ships every standard token's packaged sign and
   // boundary so a bare axis:value never reaches Jev unexplained.
   assert.equal(JEV_TOKEN_DEFINITIONS.length, 16);

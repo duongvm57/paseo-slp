@@ -32,7 +32,7 @@ const record = value => value !== null && typeof value === 'object' && !Array.is
 const jevError = (code, message, details) => new JevError(code, message, details);
 
 const describeOption = option =>
-  `${option.provider} ${option.model}; suitable for: ${option.suitableFor.join(', ') || 'unspecified'}; avoid for: ${option.avoidFor.join(', ') || 'none'}`;
+  `${option.provider} ${option.model}; thinking: ${option.thinkingOptionId ?? 'provider default'}; suitable for: ${option.suitableFor.join(', ') || 'unspecified'}; avoid for: ${option.avoidFor.join(', ') || 'none'}`;
 
 // route-decide <request.json>: { repository, role? (default peer), brief,
 // paseoHome? }. `brief` is the Lead-authored routing brief — a nonempty string
@@ -95,15 +95,19 @@ export async function routeDecide(request, { home, fetchImpl, now } = {}) {
     // table: the state ships each standard token's packaged sign/boundary
     // under the vocabulary version the receipt binds.
     vocabulary: { version: ROUTING_VOCABULARY_VERSION, tokens: JEV_TOKEN_DEFINITIONS },
+    // The option surface is fixed-shape — thinkingOptionId ships as explicit
+    // null when absent so Jev never guesses whether the key was dropped; null
+    // means the provider has no separate thinking knob (baked into the model).
     options: usable.map(option => ({
       id: option.id, provider: option.provider, model: option.model,
+      thinkingOptionId: option.thinkingOptionId ?? null,
       suitableFor: option.suitableFor, avoidFor: option.avoidFor,
     })),
   };
   const questions = {
     [ROUTE_DECISION_QUESTION]: {
       type: 'choice',
-      instructions: `Choose exactly one criteria key as the seat for this task. Judge the task brief against each option's provider, model and suitability fields. ${JEV_SUITABILITY_GUIDANCE} Answer no-suitable-option when none of the listed options fits.`,
+      instructions: `Choose exactly one criteria key as the seat for this task. Judge the task brief against each option's provider, model, thinking option and suitability fields. ${JEV_SUITABILITY_GUIDANCE} Answer no-suitable-option when none of the listed options fits.`,
       criteria: {
         ...Object.fromEntries(usable.map(option => [option.id, describeOption(option)])),
         [ROUTE_DECLINE_CANDIDATE]: 'None of the listed options is a suitable seat for this task — decline rather than guess',
