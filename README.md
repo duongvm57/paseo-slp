@@ -98,15 +98,21 @@ The pack ships as a Paseo plugin. Install it on the daemon that runs the
 work:
 
 ```bash
-# From a Git source — the plugin lives in the repo's plugin/ subdirectory:
-paseo plugin install <git-source>:plugin --ref <ref>
+# Pinned to a release — the plugin lives in the repo's plugin/ subdirectory:
+paseo plugin install duongvm57/paseo-slp:plugin --ref v0.2.0
+
+# Tracking main instead of a pinned release:
+paseo plugin install duongvm57/paseo-slp:plugin --ref main
 
 # From a local checkout (development):
 paseo plugin install /absolute/path/to/paseo-slp/plugin
 ```
 
-`<git-source>` is anything `git clone` accepts — e.g. the GitHub repo URL or
-`file:///absolute/path/to/paseo-slp` for a local clone. The daemon checks out
+`duongvm57/paseo-slp` is GitHub shorthand; the source argument takes anything
+`git clone` accepts, including a full HTTPS/SSH URL or
+`file:///absolute/path/to/paseo-slp` for a local clone. The `:plugin` suffix
+selects the subdirectory. A tag or commit `--ref` pins the checkout; a branch
+ref tracks and moves on `paseo plugin update`. The daemon checks out
 the ref into a managed directory under `$PASEO_HOME/plugins/paseo-slp/<id>/`
 and runs the manifest's `build` step (`npm install` inside `plugin/`) before
 loading it. Verify with `paseo plugin ls` — the plugin should reach
