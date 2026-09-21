@@ -1255,10 +1255,11 @@ test('custom controls carry RN accessibility props and stale mockup strings stay
 });
 
 test('target-scoped Jev reads refuse to paint a stale response over the displayed view', () => {
-  // Regression (gate F1): switching targets while get-jev is in flight must
-  // not let the old target's config seed the new target's fields — the same
-  // issueKey discipline the pool ops use, guarding BOTH the load/Retry path
-  // and the key-save refresh.
+  // Regression (gate F1/F-NEW): switching targets while a Jev RPC is in
+  // flight must not let the old target's response seed the new target's
+  // fields — the same issueKey discipline the pool ops use, on EVERY
+  // Jev write-site: loadJev (load/Retry), saveJev (set-jev response),
+  // saveJevKey (post-write refresh) and runJevTest (success AND error).
   const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
   const loadJev = source.slice(source.indexOf('const loadJev'), source.indexOf('useEffect(() => {', source.indexOf('const loadJev')));
   assert.equal(
@@ -1266,9 +1267,45 @@ test('target-scoped Jev reads refuse to paint a stale response over the displaye
     2,
     'loadJev must gate the success AND error writes on the displayed key',
   );
+  const saveJev = source.slice(source.indexOf('const saveJev ='), source.indexOf('const saveJevKey'));
+  assert.ok(
+    saveJev.includes('keyRef.current !== targetKey(target)'),
+    'saveJev must gate its response writes on the displayed key',
+  );
   const saveJevKey = source.slice(source.indexOf('const saveJevKey'), source.indexOf('const runJevTest'));
   assert.ok(
     saveJevKey.includes('keyRef.current !== targetKey(target)'),
     'the key-save getJev refresh must be stale-guarded too',
   );
+  // The key-input/test clears must sit AFTER the guard — a stale resolution
+  // may not touch the new target's pending state.
+  const guardIdx = saveJevKey.indexOf('keyRef.current !== targetKey(target)');
+  assert.ok(
+    guardIdx !== -1 && saveJevKey.indexOf('setJevKeyInput("")') > guardIdx,
+    'saveJevKey clears must come after the stale-write guard',
+  );
+  const runJevTest = source.slice(source.indexOf('const runJevTest'), source.indexOf('// Prefill the routing form'));
+  assert.equal(
+    occurrences(runJevTest, 'keyRef.current !== targetKey(target)'),
+    2,
+    'runJevTest must gate the success AND error result writes',
+  );
+  // Stale ops must not clear a newer op's busy flag — each finally only
+  // releases it when the response still belongs to the displayed target.
+  for (const flag of ['setJevBusy(false)', 'setJevKeyBusy(false)', 'setJevTestBusy(false)']) {
+    const fn = flag === 'setJevBusy(false)' ? saveJev : flag === 'setJevKeyBusy(false)' ? saveJevKey : runJevTest;
+    assert.ok(
+      fn.includes(`keyRef.current === targetKey(target)) ${flag}`),
+      `${flag} must be conditioned on the displayed key`,
+    );
+  }
+  // And the target-switch reset drops the Jev draft + pending flags — a
+  // skipped stale clear can never leak busy state onto the new target.
+  const resetBlock = source.slice(
+    source.indexOf('// Pool state is keyed to the displayed target'),
+    source.indexOf('// Fetch the peer pool once per target'),
+  );
+  for (const reset of ['setJevDirty(false)', 'setJevBusy(false)', 'setJevKeyBusy(false)', 'setJevTestBusy(false)']) {
+    assert.ok(resetBlock.includes(reset), `target-switch reset must drop ${reset}`);
+  }
 });

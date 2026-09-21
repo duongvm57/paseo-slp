@@ -919,6 +919,21 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     setTokenLookupToken(null);
     setOpenSeat(null);
     setAddSeatOpen(false);
+    // Jev follows the same target scoping: the draft and every pending flag
+    // drop on switch — a draft authored against home A must not Apply into
+    // home B, and a stale op's guarded finally skips its busy clear, so the
+    // switch itself is what releases the abandoned view's pending flags.
+    setJevView(null);
+    setJevDirty(false);
+    setJevSaved(false);
+    setJevKeyInput("");
+    setJevTest(null);
+    setJevLoadError(null);
+    setJevModelError(null);
+    setJevUrlError(null);
+    setJevBusy(false);
+    setJevKeyBusy(false);
+    setJevTestBusy(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- key captures target
   }, [key]);
 
@@ -1010,13 +1025,21 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
           },
         },
       });
+      // Same stale-write guard as loadJev — a set-jev response issued on the
+      // previous target must not paint its config over the displayed view,
+      // clear the dirty gate (which would let the prefill seed A's fields
+      // into B's draft), or flash "Saved." for a write B never saw.
+      if (keyRef.current !== targetKey(target)) return;
       setJevView(result.jev);
       setJevDirty(false);
       setJevSaved(true);
     } catch (error) {
       update({ lastError: errorMessage(error) }, target);
     } finally {
-      setJevBusy(false);
+      // A stale op must not clear the busy flag of a NEWER op already
+      // in-flight on the displayed target — the key-change reset releases
+      // the flag for the abandoned view instead.
+      if (keyRef.current === targetKey(target)) setJevBusy(false);
     }
   };
 
@@ -1025,18 +1048,19 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     setJevKeyBusy(true);
     try {
       await callSetJevKey({ schemaVersion: 1, target, key });
+      const result = await callGetJev({ schemaVersion: 1, target });
+      // Same stale-write guard as loadJev — the clears stay AFTER it so a
+      // stale resolution never touches the new target's pending key input
+      // or test result (the mutation already landed server-side; the guard
+      // only blocks the view/state paint).
+      if (keyRef.current !== targetKey(target)) return;
       setJevKeyInput("");
       setJevTest(null);
-      const result = await callGetJev({ schemaVersion: 1, target });
-      // Same stale-write guard as loadJev — a key write issued on the
-      // previous target must not paint its refreshed config over the
-      // displayed target's view.
-      if (keyRef.current !== targetKey(target)) return;
       setJevView(result.jev);
     } catch (error) {
       update({ lastError: errorMessage(error) }, target);
     } finally {
-      setJevKeyBusy(false);
+      if (keyRef.current === targetKey(target)) setJevKeyBusy(false);
     }
   };
 
@@ -1046,11 +1070,13 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     setJevTest(null);
     try {
       const result = await callTestJev({ schemaVersion: 1, target });
+      if (keyRef.current !== targetKey(target)) return;
       setJevTest({ ok: result.ok, detail: result.detail });
     } catch (error) {
+      if (keyRef.current !== targetKey(target)) return;
       setJevTest({ ok: false, detail: errorMessage(error) });
     } finally {
-      setJevTestBusy(false);
+      if (keyRef.current === targetKey(target)) setJevTestBusy(false);
     }
   };
 
