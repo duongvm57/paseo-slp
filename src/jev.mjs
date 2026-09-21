@@ -215,6 +215,9 @@ export function resolveJev(home, capability, { allowShadow = false } = {}) {
 
 const credentialPatterns = [
   { name: 'openrouter-key', pattern: /\bsk-or-[A-Za-z0-9_-]{12,}/ },
+  // Bare TypeSafe keys — a custom-baseUrl endpoint can reflect the key in
+  // error text; the Bearer variant is covered by bearer-token below.
+  { name: 'typesafe-key', pattern: /\bts-[A-Za-z0-9_-]{12,}/ },
   { name: 'openai-style-key', pattern: /\bsk-[A-Za-z0-9_-]{20,}/ },
   { name: 'bearer-token', pattern: /Bearer\s+[A-Za-z0-9._~+/=-]{16,}/i },
   { name: 'private-key-block', pattern: /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/ },

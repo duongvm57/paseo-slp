@@ -237,6 +237,14 @@ test('a label carrying credential-shaped text is scrubbed from the detail', asyn
   const bearerResult = await testJev(bearerJev, home);
   assert.ok(!bearerResult.detail.includes('abcdefghijklmnopqrstuvwxyz012345'), 'lowercase bearer token is scrubbed');
   assert.match(bearerResult.detail, /<redacted>/);
+  // Bare `ts-…` keys — the typesafe kind's credential shape; a custom
+  // endpoint could reflect it in the key-info label or error text.
+  const tsJev = createJev({
+    fetchImpl: async () => ({ ok: true, json: async () => ({ data: { label: 'acct ts-reflectedtypesafekey000' } }) }),
+  });
+  const tsResult = await testJev(tsJev, home);
+  assert.ok(!tsResult.detail.includes('ts-reflectedtypesafekey000'), 'bare ts- key is scrubbed');
+  assert.match(tsResult.detail, /<redacted>/);
 });
 
 test('get/set-jev verify the daemon home like every other mutation', async t => {

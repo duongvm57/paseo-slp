@@ -57,6 +57,7 @@ const probeUrl = (provider: { kind: string; baseUrl: string }): string =>
 // `bearer <token>`.
 const remoteCredentialPatterns = [
   /\bsk-or-[A-Za-z0-9_-]{12,}/,
+  /\bts-[A-Za-z0-9_-]{12,}/,
   /\bsk-[A-Za-z0-9_-]{20,}/,
   /Bearer\s+[A-Za-z0-9._~+/=-]{16,}/i,
   /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/,

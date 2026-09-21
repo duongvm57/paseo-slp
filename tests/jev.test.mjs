@@ -597,6 +597,25 @@ test('remote-controlled error text is scrubbed before it reaches thrown errors',
     assert.ok(!error.message.includes('abcdefghijklmnopqrstuvwxyz012345'), 'lowercase bearer token is scrubbed');
     assert.match(error.message, /<redacted>/);
   }
+  // Bare `ts-…` keys — a custom typesafe endpoint can reflect the key in
+  // error text; the Bearer form was already covered, the bare shape was not.
+  const tsKey = 'ts-bareechoedtypesafekey000';
+  const echoTs = async () => ({ ok: false, status: 401, json: async () => ({ error: { code: 401, message: `bad credential ${tsKey}` } }) });
+  try {
+    await routeDecide({ repository: repo, brief: 'x' }, { home, fetchImpl: echoTs });
+    assert.fail('expected jev-http');
+  } catch (error) {
+    assert.equal(error.code, 'jev-http');
+    assert.ok(!error.message.includes(tsKey), 'bare ts- key is scrubbed from remote error text');
+    assert.match(error.message, /<redacted>/);
+  }
+  // Controls: `Bearer ts-…` still scrubs (bearer pattern), and remote text
+  // carrying no credential shape passes through untouched.
+  const bearerTs = `Bearer ${tsKey}`;
+  const echoBearerTs = async () => ({ ok: false, status: 401, json: async () => ({ error: { code: 401, message: `denied ${bearerTs}` } }) });
+  await assert.rejects(routeDecide({ repository: repo, brief: 'x' }, { home, fetchImpl: echoBearerTs }), error => error.code === 'jev-http' && !error.message.includes(tsKey));
+  const clean = async () => ({ ok: false, status: 422, json: async () => ({ error: { code: 422, message: 'questions must be a record' } }) });
+  await assert.rejects(routeDecide({ repository: repo, brief: 'x' }, { home, fetchImpl: clean }), /questions must be a record/);
 });
 
 test('receipt for a different capability or missing answer fails verification', async t => {
