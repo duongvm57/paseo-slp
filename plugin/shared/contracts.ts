@@ -336,24 +336,35 @@ export const SetPeerPoolOutput = z.object({
   /** sha256 of the written file — the next expectedSha256 token. */
   sha256: Sha,
 }).strict();
-/** Jev provider block stored at slp-runtime/state/jev.json — v1 OpenRouter
- *  only. The model must be a pinned `<owner>/jev-<version>` id; aliases
+/** Jev provider block stored at slp-runtime/state/jev.json — two kinds.
+ *  openrouter: model must be a pinned `<owner>/jev-<version>` id; aliases
  *  (~typesafe/jev-latest, jev-latest, jev-preview) drift and are rejected.
- *  baseUrl accepts the bare origin or the documented prefixed form …/api/v1
- *  (parity with src/jev.mjs readJevConfig); absent → the default origin. */
-export const JevProvider = z.object({
-  kind: z.literal("openrouter"),
-  baseUrl: z.string().min(1).max(512)
+ *  baseUrl accepts the bare origin or the documented prefixed form …/api/v1.
+ *  typesafe (first-party, verified against docs.typesafe.ai): model is a
+ *  pinned bare `jev-<semver>` id; baseUrl accepts a bare https origin or an
+ *  origin+path prefix (custom endpoint/proxy). Both require https and reject
+ *  query/hash (parity with src/jev.mjs readJevConfig); absent baseUrl → the
+ *  kind's default origin. */
+const jevBaseUrl = (allowPath: (path: string) => boolean) =>
+  z.string().min(1).max(512)
     .refine(s => {
       try {
         const u = new URL(s);
-        const path = u.pathname.replace(/\/+$/, "");
-        return u.protocol === "https:" && (path === "" || path === "/api/v1") && u.search === "" && u.hash === "";
+        return u.protocol === "https:" && allowPath(u.pathname.replace(/\/+$/, "")) && u.search === "" && u.hash === "";
       } catch { return false; }
-    })
-    .default("https://openrouter.ai"),
-  model: z.string().regex(/^[a-z0-9-]+\/jev-\d+\.\d+(\.\d+)?$/),
-}).strict();
+    });
+export const JevProvider = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("openrouter"),
+    baseUrl: jevBaseUrl(path => path === "" || path === "/api/v1").default("https://openrouter.ai"),
+    model: z.string().regex(/^[a-z0-9-]+\/jev-\d+\.\d+(\.\d+)?$/),
+  }).strict(),
+  z.object({
+    kind: z.literal("typesafe"),
+    baseUrl: jevBaseUrl(() => true).default("https://api.typesafe.ai"),
+    model: z.string().regex(/^jev-\d+\.\d+\.\d+$/),
+  }).strict(),
+]);
 /** Per-daemon Jev config — all toggles default off; capabilities is a bool
  *  record so a future capability arrives without a schema bump (a missing
  *  capability defaults to off, matching src/jev.mjs). Stored as

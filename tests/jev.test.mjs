@@ -120,7 +120,13 @@ test('jev config validation rejects aliases, non-https endpoints and corrupt fil
     ['undocumented path', { schemaVersion: 1, enabled: true, capabilities: { routing: true }, provider: { kind: 'openrouter', baseUrl: 'https://openrouter.ai/v1/x', model: 'typesafe/jev-1.13' } }],
     ['api v2 path', { schemaVersion: 1, enabled: true, capabilities: { routing: true }, provider: { kind: 'openrouter', baseUrl: 'https://openrouter.ai/api/v2', model: 'typesafe/jev-1.13' } }],
     ['query string', { schemaVersion: 1, enabled: true, capabilities: { routing: true }, provider: { kind: 'openrouter', baseUrl: 'https://openrouter.ai/?x=1', model: 'typesafe/jev-1.13' } }],
-    ['unknown kind', { schemaVersion: 1, enabled: true, capabilities: { routing: true }, provider: { kind: 'typesafe', model: 'jev-1.13.0' } }],
+    ['unknown kind', { schemaVersion: 1, enabled: true, capabilities: { routing: true }, provider: { kind: 'openai', model: 'jev-1.13.0' } }],
+    // Cross-kind confusion: each shape is pinned to its own kind.
+    ['openrouter shape on typesafe', { schemaVersion: 1, enabled: true, capabilities: { routing: true }, provider: { kind: 'typesafe', model: 'typesafe/jev-1.13' } }],
+    ['typesafe shape on openrouter', { schemaVersion: 1, enabled: true, capabilities: { routing: true }, provider: { kind: 'openrouter', model: 'jev-1.13.0' } }],
+    ['typesafe alias', { schemaVersion: 1, enabled: true, capabilities: { routing: true }, provider: { kind: 'typesafe', model: 'jev-latest' } }],
+    ['typesafe http', { schemaVersion: 1, enabled: true, capabilities: { routing: true }, provider: { kind: 'typesafe', baseUrl: 'http://api.typesafe.ai', model: 'jev-1.13.0' } }],
+    ['typesafe query', { schemaVersion: 1, enabled: true, capabilities: { routing: true }, provider: { kind: 'typesafe', baseUrl: 'https://api.typesafe.ai/?x=1', model: 'jev-1.13.0' } }],
   ]) {
     jevHome(home, { config });
     assert.throws(() => readJevConfig(home), /jev-config-invalid|pinned Jev|https|provider\.kind|carry a path/, name);
@@ -141,6 +147,46 @@ test('the documented prefixed baseUrl …/api/v1 is accepted and normalized', t 
   // A missing baseUrl defaults to the bare origin on the CLI side too.
   jevHome(home, { config: { schemaVersion: 1, enabled: true, capabilities: { routing: true }, provider: { kind: 'openrouter', model: 'typesafe/jev-1.13' } } });
   assert.equal(readJevConfig(home).provider.baseUrl, 'https://openrouter.ai');
+});
+
+// First-party TypeSafe kind (docs.typesafe.ai contract): pinned bare
+// jev-<semver> model, /v1/systemone endpoint, baseUrl may carry an
+// origin+path prefix for a custom endpoint — and the request body must NOT
+// carry OpenRouter's provider.allow_fallbacks.
+test('the typesafe kind resolves /v1/systemone with its own model pin and sends no provider field', async t => {
+  const { repo, home } = fixture(t);
+  catalogFixture(repo);
+  const keyPath = join(home, 'slp-runtime', 'state', 'jev-typesafe.key');
+  for (const baseUrl of [undefined, 'https://api.typesafe.ai', 'https://jev.internal.example.com/proxy/v1']) {
+    jevHome(home, { key: null, config: { schemaVersion: 1, enabled: true, capabilities: { routing: true }, provider: { kind: 'typesafe', ...(baseUrl ? { baseUrl } : {}), model: 'jev-1.13.0' } } });
+    writeFileSync(keyPath, 'ts-synthetic-test-key\n', { mode: 0o600 });
+    const { provider } = resolveJev(home, 'routing');
+    const expectedBase = (baseUrl ?? 'https://api.typesafe.ai').replace(/\/+$/, '');
+    assert.equal(provider.baseUrl, expectedBase);
+    assert.equal(provider.endpoint, `${expectedBase}/v1/systemone`);
+    const calls = [];
+    const fetchImpl = async (url, init) => {
+      calls.push({ url, init });
+      // Native response shape: model + answers + usage — no id/provider.
+      return { ok: true, json: async () => ({ model: 'jev-1.13.0', answers: choiceAnswer('luna-code'), usage: { input_tokens: 10, output_tokens: 5 } }) };
+    };
+    const result = await routeDecide({ repository: repo, brief: 'x' }, { home, fetchImpl });
+    assert.equal(result.optionId, 'luna-code');
+    assert.equal(calls.at(-1).url, `${expectedBase}/v1/systemone`);
+    const body = JSON.parse(calls.at(-1).init.body);
+    assert.equal(body.model, 'jev-1.13.0');
+    assert.ok(!('provider' in body), 'native API must not receive provider.allow_fallbacks');
+    assert.equal(result.decision.provider.kind, 'typesafe');
+    assert.equal(verifyReceipt(result.decision), true, 'receipt verifies under the typesafe pin');
+  }
+  // A receipt pinning an openrouter-shaped model under kind typesafe (or vice
+  // versa) must not verify.
+  const { receipt } = await askChoice(
+    { name: 'q', instructions: 'pick', criteria: { a: 'x', b: 'y' }, provider: { kind: 'typesafe', endpoint: 'https://api.typesafe.ai/v1/systemone', model: 'jev-1.13.0' }, key: 'k', state: 's' },
+    { fetchImpl: async () => ({ ok: true, json: async () => ({ model: 'jev-1.13.0', answers: { q: { type: 'choice', choice: 'a' } } }) }) },
+  );
+  assert.throws(() => verifyReceipt({ ...receipt, model: 'typesafe/jev-1.13' }), /pinned Jev model/);
+  assert.throws(() => verifyReceipt({ ...receipt, provider: { kind: 'openrouter', endpoint: receipt.provider.endpoint } }), /pinned Jev model/);
 });
 
 test('key file must be regular, 0600-class and non-empty', t => {

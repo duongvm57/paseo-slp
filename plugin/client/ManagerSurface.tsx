@@ -466,6 +466,13 @@ const sameRoleForm = (a: RoutingRoleForm, b: RoutingRoleForm): boolean =>
 // Surface
 // ---------------------------------------------------------------------------
 
+// Jev provider kinds — the same pin/defaults src/jev.mjs enforces
+// daemon-side. Changing kind resets model/baseUrl to the kind's defaults.
+const JEV_KIND_DEFAULT = {
+  openrouter: { model: "typesafe/jev-1.13", baseUrl: "https://openrouter.ai", keyLabel: "OpenRouter API key", keyFile: "jev-openrouter.key", keyPlaceholder: "sk-or-v1-…" },
+  typesafe: { model: "jev-1.13.0", baseUrl: "https://api.typesafe.ai", keyLabel: "TypeSafe API key", keyFile: "jev-typesafe.key", keyPlaceholder: "ts-…" },
+} as const;
+
 /** Status rows that are audit/debug metadata — rendered inside the collapsed
  *  "Details" section so the card stays scannable. Everything else (state,
  *  canonical home, candidates, binding) stays visible: spec §4 requires the
@@ -585,10 +592,14 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   // (a renamed seat keeps its editor open); removing any seat closes both.
   const [openSeat, setOpenSeat] = useState<number | null>(null);
   const [addSeatOpen, setAddSeatOpen] = useState(false);
-  // Jev (OpenRouter): per-daemon config + key — the key value lives only in
-  // jevKeyInput until Save, is cleared right after, and status reports hasKey
-  // only. Provider fields are pinned v1 values, shown read-only.
+  // Jev: per-daemon config + key — the key value lives only in jevKeyInput
+  // until Save, is cleared right after, and status reports hasKey only.
+  // Provider kind is selectable (OpenRouter relay vs TypeSafe first-party);
+  // model/baseUrl default per kind, baseUrl editable for custom endpoints.
   const [jevView, setJevView] = useState<JevViewValue | null>(null);
+  const [jevKind, setJevKind] = useState<"openrouter" | "typesafe">("openrouter");
+  const [jevModel, setJevModel] = useState("");
+  const [jevBaseUrl, setJevBaseUrl] = useState("");
   const [jevEnabledOn, setJevEnabledOn] = useState(false);
   const [jevRoutingOn, setJevRoutingOn] = useState(false);
   const [jevDirty, setJevDirty] = useState(false);
@@ -769,17 +780,20 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     setPoolForm(current => (samePeerPoolForm(current, next) ? current : next));
   }, [poolData, poolDirty]);
 
-  // Prefill the toggles from the stored config until the Human edits —
-  // same tracking discipline as the language form.
+  // Prefill the toggles and provider fields from the stored config until the
+  // Human edits — same tracking discipline as the language form.
   useEffect(() => {
     if (jevDirty) return;
     setJevEnabledOn(jevView?.enabled === true);
     setJevRoutingOn(jevView?.capabilities?.routing === true);
+    const kind = jevView?.provider?.kind === "typesafe" ? "typesafe" : "openrouter";
+    setJevKind(kind);
+    setJevModel(jevView?.provider?.model ?? JEV_KIND_DEFAULT[kind].model);
+    setJevBaseUrl(jevView?.provider?.baseUrl ?? JEV_KIND_DEFAULT[kind].baseUrl);
   }, [jevView, jevDirty]);
 
-  // Provider is pinned for v1 — the card shows it read-only; only toggles and
-  // the key are editable. Saving writes the whole config document.
-  const JEV_PINNED_PROVIDER = { kind: "openrouter", baseUrl: "https://openrouter.ai", model: "typesafe/jev-1.13" } as const;
+  // Provider kind drives the model pin and the baseUrl default/rule — the
+  // same contract src/jev.mjs readJevConfig enforces daemon-side.
   const saveJev = async () => {
     if (!target) return;
     setJevBusy(true);
@@ -787,7 +801,16 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
       const result = await callSetJev({
         schemaVersion: 1,
         target,
-        jev: { schemaVersion: 1, enabled: jevEnabledOn, capabilities: { routing: jevRoutingOn }, provider: JEV_PINNED_PROVIDER },
+        jev: {
+          schemaVersion: 1,
+          enabled: jevEnabledOn,
+          capabilities: { routing: jevRoutingOn },
+          provider: {
+            kind: jevKind,
+            baseUrl: jevBaseUrl.trim() === "" ? JEV_KIND_DEFAULT[jevKind].baseUrl : jevBaseUrl.trim(),
+            model: jevModel.trim() === "" ? JEV_KIND_DEFAULT[jevKind].model : jevModel.trim(),
+          },
+        },
       });
       setJevView(result.jev);
       setJevDirty(false);
@@ -2894,23 +2917,56 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
       {target ? (
         // Jev config is per-daemon-home — independent of activation state, so
         // the card shows whenever a target resolves (unlike the binding-bound
-        // cards above). Provider fields are pinned read-only for v1; toggles
-        // save through one set-jev call and take effect at the NEXT
-        // preparation — a running session is never mutated. The key is
-        // write-only: the card reports hasKey, never the value.
+        // cards above). Provider kind selects the wire contract (OpenRouter
+        // Decisions API vs TypeSafe first-party System One); model/baseUrl
+        // default per kind, and toggles save through one set-jev call taking
+        // effect at the NEXT preparation — a running session is never
+        // mutated. The key is write-only: the card reports hasKey, never the
+        // value.
         <Card
           colors={colors}
-          title="Jev (OpenRouter)"
+          title="Jev"
           subtitle="Bounded routing decisions — a Lead runs `slp route-decide` so Jev picks the pool seat from the eligible set, and prepare verifies the receipt offline. All toggles default off; an outage fails closed and disabling restores Lead-judgment routing."
         >
-          <View style={styles.kvRow}>
-            <Text style={[styles.kvLabel, { color: colors.foregroundMuted }]}>Provider</Text>
-            <Text style={[styles.kvValue, { color: colors.foreground }]}>openrouter · typesafe/jev-1.13</Text>
-          </View>
-          <View style={styles.kvRow}>
-            <Text style={[styles.kvLabel, { color: colors.foregroundMuted }]}>Endpoint</Text>
-            <Text style={[styles.kvValue, { color: colors.foreground }]}>https://openrouter.ai/api/alpha/decisions</Text>
-          </View>
+          <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Provider</Text>
+          <ChipSelect<"openrouter" | "typesafe">
+            colors={colors}
+            value={jevKind}
+            options={[
+              { label: "OpenRouter", value: "openrouter" },
+              { label: "TypeSafe (first-party)", value: "typesafe" },
+            ]}
+            disabled={!target || jevBusy}
+            onChange={next => {
+              setJevDirty(true);
+              setJevSaved(false);
+              setJevKind(next);
+              setJevModel(JEV_KIND_DEFAULT[next].model);
+              setJevBaseUrl(JEV_KIND_DEFAULT[next].baseUrl);
+            }}
+          />
+          <Field
+            colors={colors}
+            label="Model"
+            hint={jevKind === "typesafe"
+              ? "Pinned versioned id (jev-<semver>) — aliases like jev-latest are rejected"
+              : "Pinned <owner>/jev-<version> id — aliases like jev-latest are rejected"}
+            value={jevModel}
+            onChangeText={text => { setJevDirty(true); setJevSaved(false); setJevModel(text); }}
+            placeholder={JEV_KIND_DEFAULT[jevKind].model}
+            disabled={!target || jevBusy}
+          />
+          <Field
+            colors={colors}
+            label={jevBaseUrl.trim() !== "" && jevBaseUrl.trim() !== JEV_KIND_DEFAULT[jevKind].baseUrl
+              ? "Base URL (custom)"
+              : "Base URL"}
+            hint={`POST ${(jevBaseUrl.trim() === "" ? JEV_KIND_DEFAULT[jevKind].baseUrl : jevBaseUrl.trim()).replace(/\/+$/, "")}${jevKind === "typesafe" ? "/v1/systemone" : "/api/alpha/decisions"}${jevKind === "typesafe" ? " — an origin+path prefix mounts a custom endpoint/proxy" : " — bare origin or the documented …/api/v1 prefixed form"}`}
+            value={jevBaseUrl}
+            onChangeText={text => { setJevDirty(true); setJevSaved(false); setJevBaseUrl(text); }}
+            placeholder={JEV_KIND_DEFAULT[jevKind].baseUrl}
+            disabled={!target || jevBusy}
+          />
           <View style={styles.kvRow}>
             <Text style={[styles.kvLabel, { color: colors.foregroundMuted }]}>Status</Text>
             <Text style={[styles.kvValue, { color: jevView?.error ? colors.statusDanger : colors.foreground }]}>
@@ -2963,11 +3019,11 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
           <View style={[styles.divider, { borderTopColor: colors.border }]} />
           <Field
             colors={colors}
-            label="OpenRouter API key"
-            hint="Stored at slp-runtime/state/jev-openrouter.key (0600) — never shown back; enter a new key to replace it"
+            label={JEV_KIND_DEFAULT[jevKind].keyLabel}
+            hint={`Stored at slp-runtime/state/${JEV_KIND_DEFAULT[jevKind].keyFile} (0600) — never shown back; enter a new key to replace it`}
             value={jevKeyInput}
             onChangeText={setJevKeyInput}
-            placeholder="sk-or-v1-…"
+            placeholder={JEV_KIND_DEFAULT[jevKind].keyPlaceholder}
             disabled={!target || jevKeyBusy}
             secure
           />

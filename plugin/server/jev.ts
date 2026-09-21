@@ -12,7 +12,8 @@
 // absent config = unconfigured (Jev OFF), corrupt config = error surfaced,
 // key group/other-accessible = reported. Keep the two validators aligned.
 // test-jev is the ONLY Jev RPC that touches the network (explicit human
-// action — GET {baseUrl}/api/v1/auth/key); the fetch seam is injectable.
+// action — per kind: GET {origin}/api/v1/auth/key for openrouter, GET
+// {baseUrl}/v1/models for typesafe); the fetch seam is injectable.
 
 import { lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -35,6 +36,18 @@ import {
 const JEV_FILE = join("state", "jev.json");
 const keyFileName = (kind: string) => join("state", `jev-${kind}.key`);
 const DEFAULT_KIND = "openrouter";
+const KIND_LABEL: Record<string, string> = { openrouter: "OpenRouter", typesafe: "TypeSafe" };
+
+// Live auth probe per provider kind — both are documented key-check
+// endpoints that answer 401 on a bad Bearer. openrouter's probe lives under
+// /api/v1 on the origin regardless of a configured /api/v1 prefix (resolve
+// from origin so the prefixed form does not double-prefix). typesafe's
+// /v1/models hangs off the configured baseUrl so a custom endpoint/proxy
+// with a path prefix is probed at its own mount.
+const probeUrl = (provider: { kind: string; baseUrl: string }): string =>
+  provider.kind === "typesafe"
+    ? `${provider.baseUrl.replace(/\/+$/, "")}/v1/models`
+    : `${new URL(provider.baseUrl).origin}/api/v1/auth/key`;
 
 // Remote-controlled text (auth/key labels, API error strings) is untrusted:
 // scrub credential-shaped substrings and bound length before it reaches RPC
@@ -225,7 +238,7 @@ export function createJev(deps: JevDeps = {}) {
     const fail = (detail: string, latencyMs = 0): TestJevResult => ({ schemaVersion: 1, ok: false, detail, latencyMs });
     if (config === null) return fail(error ?? "Jev is not configured for this daemon");
     const probe = keyProbe(ctx.stableRoot, config.provider.kind);
-    if (!probe.hasKey) return fail("no key stored — set the OpenRouter key first");
+    if (!probe.hasKey) return fail(`no key stored — set the ${KIND_LABEL[config.provider.kind] ?? config.provider.kind} key first`);
     if (probe.keyPermissionsOk === false) return fail("key file is group/other-accessible — chmod 600 the jev key file");
     let key: string;
     try {
@@ -236,19 +249,18 @@ export function createJev(deps: JevDeps = {}) {
     const started = now();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 5000);
+    const label0 = KIND_LABEL[config.provider.kind] ?? config.provider.kind;
     try {
-      // The probe lives under /api/v1 on the origin regardless of whether the
-      // configured baseUrl carries the /api/v1 prefix — resolve from origin so
-      // the prefixed form does not double-prefix.
-      const probeUrl = `${new URL(config.provider.baseUrl).origin}/api/v1/auth/key`;
-      const response = await fetchImpl(probeUrl, {
+      const response = await fetchImpl(probeUrl(config.provider), {
         headers: { authorization: `Bearer ${key}` },
         signal: controller.signal,
       });
       const latencyMs = now() - started;
-      if (!response.ok) return fail(`OpenRouter answered HTTP ${response.status}`, latencyMs);
-      const body: unknown = await response.json();
-      const label = typeof body === "object" && body !== null && typeof (body as { data?: { label?: unknown } }).data?.label === "string"
+      if (!response.ok) return fail(`${label0} answered HTTP ${response.status}`, latencyMs);
+      // OpenRouter's key-info answers {data:{label}}; /v1/models returns a
+      // model list — a 2xx already proves the key, no field is consumed.
+      const body: unknown = await response.json().catch(() => null);
+      const label = config.provider.kind === "openrouter" && typeof body === "object" && body !== null && typeof (body as { data?: { label?: unknown } }).data?.label === "string"
         ? (body as { data: { label: string } }).data.label
         : null;
       return { schemaVersion: 1, ok: true, detail: label ? `key accepted (label ${sanitizeRemoteText(label, 120)})` : "key accepted", latencyMs };

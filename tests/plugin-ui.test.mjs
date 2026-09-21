@@ -1034,6 +1034,20 @@ test('the Peer pool card authors the pool through catalog-backed pickers', () =>
   assert.ok(bundle.includes('Peer pool'), 'card title bundled');
 });
 
+test('the Jev card offers both provider kinds with per-kind model/baseUrl/key surfaces', () => {
+  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  // Kind picker with both options — the Human asked for a TypeSafe
+  // first-party path beside the OpenRouter relay.
+  assert.ok(source.includes('"TypeSafe (first-party)"'), 'typesafe kind option missing');
+  assert.ok(source.includes('{ label: "OpenRouter", value: "openrouter" }'), 'openrouter kind option missing');
+  // Per-kind defaults and the per-kind key file label.
+  assert.ok(source.includes('jev-1.13.0'), 'typesafe pinned model default missing');
+  assert.ok(source.includes('jev-typesafe.key'), 'typesafe key file missing');
+  // Custom base URL is the Human-requested surface — an editable field that
+  // marks itself when the value diverges from the kind default.
+  assert.ok(source.includes('"Base URL (custom)"'), 'custom baseUrl marker missing');
+});
+
 test('featureDefsForSeat is declared before poolBuild calls it eagerly', () => {
   // Regression: poolBuild runs during render and invokes the lambda per seat
   // — a const declared below it is a TDZ crash on any non-empty seat list

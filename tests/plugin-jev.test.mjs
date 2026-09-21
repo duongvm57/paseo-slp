@@ -61,7 +61,12 @@ test('set-jev rejects malformed input and drift-prone provider values', async t 
     ['first-party id shape', { ...config(), provider: { kind: 'openrouter', baseUrl: 'https://openrouter.ai', model: 'jev-1.13.0' } }],
     ['http baseUrl', { ...config(), provider: { kind: 'openrouter', baseUrl: 'http://openrouter.ai', model: 'typesafe/jev-1.13' } }],
     ['undocumented baseUrl path', { ...config(), provider: { kind: 'openrouter', baseUrl: 'https://openrouter.ai/api/v2', model: 'typesafe/jev-1.13' } }],
-    ['other kind', { ...config(), provider: { kind: 'typesafe', baseUrl: 'https://api.typesafe.ai', model: 'typesafe/jev-1.13' } }],
+    ['other kind', { ...config(), provider: { kind: 'openai', baseUrl: 'https://api.openai.com', model: 'typesafe/jev-1.13' } }],
+    // Cross-kind confusion — each shape is pinned to its own kind.
+    ['openrouter model on typesafe', { ...config(), provider: { kind: 'typesafe', baseUrl: 'https://api.typesafe.ai', model: 'typesafe/jev-1.13' } }],
+    ['typesafe model on openrouter', { ...config(), provider: { kind: 'openrouter', baseUrl: 'https://openrouter.ai', model: 'jev-1.13.0' } }],
+    ['typesafe http baseUrl', { ...config(), provider: { kind: 'typesafe', baseUrl: 'http://api.typesafe.ai', model: 'jev-1.13.0' } }],
+    ['typesafe baseUrl query', { ...config(), provider: { kind: 'typesafe', baseUrl: 'https://api.typesafe.ai/?x=1', model: 'jev-1.13.0' } }],
   ];
   for (const [name, jevConfig] of cases) {
     await assert.rejects(() => setJev(jev, home, jevConfig), /invalid set-jev input/, name);
@@ -158,6 +163,36 @@ test('test-jev probes the stored key — no key/config fail fast, network is dou
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, 'https://openrouter.ai/api/v1/auth/key');
   assert.equal(calls[0].init.headers.authorization, 'Bearer sk-or-v1-probe-key');
+});
+
+test('typesafe kind: config round-trip, jev-typesafe.key lifecycle, /v1/models probe', async t => {
+  const home = makeHome(t);
+  const calls = [];
+  const jev = createJev({ fetchImpl: async (url, init) => { calls.push({ url, init }); return { ok: true, json: async () => ({ data: [{ id: 'jev-1.13.0' }] }) }; } });
+  const tsConfig = over => config({ provider: { kind: 'typesafe', model: 'jev-1.13.0', ...over } });
+  // Absent baseUrl defaults to the first-party origin — same parity rule as
+  // the openrouter default.
+  const stored = await setJev(jev, home, tsConfig());
+  assert.equal(stored.jev.provider.baseUrl, 'https://api.typesafe.ai');
+  assert.equal(stored.jev.provider.model, 'jev-1.13.0');
+  // A custom endpoint mounts under an origin+path prefix (Human-requested).
+  await setJev(jev, home, tsConfig({ baseUrl: 'https://jev.internal.example.com/proxy' }));
+  assert.equal((await getJev(jev, home)).jev.provider.baseUrl, 'https://jev.internal.example.com/proxy');
+  // The key lives in the kind-named file, not jev-openrouter.key.
+  await setJevKey(jev, home, 'ts-probe-key');
+  assert.equal(existsSync(join(home, 'slp-runtime', 'state', 'jev-typesafe.key')), true);
+  assert.equal(existsSync(keyPath(home)), false, 'openrouter key file untouched');
+  // The probe follows the configured baseUrl mount — a proxy serves its API
+  // under the prefix, so {baseUrl}/v1/models is the documented check.
+  const result = await testJev(jev, home);
+  assert.equal(result.ok, true);
+  assert.equal(calls.at(-1).url, 'https://jev.internal.example.com/proxy/v1/models');
+  assert.equal(calls.at(-1).init.headers.authorization, 'Bearer ts-probe-key');
+  // Bad key → the documented 401 surfaces as a failed probe, never a throw.
+  const bad = createJev({ fetchImpl: async () => ({ ok: false, status: 401, json: async () => ({}) }) });
+  const denied = await testJev(bad, home);
+  assert.equal(denied.ok, false);
+  assert.match(denied.detail, /HTTP 401/);
 });
 
 test('test-jev reports HTTP and network failures without throwing or leaking', async t => {

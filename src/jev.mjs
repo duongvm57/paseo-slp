@@ -16,8 +16,24 @@
 //   { schemaVersion: 1,
 //     enabled: boolean,
 //     capabilities: { routing: boolean, ...future bools },   // only when enabled
-//     provider: { kind: "openrouter", baseUrl?, model } }    // only when enabled
+//     provider: { kind: "openrouter"|"typesafe", baseUrl?, model } }  // only when enabled
 // Key: <daemonHome>/slp-runtime/state/jev-<kind>.key   mode must be *00
+//
+// TypeSafe first-party mapping (verified 2026-09-21 against the official API
+// reference at docs.typesafe.ai — api.typesafe.ai, keys minted at
+// console.typesafe.ai/keys): the native System One endpoint, NOT
+// OpenAI-compatible chat/completions:
+//   POST {baseUrl}/v1/systemone
+//   { model, state: string|object|array, questions: {name: {type, instructions,
+//     criteria}} }                                   — no `provider` field;
+//     provider.allow_fallbacks is OpenRouter-only and must not be sent
+//   → { model: "jev-1.13.0", answers: {name: {type, ...}},
+//       usage: {input_tokens, output_tokens} }       — no id/provider fields
+//   errors → 401 key, 422 body validation, 429 rate limit, 529 overloaded
+// Models are pinned versioned ids (jev-1.13.0); aliases still reject. The
+// documented auth probe is GET /v1/models (Bearer required). baseUrl may be
+// a bare https origin or an origin+path prefix for a custom endpoint/proxy —
+// path is appended after the prefix.
 //
 // OpenRouter mapping (verified 2026-09-20 against the OpenRouter OpenAPI at
 // openrouter.ai/docs/api/api-reference/alphadecisions + the typesafe/jev-1.13
@@ -64,20 +80,44 @@ const jevError = (code, message, details) => new JevError(code, message, details
 // Per-daemon config + key
 // ---------------------------------------------------------------------------
 
+// Historical default kind — its defaults keep their exported names.
 export const JEV_DEFAULT_BASE_URL = 'https://openrouter.ai';
 export const JEV_DEFAULT_MODEL = 'typesafe/jev-1.13';
 // OpenRouter Jev model ids are `<owner>/jev-<version>`; aliases (~typesafe/
-// jev-latest, jev-latest, jev-preview) drift and are rejected here.
+// jev-latest, jev-latest, jev-preview) drift and are rejected here. The
+// first-party API pins bare versioned ids (jev-1.13.0) instead.
 const pinnedModelPattern = /^[a-z0-9-]+\/jev-\d+\.\d+(\.\d+)?$/;
+const typesafeModelPattern = /^jev-\d+\.\d+\.\d+$/;
 
 export const jevConfigPath = home => join(home, 'slp-runtime', 'state', 'jev.json');
 export const jevKeyPath = (home, kind) => join(home, 'slp-runtime', 'state', `jev-${kind}.key`);
 
-// Transport seam: a provider kind owns its endpoint path and key filename.
-// Adding first-party `typesafe` later means one more entry here — consumers do
-// not change.
+// Transport seam: a provider kind owns its endpoint path, default baseUrl,
+// model pin, baseUrl path rule and request extras — consumers do not change.
+// requestExtras spread into the POST body: OpenRouter accepts
+// ProviderPreferences (fallbacks pinned off); the native API has no provider
+// field, so typesafe sends none.
 const transports = {
-  openrouter: { endpoint: '/api/alpha/decisions' },
+  openrouter: {
+    endpoint: '/api/alpha/decisions',
+    defaultBaseUrl: JEV_DEFAULT_BASE_URL,
+    modelPattern: pinnedModelPattern,
+    modelHint: JEV_DEFAULT_MODEL,
+    // The documented prefixed form is the only non-empty path allowed.
+    baseUrlPathAllowed: path => path === '' || path === '/api/v1',
+    baseUrlHint: 'a bare https origin or the documented prefixed form …/api/v1 (no other path, no query)',
+    requestExtras: { provider: { allow_fallbacks: false } },
+  },
+  typesafe: {
+    endpoint: '/v1/systemone',
+    defaultBaseUrl: 'https://api.typesafe.ai',
+    modelPattern: typesafeModelPattern,
+    modelHint: 'jev-1.13.0',
+    // Custom endpoint/proxy support: any origin+path prefix is a mount point.
+    baseUrlPathAllowed: () => true,
+    baseUrlHint: 'a bare https origin or an origin+path prefix (custom endpoint, no query)',
+    requestExtras: {},
+  },
 };
 
 export function readJevConfig(home) {
@@ -107,7 +147,8 @@ export function readJevConfig(home) {
   if (!record(parsed.provider) || !transports[parsed.provider.kind]) {
     throw jevError('jev-config-invalid', `Jev config at ${path}: provider.kind must be one of ${Object.keys(transports).join(', ')}`);
   }
-  const baseUrl = parsed.provider.baseUrl ?? JEV_DEFAULT_BASE_URL;
+  const transport = transports[parsed.provider.kind];
+  const baseUrl = parsed.provider.baseUrl ?? transport.defaultBaseUrl;
   let parsedUrl;
   try {
     parsedUrl = new URL(baseUrl);
@@ -116,11 +157,11 @@ export function readJevConfig(home) {
   }
   if (parsedUrl.protocol !== 'https:') throw jevError('jev-config-invalid', `Jev config at ${path}: provider.baseUrl must be https`);
   const urlPath = parsedUrl.pathname.replace(/\/+$/, '');
-  if (urlPath !== '' && urlPath !== '/api/v1' || parsedUrl.search !== '' || parsedUrl.hash !== '') {
-    throw jevError('jev-config-invalid', `Jev config at ${path}: provider.baseUrl must be a bare https origin or the documented prefixed form …/api/v1 (no other path, no query)`);
+  if (!transport.baseUrlPathAllowed(urlPath) || parsedUrl.search !== '' || parsedUrl.hash !== '') {
+    throw jevError('jev-config-invalid', `Jev config at ${path}: provider.baseUrl must be ${transport.baseUrlHint}`);
   }
-  if (!pinnedModelPattern.test(parsed.provider.model ?? '')) {
-    throw jevError('jev-config-invalid', `Jev config at ${path}: provider.model must be a pinned Jev id like ${JEV_DEFAULT_MODEL} — aliases (jev-latest, jev-preview) drift and are rejected`);
+  if (!transport.modelPattern.test(parsed.provider.model ?? '')) {
+    throw jevError('jev-config-invalid', `Jev config at ${path}: provider.model must be a pinned Jev id like ${transport.modelHint} — aliases (jev-latest, jev-preview) drift and are rejected`);
   }
   return {
     path,
@@ -262,7 +303,11 @@ export function verifyReceipt(decision) {
   const fail = message => { throw new Error(`Jev decision receipt: ${message}`); };
   if (!record(decision) || decision.schemaVersion !== 1 || decision.kind !== 'jev-decision') fail('requires schemaVersion=1 and kind=jev-decision');
   if (!record(decision.provider) || !nonempty(decision.provider.kind) || !nonempty(decision.provider.endpoint)) fail('provider{kind,endpoint} required');
-  if (!nonempty(decision.model) || !pinnedModelPattern.test(decision.model)) fail('a pinned Jev model id is required');
+  // The pin is per provider kind: OpenRouter ids are <owner>/jev-<version>,
+  // the native API pins bare jev-<semver>. An unknown kind has no pin and
+  // fails here rather than slipping an unpinned model through.
+  const pin = transports[decision.provider.kind]?.modelPattern;
+  if (!nonempty(decision.model) || !pin || !pin.test(decision.model)) fail('a pinned Jev model id is required');
   if (!sha256Pattern.test(decision.stateSha256 ?? '')) fail('stateSha256 must be a sha256 hex');
   if (!record(decision.questions) || Object.keys(decision.questions).length === 0) fail('questions must be a nonempty record');
   if (!record(decision.context)) fail('context must be a record');
@@ -342,7 +387,9 @@ export async function askJev({ provider, key, state, questions, context = {} }, 
   if (typeof state !== 'string' && !record(state) && !Array.isArray(state)) throw jevError('jev-request-invalid', 'state must be a string, object or array');
   if (!record(questions) || Object.keys(questions).length === 0) throw jevError('jev-request-invalid', 'questions must be a nonempty record');
   for (const [name, question] of Object.entries(questions)) validateQuestion(name, question);
-  const body = { model: provider.model, state, questions, provider: { allow_fallbacks: false } };
+  // Per-kind extras: OpenRouter pins provider.allow_fallbacks off; the
+  // native TypeSafe API has no provider field and must not receive one.
+  const body = { model: provider.model, state, questions, ...(transports[provider.kind]?.requestExtras ?? {}) };
   // Redaction runs over the exact outbound payload — after the request is
   // assembled, before any network call.
   assertRedacted(body);
