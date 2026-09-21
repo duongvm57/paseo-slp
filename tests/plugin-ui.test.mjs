@@ -1253,3 +1253,22 @@ test('custom controls carry RN accessibility props and stale mockup strings stay
     assert.ok(!source.includes(stale), `stale mockup string present: ${stale}`);
   }
 });
+
+test('target-scoped Jev reads refuse to paint a stale response over the displayed view', () => {
+  // Regression (gate F1): switching targets while get-jev is in flight must
+  // not let the old target's config seed the new target's fields — the same
+  // issueKey discipline the pool ops use, guarding BOTH the load/Retry path
+  // and the key-save refresh.
+  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  const loadJev = source.slice(source.indexOf('const loadJev'), source.indexOf('useEffect(() => {', source.indexOf('const loadJev')));
+  assert.equal(
+    occurrences(loadJev, 'keyRef.current !== targetKey(forTarget)'),
+    2,
+    'loadJev must gate the success AND error writes on the displayed key',
+  );
+  const saveJevKey = source.slice(source.indexOf('const saveJevKey'), source.indexOf('const runJevTest'));
+  assert.ok(
+    saveJevKey.includes('keyRef.current !== targetKey(target)'),
+    'the key-save getJev refresh must be stale-guarded too',
+  );
+});

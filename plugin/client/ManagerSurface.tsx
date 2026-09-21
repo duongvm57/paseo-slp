@@ -868,10 +868,17 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   const jevLoadedFor = useRef<string | null>(null);
   const loadJev = useCallback(async (forTarget: TargetValue) => {
     setJevLoadError(null);
+    // Stale-write guard (the same issueKey discipline the pool ops use): a
+    // response issued for the previous target must never paint its config
+    // over the displayed target's view — an unguarded write would let a
+    // late A-config seed B's fields, and saveJev would then write A's
+    // provider settings to B.
     try {
       const result = await callGetJev({ schemaVersion: 1, target: forTarget });
+      if (keyRef.current !== targetKey(forTarget)) return;
       setJevView(result.jev);
     } catch (error) {
+      if (keyRef.current !== targetKey(forTarget)) return;
       setJevView(null);
       setJevLoadError(errorMessage(error));
     }
@@ -1021,6 +1028,10 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
       setJevKeyInput("");
       setJevTest(null);
       const result = await callGetJev({ schemaVersion: 1, target });
+      // Same stale-write guard as loadJev — a key write issued on the
+      // previous target must not paint its refreshed config over the
+      // displayed target's view.
+      if (keyRef.current !== targetKey(target)) return;
       setJevView(result.jev);
     } catch (error) {
       update({ lastError: errorMessage(error) }, target);
@@ -2479,7 +2490,9 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                     colors={colors}
                     label={open ? "Close" : "Edit"}
                     onPress={() => setOpenSeat(open ? null : index)}
-                    disabled={disabled}
+                    // Intentionally NOT disabled: expanding while the pool is
+                    // locked is view-only — every control inside stays
+                    // disabled — and matches the title press beside it.
                   />
                 </View>
                 {open ? (
