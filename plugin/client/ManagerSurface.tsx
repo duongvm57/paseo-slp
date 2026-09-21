@@ -949,6 +949,22 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   const storedSeatOptions = new Map(
     (poolData?.pool?.options ?? []).map(option => [option.id, option]),
   );
+  // Seat feature defs read the same per-key cache as the role pickers below —
+  // hoisted above poolBuild because buildPeerPool invokes the lambda eagerly
+  // during render (a const declared later would be a TDZ crash on any
+  // non-empty seat list).
+  const featureDefsForSeat = (seat: PeerSeatForm) => {
+    const key = seat.family !== "" && seat.model.trim() !== ""
+      ? `${seat.family}|${seat.model.trim()}|${seat.modeId.trim()}`
+      : null;
+    const set = key ? featureSets[key] : undefined;
+    return {
+      key,
+      defs: set?.defs ?? [],
+      error: set?.error ?? null,
+      loading: key !== null && featuresLoadingFor === key,
+    };
+  };
   const poolBuild = buildPeerPool(
     poolForm,
     seat => featureDefsForSeat(seat).defs,
@@ -1388,19 +1404,6 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
       loading: key !== null && featuresLoadingFor === key,
     };
   };
-  const featureDefsForSeat = (seat: PeerSeatForm) => {
-    const key = seat.family !== "" && seat.model.trim() !== ""
-      ? `${seat.family}|${seat.model.trim()}|${seat.modeId.trim()}`
-      : null;
-    const set = key ? featureSets[key] : undefined;
-    return {
-      key,
-      defs: set?.defs ?? [],
-      error: set?.error ?? null,
-      loading: key !== null && featuresLoadingFor === key,
-    };
-  };
-
   // The Save diff-gate (spec §9): ONE build path produces the choices the
   // gate compares and saveRouting dispatches. Save enables when a bound
   // form builds to a routing that differs from the stored one — a bound
@@ -2415,7 +2418,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                         // prohibition; shown once for both avoid lists,
                         // conflict view included.
                         <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-                          avoidFor là cảnh báo tư vấn — advisory only; it does not block a runtime permission.
+                          avoidFor is advisory only — it does not block a runtime permission.
                         </Text>
                       ) : null}
                       {conflict && standardTokens ? (
@@ -2502,7 +2505,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                           lineList(seat.suitableFor).length + lineList(seat.avoidFor).length > 0 ? (
                             <>
                               <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-                                Tra cứu từng chuỗi đã nhập — press a string to look it up:
+                                Press an entered string to look it up:
                               </Text>
                               {tokenRows(lineList(seat.suitableFor))}
                               {tokenRows(lineList(seat.avoidFor))}
@@ -2609,13 +2612,13 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                               </Text>
                               <Text style={[styles.mutedSmall, { color: colors.foreground }]}>{def.sign}</Text>
                               <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-                                Ví dụ: {def.example}
+                                Example: {def.example}
                               </Text>
                               <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-                                Phản ví dụ: {def.counterExample}
+                                Counter-example: {def.counterExample}
                               </Text>
                               <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-                                Ranh giới: {def.boundary}
+                                Boundary: {def.boundary}
                               </Text>
                             </View>
                           ) : (
@@ -2771,7 +2774,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
               {poolBuild.seatIndex != null ? (
                 <Button
                   colors={colors}
-                  label={`Mở ghế ${poolForm.seats[poolBuild.seatIndex]?.id ?? ""}`}
+                  label={`Open seat ${poolForm.seats[poolBuild.seatIndex]?.id ?? ""}`}
                   onPress={() => setOpenSeat(poolBuild.seatIndex ?? null)}
                 />
               ) : null}

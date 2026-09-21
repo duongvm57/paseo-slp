@@ -1033,3 +1033,14 @@ test('the Peer pool card authors the pool through catalog-backed pickers', () =>
   assert.ok(peerCard.includes('fails closed'), 'stale note names the fail-closed binding');
   assert.ok(bundle.includes('Peer pool'), 'card title bundled');
 });
+
+test('featureDefsForSeat is declared before poolBuild calls it eagerly', () => {
+  // Regression: poolBuild runs during render and invokes the lambda per seat
+  // — a const declared below it is a TDZ crash on any non-empty seat list
+  // (host report: picker renders, adding a seat crashes the surface).
+  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  const decl = source.indexOf('const featureDefsForSeat');
+  const use = source.indexOf('const poolBuild = buildPeerPool(');
+  assert.ok(decl !== -1 && use !== -1, 'featureDefsForSeat/poolBuild must exist');
+  assert.ok(decl < use, 'featureDefsForSeat must be declared before poolBuild uses it');
+});
