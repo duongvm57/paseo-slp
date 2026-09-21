@@ -474,16 +474,20 @@ BLOCKED; giữ ownership và bằng chứng trước khi handoff.
 
 ### Routing có Jev hỗ trợ (tùy chọn)
 
-Jev là một decision primitive có giới hạn — System One của TypeSafe chạy qua
-Decisions API của OpenRouter với model ghim `typesafe/jev-1.13`. Nó **không
-phải** ACP provider và không bao giờ trở thành ghế agent; nó trả lời một câu
-hỏi choice đã định kiểu trên `state` do caller cung cấp và trả về đáp án đã
-hiệu chuẩn. Nó chỉ chạy qua helper tường minh `route-decide` — không bao giờ
-trong vòng lặp nền, lịch định kỳ, hay bên trong `prepare`.
+Jev là một decision primitive có giới hạn — System One của TypeSafe, chạy qua
+một trong hai provider kind: `openrouter` (Decisions API của OpenRouter với
+model ghim `typesafe/jev-1.13`) hoặc `typesafe` (System One API chính chủ tại
+`https://api.typesafe.ai/v1/systemone` với model ghim `jev-1.13.0`; `baseUrl`
+có thể trỏ tới custom https endpoint/proxy mang origin+path prefix). Nó
+**không phải** ACP provider và không bao giờ trở thành ghế agent; nó trả lời
+một câu hỏi choice đã định kiểu trên `state` do caller cung cấp và trả về đáp
+án đã hiệu chuẩn. Nó chỉ chạy qua helper tường minh `route-decide` — không
+bao giờ trong vòng lặp nền, lịch định kỳ, hay bên trong `prepare`.
 
-Cấu hình theo từng daemon, qua card **Jev (OpenRouter)** của SLP Manager
-(`<daemonHome>/slp-runtime/state/jev.json` + `jev-openrouter.key` write-only,
-0600). Mọi toggle mặc định tắt, đánh giá tại thời điểm prepare — đổi toggle
+Cấu hình theo từng daemon, qua card **Jev** của SLP Manager
+(`<daemonHome>/slp-runtime/state/jev.json` + `jev-<kind>.key` write-only,
+0600 — `jev-openrouter.key` hoặc `jev-typesafe.key` theo kind đã chọn). Mọi
+toggle mặc định tắt, đánh giá tại thời điểm prepare — đổi toggle
 không đụng vào ghế đang chạy, và tắt không xóa key đã lưu. Hai chế độ:
 
 - **Shadow** (`enabled` bật, `capabilities.routing` tắt): `route-decide`

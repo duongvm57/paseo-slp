@@ -497,16 +497,21 @@ before handing off.
 
 ### Jev-assisted routing (optional)
 
-Jev is a bounded decision primitive — TypeSafe's System One served through
-OpenRouter's Decisions API with the pinned model `typesafe/jev-1.13`. It is
+Jev is a bounded decision primitive — TypeSafe's System One, served through
+either provider kind: `openrouter` (the OpenRouter Decisions API with the
+pinned model `typesafe/jev-1.13`) or `typesafe` (the first-party System One
+API at `https://api.typesafe.ai/v1/systemone` with the pinned model
+`jev-1.13.0`; `baseUrl` may point at a custom https endpoint/proxy carrying
+an origin+path prefix). It is
 **not** an ACP provider and never becomes an agent seat; it answers one typed
 choice question over a caller-supplied state and returns a calibrated answer.
 It runs only through the explicit `route-decide` helper — never in a
 background loop, a schedule, or inside `prepare`.
 
-Configuration is per daemon, via the SLP Manager's **Jev (OpenRouter)** card
-(`<daemonHome>/slp-runtime/state/jev.json` + a write-only `jev-openrouter.key`,
-0600). All toggles default off, evaluated at preparation time — toggling
+Configuration is per daemon, via the SLP Manager's **Jev** card
+(`<daemonHome>/slp-runtime/state/jev.json` + a write-only `jev-<kind>.key`,
+0600 — `jev-openrouter.key` or `jev-typesafe.key` per the selected kind).
+All toggles default off, evaluated at preparation time — toggling
 never mutates running seats, and disabling keeps the stored key. Two modes:
 
 - **Shadow** (`enabled` on, `capabilities.routing` off): `route-decide`

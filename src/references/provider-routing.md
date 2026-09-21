@@ -60,15 +60,18 @@ Unknown availability is not permission to launch.
 
 Jev is a bounded decision primitive, not an agent: it answers one typed choice
 question over a caller-supplied state and returns a calibrated answer. It is
-served through OpenRouter's Decisions API at
-`https://openrouter.ai/api/alpha/decisions` with the pinned model
-`typesafe/jev-1.13`. Jev is never an ACP provider, never an agent seat and
+served through one of two provider kinds: `openrouter` — OpenRouter's
+Decisions API at `https://openrouter.ai/api/alpha/decisions` with the pinned
+model `typesafe/jev-1.13` — or `typesafe` — the first-party System One API
+at `https://api.typesafe.ai/v1/systemone` with the pinned model `jev-1.13.0`,
+whose `baseUrl` may point at a custom https endpoint/proxy carrying an
+origin+path prefix. Jev is never an ACP provider, never an agent seat and
 never runs in a background loop or schedule — it is invoked only through the
 explicit helper `node <installed>/bin/slp.mjs route-decide <request.json>`.
 
 Jev routing mode is per-daemon configuration under
-`<daemonHome>/slp-runtime/state/jev.json` with its OpenRouter key in
-`jev-openrouter.key` (0600, write-only; the Manager card stores it and status
+`<daemonHome>/slp-runtime/state/jev.json` with its provider key in
+`jev-<kind>.key` (0600, write-only; the Manager card stores it and status
 reports `hasKey` only). All toggles default off, evaluated at preparation
 time — toggling never mutates already-running seats. Two live modes:
 
@@ -138,7 +141,7 @@ the stored key.
 Accepted risk (recorded): the key file is `0600` inside the daemon home, but
 any process running as the same user — including a Peer seat — can read it.
 `0600` narrows the exposure to same-user processes; it does not eliminate it.
-The OpenRouter key is the only credential SLP stores; treat daemon-home
+The Jev provider key is the only credential SLP stores; treat daemon-home
 integrity as the security boundary.
 
 ## Peer quota fallback
