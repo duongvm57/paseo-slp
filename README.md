@@ -483,17 +483,18 @@ Configure it in the pool (the Manager's Peer pool card, or
 `.paseo-slp/slp-routing.json` for a repo-pinned pool):
 
 ```json
-"quotaFallback": { "enabled": true, "optionIds": ["luna-code", "glm-design"] }
+"quotaFallback": { "enabled": true, "optionId": "luna-code" }
 ```
 
-The IDs must exist in `options`; use the repo's real IDs. By default (or when
-misconfigured) a branch stops when its quota runs out. The Lead picks a
-remaining, suitable option from this list; `prepare` additionally accepts
-`route.quotaFallbackFrom`, the ID of the option that ran out of quota. Do not
-switch models outside the pool via `update_agent`, do not use a provider
-default, and do not treat another model on the same account as fresh quota.
-When no valid fallback remains, report BLOCKED; keep ownership and evidence
-before handing off.
+`optionId` names one designated pool option — no list, no order. It must
+exist in `options`; use the repo's real ID. By default (or when
+misconfigured) a branch stops when its quota runs out. On a quota error the
+Lead may make one retry on the designated option; `prepare` additionally
+accepts `route.quotaFallbackFrom`, the ID of the option that ran out of
+quota. Do not switch models outside the pool via `update_agent`, do not use
+a provider default, and do not treat another model on the same account as
+fresh quota. When the designated option is not viable or quota fails again,
+report BLOCKED; keep ownership and evidence before handing off.
 
 ### Jev-assisted routing (optional)
 

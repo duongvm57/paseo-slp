@@ -461,16 +461,18 @@ Cấu hình trong pool (thẻ Peer pool của Manager, hoặc
 `.paseo-slp/slp-routing.json` cho pool pin theo repo):
 
 ```json
-"quotaFallback": { "enabled": true, "optionIds": ["luna-code", "glm-design"] }
+"quotaFallback": { "enabled": true, "optionId": "luna-code" }
 ```
 
-Các ID phải tồn tại trong `options`; dùng ID thực tế của repo. Mặc định tắt
-hoặc thiếu cấu hình thì dừng nhánh hết quota. Lead chọn bundle còn khả dụng,
-phù hợp và nằm trong danh sách này; `prepare` nhận thêm
+`optionId` chỉ định đúng một option trong pool — không danh sách, không thứ
+tự. ID phải tồn tại trong `options`; dùng ID thực tế của repo. Mặc định tắt
+hoặc thiếu cấu hình thì dừng nhánh hết quota. Khi provider báo hết quota,
+Lead được retry đúng một lần lên option được chỉ định; `prepare` nhận thêm
 `route.quotaFallbackFrom` là ID option bị quota. Không tự đổi model ngoài
 pool bằng `update_agent`, không dùng provider default, và không coi model
-khác cùng tài khoản là quota mới. Nếu không còn fallback hợp lệ thì báo
-BLOCKED; giữ ownership và bằng chứng trước khi handoff.
+khác cùng tài khoản là quota mới. Nếu option được chỉ định không khả dụng
+hoặc quota lại hết thì báo BLOCKED; giữ ownership và bằng chứng trước khi
+handoff.
 
 ### Routing có Jev hỗ trợ (tùy chọn)
 

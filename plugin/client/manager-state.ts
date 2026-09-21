@@ -840,8 +840,8 @@ export function buildPeerPool(
 }
 
 /** Order-stable key for whole-pool equality — file key order must never make
- *  a byte-identical pool look dirty. Arrays stay ordered: option order and
- *  fallback order are meaningful. */
+ *  a byte-identical pool look dirty. Arrays stay ordered: option order is
+ *  meaningful. */
 const canonicalPoolKey = (value: unknown): string =>
   JSON.stringify(value, (_key, v) =>
     v !== null && typeof v === "object" && !Array.isArray(v)

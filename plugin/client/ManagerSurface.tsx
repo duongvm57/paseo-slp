@@ -1108,8 +1108,8 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   };
 
   // §7.4.D "Convert this seat to a custom seat": one draft edit renames the seat
-  // and remaps every in-pool quotaFallback reference (order preserved); the
-  // Save that lands it keeps the two sides atomic.
+  // and retargets the in-pool quotaFallback designation; the Save that lands
+  // it keeps the two sides atomic.
   const openConvertToCustom = (index: number) => () => {
     setConvertSeatIndex(index);
     setConvertId(suggestCustomSeatId(poolForm.seats[index]?.id.trim() || "seat", poolForm.seats.map(seat => seat.id)));
