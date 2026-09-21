@@ -464,8 +464,11 @@ Manager's Peer pool card is its sole writer. Each option carries a
 `enabled`/`availability` state. The Lead chooses per task — Engineer,
 Architect and Reviewer are not hard-mapped to models. Two Peers can differ in
 provider/model/effort without any extra saved profile. The card's archetype
-list shows the shape: each seat names a kind of work, and provider/`model`
-stay blank until picked from live discovery on the host.
+list shows the shape: each of the 12 standard seats names a kind of work and
+carries the package's `axis:value` suitability tokens (reserved ids,
+read-only on the form — see `docs/spec/routing-criteria.md`); custom seats
+are free-form, and provider/`model` stay blank until picked from live
+discovery on the host.
 
 The Lead reads the current pool, records its choice rationale and validates
 option/hash via `prepare` before launching (when Jev routing is armed, the

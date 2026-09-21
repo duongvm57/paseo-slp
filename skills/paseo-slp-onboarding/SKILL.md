@@ -191,7 +191,9 @@ decision itself. Every option has:
 - roles: ["peer"]; enabled: boolean; availability: ready, paused, quota-exhausted
   or unknown. Only enabled/ready options may launch.
 - Optional thinkingOptionId, modeId and features, verified for that runtime.
-- suitableFor and avoidFor: lists of task descriptions Jev can read;
+- suitableFor and avoidFor: on the 12 reserved standard seats these are the
+  package's closed `axis:value` tokens (read-only — docs/spec/routing-criteria.md);
+  custom seats keep free-form lists Jev can read;
   notes: concrete guidance/tradeoffs for Lead, held back from Jev.
 
 Configure quotaFallback: { enabled: false, optionIds: [] } by default. Enable it

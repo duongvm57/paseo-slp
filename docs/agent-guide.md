@@ -168,7 +168,9 @@ Preview with `node bin/slp.mjs init <absolute-repo>`, then rerun with
   catalog pickers.
 - Human chose a repo pool → build the catalog file per the schema in
   `provider-routing.md` (`id`, `provider`, exact discovered `model`,
-  `enabled`, `availability`, `suitableFor`/`avoidFor`, `notes`, and
+  `enabled`, `availability`, `suitableFor`/`avoidFor` (the closed
+  `axis:value` vocabulary on the 12 reserved standard-seat ids, free-form on
+  custom seats — docs/spec/routing-criteria.md), `notes`, and
   `quotaFallback` only under Human fallback authority), then
   `slp init <repo> --routing-from <file> --apply`. The Manager's Copy pool
   JSON button supplies the document shape; pasting it into a repo pins that

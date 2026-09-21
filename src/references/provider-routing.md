@@ -27,11 +27,16 @@ model/mode/thinking values come from the live provider catalog, so a seat
 cannot name a mode the provider never offered.
 Each option contains an id, provider family (pi/codex/devin/claude), model, optional modeId,
 thinkingOptionId/features, roles, enabled, availability, suitableFor,
-avoidFor and notes. Human/onboarding establishes the pool and suitability under
+avoidFor and notes. The 12 archetype ids are reserved standard-seat names:
+on them suitableFor/avoidFor are the package's closed `axis:value` token set
+(read-only in the Manager — docs/spec/routing-criteria.md), and a reserved id
+with divergent tokens is a Token conflict that cannot be routed or saved until
+resolved; every other id is a custom seat with free strings.
+Human/onboarding establishes the pool and suitability under
 project setup authority; Lead chooses within it for each task and budget.
 
 Choose an enabled, ready option with peer in roles. Explain suitability using the
-assignment and option descriptions; Engineer/Architect/Reviewer are dispositions,
+assignment and the option's suitability tokens; Engineer/Architect/Reviewer are dispositions,
 not fixed model mappings. Two Peers may use different models or providers while
 receiving the same Peer policy. Supervisor/Lead profiles need not match their family.
 
