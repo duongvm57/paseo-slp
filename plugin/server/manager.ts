@@ -2881,8 +2881,9 @@ export function createManager(deps: ManagerDeps): Manager {
         `peer pool has unresolved Token conflicts on standard seats: ${conflicts.map(c => c.id).join(", ")} — resolve each seat in the Manager surface (use the standard set or convert to a custom id)`,
       );
     }
-    // CAS gate first: the on-disk bytes must hash to the token the writer
-    // read. An unreadable pool fails loud rather than comparing against null.
+    // CAS gate next, after the semantic gate above: the on-disk bytes must
+    // hash to the token the writer read. An unreadable pool fails loud
+    // rather than comparing against null.
     const actualSha256 = readPeerPoolFile(file, false).sha256;
     if (actualSha256 !== parsed.data.expectedSha256) {
       throw new OperationConflict(

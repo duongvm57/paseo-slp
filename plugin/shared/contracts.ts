@@ -232,8 +232,14 @@ const POOL_UNSAFE_MODEL = /[\s\x00-\x1f\x7f]/;
 const POOL_SWE2_MODEL = /^swe-2($|-)/;
 const poolNonempty = (s: string) => s.trim().length > 0;
 
+/** The Jev decline sentinel (src/routing.mjs ROUTE_DECLINE_CANDIDATE) — a
+ *  seat may never take it as an id; validateCatalog rejects it the same way. */
+export const ROUTE_DECLINE_OPTION_ID = "no-suitable-option";
+
 export const PeerPoolOption = z.object({
-  id: z.string().regex(/^[a-z][a-z0-9-]*$/),
+  id: z.string().regex(/^[a-z][a-z0-9-]*$/).refine(id => id !== ROUTE_DECLINE_OPTION_ID, {
+    message: `id is reserved for the Jev decline sentinel`,
+  }),
   provider: z.union([Family, z.literal("")]),
   roles: z.array(z.enum(["supervisor", "lead", "peer"])).min(1),
   model: z.string().refine(v => !POOL_UNSAFE_MODEL.test(v)),

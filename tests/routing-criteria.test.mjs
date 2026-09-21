@@ -9,12 +9,13 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { json, hash } from '../src/package.mjs';
-import { readCatalog, catalogBinding, ROUTE_DECISION_QUESTION, ROUTE_DECLINE_CANDIDATE } from '../src/routing.mjs';
+import { readCatalog, catalogBinding, validateCatalog, ROUTE_DECISION_QUESTION, ROUTE_DECLINE_CANDIDATE } from '../src/routing.mjs';
 import { routeDecide } from '../src/jev-routing.mjs';
 import { canonicalJson } from '../src/jev.mjs';
 import {
   HOW_TO_READ,
   JEV_SUITABILITY_GUIDANCE,
+  JEV_TOKEN_DEFINITIONS,
   ROUTING_VOCABULARY_VERSION,
   STANDARD_SEAT_IDS,
   STANDARD_SEAT_TOKENS,
@@ -94,6 +95,7 @@ test('the plugin mirror and the canonical runtime vocabulary are identical data'
   assert.deepEqual(mirror.STANDARD_SEAT_TOKENS, STANDARD_SEAT_TOKENS);
   assert.deepEqual(mirror.STANDARD_SEAT_IDS, STANDARD_SEAT_IDS);
   assert.equal(mirror.JEV_SUITABILITY_GUIDANCE, JEV_SUITABILITY_GUIDANCE);
+  assert.deepEqual(mirror.JEV_TOKEN_DEFINITIONS, JEV_TOKEN_DEFINITIONS);
   assert.deepEqual(mirror.HOW_TO_READ, HOW_TO_READ);
   // Behavioral parity on the shared semantic checks.
   const divergent = { id: 'security-review', suitableFor: ['work:verify'], avoidFor: [] };
@@ -105,6 +107,32 @@ test('the plugin mirror and the canonical runtime vocabulary are identical data'
     mirror.catalogTokenConflicts(pool([seat('security-review', divergent), seat('my-seat', custom)])),
     catalogTokenConflicts(pool([seat('security-review', divergent), seat('my-seat', custom)])),
   );
+  // The §4 reading helpers must agree across the module boundary too —
+  // mirror drift here would make the Manager and the router disagree.
+  const tokenSets = [
+    STANDARD_SEAT_TOKENS['standard-coding'].suitableFor,
+    STANDARD_SEAT_TOKENS['security-review'].avoidFor,
+    ['free string', 'work:change'],
+    [],
+  ];
+  const tasks = [
+    { work: 'change', depth: 'bounded', flow: 'direct', domains: ['software', 'tests'] },
+    { work: 'verify', domains: ['security'] },
+    { work: 'enumerate', depth: 'open', domains: [] },
+    {},
+    undefined,
+  ];
+  for (const tokens of tokenSets) {
+    for (const task of tasks) {
+      assert.equal(mirror.suitabilityMatch(tokens, task), suitabilityMatch(tokens, task), `suitabilityMatch ${JSON.stringify(tokens)}`);
+      assert.deepEqual(mirror.avoidWarnings(tokens, task), avoidWarnings(tokens, task), `avoidWarnings ${JSON.stringify(tokens)}`);
+      assert.equal(mirror.domainCoverage(tokens, task?.domains ?? []), domainCoverage(tokens, task?.domains ?? []), `domainCoverage ${JSON.stringify(tokens)}`);
+    }
+  }
+  assert.equal(mirror.isStandardToken('work:change'), isStandardToken('work:change'));
+  assert.equal(mirror.isStandardToken('legacy-tag'), isStandardToken('legacy-tag'));
+  assert.deepEqual(mirror.tokenDefinition('work:change'), tokenDefinition('work:change'));
+  assert.equal(mirror.tokenDefinition('legacy-tag'), tokenDefinition('legacy-tag'));
 });
 
 // ---------------------------------------------------------------------------
@@ -339,6 +367,9 @@ test('route-decide excludes conflicted seats and records them on the receipt', a
   writeCatalog(repo, pool([
     seat('security-review', { suitableFor: ['legacy-tag'], avoidFor: [] }),
     seat('luna-code', { suitableFor: standard.suitableFor, avoidFor: standard.avoidFor }),
+    // A disabled seat is out of eligibility but its conflict still belongs on
+    // the read path's report (§7.2).
+    seat('deep-reasoning', { enabled: false, suitableFor: ['old-token'], avoidFor: [] }),
   ]));
   jevHome(home);
   let body;
@@ -347,9 +378,15 @@ test('route-decide excludes conflicted seats and records them on the receipt', a
     fetchImpl: async (url, init) => { body = JSON.parse(init.body); return okFetch('luna-code')(url, init); },
   });
   assert.deepEqual(result.decision.context.candidates, ['luna-code']);
-  assert.deepEqual(result.tokenConflicts, ['security-review']);
+  assert.deepEqual(result.tokenConflicts, ['security-review', 'deep-reasoning'],
+    'the receipt reports every catalog conflict, not only eligible ones');
   assert.equal(result.decision.context.vocabularyVersion, ROUTING_VOCABULARY_VERSION);
-  assert.equal(result.decision.context.tokenConflicts.length, 1);
+  assert.deepEqual(result.decision.context.tokenConflicts, ['security-review', 'deep-reasoning']);
+  // §1/§9 — the state carries the compact token glossary under the bound
+  // vocabulary version so bare axis:value strings are never unexplained.
+  assert.equal(body.state.vocabulary.version, ROUTING_VOCABULARY_VERSION);
+  assert.equal(body.state.vocabulary.tokens.length, 16);
+  assert.deepEqual(Object.keys(body.state.vocabulary.tokens[0]).sort(), ['axis', 'boundary', 'id', 'sign']);
   assert.deepEqual(Object.keys(body.questions[ROUTE_DECISION_QUESTION].criteria), ['luna-code', ROUTE_DECLINE_CANDIDATE]);
   // The receipt binds the pool to 'luna-code' — and a receipt re-signed
   // under a different vocabulary version is refused at prepare.
@@ -434,6 +471,42 @@ test('convertSeatToCustom renames and remaps quotaFallback in one draft edit', (
   assert.equal(next.seats[1].id, 'helper-seat', 'unrelated seats untouched');
 });
 
+test('rename/convert keeps passthrough fields via the load-time storedId', () => {
+  // A stored foreign key the form does not model survives a rename and a
+  // convert-to-custom because the stored lookup follows storedId, not the
+  // edited id (§7.4.D).
+  const stored = seat('keeper', { suitableFor: ['free text'], quotaNote: 'external metadata' });
+  const form = peerPoolForm(pool([stored]));
+  assert.equal(form.seats[0].storedId, 'keeper', 'load records the stored id');
+  const storedOptions = new Map([[stored.id, stored]]);
+  // Plain rename: id changes, passthrough survives.
+  const renamed = { ...form, seats: [{ ...form.seats[0], id: 'keeper-renamed' }] };
+  const renamedBuild = buildPeerPool(renamed, noDefs, storedOptions);
+  assert.ok('pool' in renamedBuild, JSON.stringify(renamedBuild));
+  assert.equal(renamedBuild.pool.options[0].quotaNote, 'external metadata');
+  // Convert-to-custom: same preservation.
+  const converted = convertSeatToCustom(form, 0, 'keeper-custom');
+  const convertedBuild = buildPeerPool(converted, noDefs, storedOptions);
+  assert.ok('pool' in convertedBuild, JSON.stringify(convertedBuild));
+  assert.equal(convertedBuild.pool.options[0].quotaNote, 'external metadata');
+});
+
+test('the decline sentinel is refused as a seat id at every gate', () => {
+  assert.match(customSeatIdError('no-suitable-option', []), /decline sentinel/);
+  const built = buildPeerPool({ ...emptyPeerPoolForm(), seats: [seatForm({ id: 'no-suitable-option' })] }, noDefs);
+  assert.ok('error' in built && /decline sentinel/.test(built.error));
+  // The stored-data validator refuses it too — a pool file carrying the
+  // sentinel must fail the same way the form does.
+  assert.throws(() => validateCatalog(pool([seat('no-suitable-option')])), /decline sentinel/);
+});
+
+test('suggestCustomSeatId always returns a valid non-reserved id', () => {
+  assert.equal(suggestCustomSeatId('', []), 'seat-2', 'empty base falls back to "seat"');
+  assert.equal(suggestCustomSeatId('  ', ['seat-2']), 'seat-3');
+  assert.equal(suggestCustomSeatId('1bad', []), 'seat-2', 'invalid base is replaced, not suffixed');
+  assert.equal(suggestCustomSeatId('security-review', []), 'security-review-2');
+});
+
 test('seatManagement and formSeatConflict follow the draft row', () => {
   const standard = STANDARD_SEAT_TOKENS['security-review'];
   const inSync = seatForm({ id: 'security-review', custom: false, suitableFor: standard.suitableFor.join('\n'), avoidFor: standard.avoidFor.join('\n') });
@@ -502,5 +575,22 @@ test('the Jev guidance states the vocabulary rules, not just the word list', () 
     'no-suitable-option',
   ]) {
     assert.ok(JEV_SUITABILITY_GUIDANCE.includes(phrase), `guidance states: ${phrase}`);
+  }
+  // §4 step 5 — the settled tie-break order, exactly: reliable cost metadata,
+  // then lighter thinking on same provider/model, then ascending option.id.
+  for (const phrase of [
+    'lowest expected execution cost from trustworthy metadata',
+    'lighter thinking option',
+    'smallest option id',
+    'never decline because of a tie',
+  ]) {
+    assert.ok(JEV_SUITABILITY_GUIDANCE.includes(phrase), `guidance states tie-break: ${phrase}`);
+  }
+  assert.ok(!JEV_SUITABILITY_GUIDANCE.includes('model size'), 'no unratified metadata in the tie-break');
+  // §1/§9 — the glossary ships every standard token's packaged sign and
+  // boundary so a bare axis:value never reaches Jev unexplained.
+  assert.equal(JEV_TOKEN_DEFINITIONS.length, 16);
+  for (const def of JEV_TOKEN_DEFINITIONS) {
+    assert.ok(def.id.includes(':') && def.sign.length > 0 && def.boundary.length > 0, def.id);
   }
 });

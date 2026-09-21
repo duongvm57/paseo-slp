@@ -621,6 +621,7 @@ test('plugin PeerPool schema and package validateCatalog agree on every verdict'
     ['missing policy', { version: 1, options: [seat] }, false],
     ['id bad pattern', pool({ options: [opt({ id: 'Peer_X' })] }), false],
     ['id empty', pool({ options: [opt({ id: '' })] }), false],
+    ['id is the Jev decline sentinel', pool({ options: [opt({ id: 'no-suitable-option' })] }), false],
     ['optionIds non-string element', pool({ quotaFallback: { enabled: false, optionIds: [7] } }), false],
     ['quotaFallback array', pool({ quotaFallback: [] }), false],
     ['suitableFor non-array', pool({ options: [opt({ suitableFor: 'x' })] }), false],

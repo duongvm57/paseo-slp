@@ -25,7 +25,7 @@ import { readCatalog, optionExclusions, eligibleOptions, paseoHome,
   ROUTE_DECISION_QUESTION, ROUTE_DECLINE_CANDIDATE } from './routing.mjs';
 import { resolveJev, askJev, JevError } from './jev.mjs';
 import { roles } from './profiles.mjs';
-import { JEV_SUITABILITY_GUIDANCE, ROUTING_VOCABULARY_VERSION,
+import { JEV_SUITABILITY_GUIDANCE, JEV_TOKEN_DEFINITIONS, ROUTING_VOCABULARY_VERSION,
   seatTokenConflict } from './routing-vocabulary.mjs';
 
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -91,6 +91,10 @@ export async function routeDecide(request, { home, fetchImpl, now } = {}) {
   const state = {
     task: brief,
     role,
+    // §1/§9 — bare tokens carry no meaning to a reader who never saw the
+    // table: the state ships each standard token's packaged sign/boundary
+    // under the vocabulary version the receipt binds.
+    vocabulary: { version: ROUTING_VOCABULARY_VERSION, tokens: JEV_TOKEN_DEFINITIONS },
     options: usable.map(option => ({
       id: option.id, provider: option.provider, model: option.model,
       suitableFor: option.suitableFor, avoidFor: option.avoidFor,
@@ -112,7 +116,10 @@ export async function routeDecide(request, { home, fetchImpl, now } = {}) {
     candidates,
     declineCandidate: ROUTE_DECLINE_CANDIDATE,
     vocabularyVersion: ROUTING_VOCABULARY_VERSION,
-    tokenConflicts: conflicted.map(option => option.id),
+    // §7.2 — the read path reports every Token conflict in the catalog, not
+    // just the ones that survived eligibility: a disabled-but-conflicted
+    // seat still misleads anyone reading the pool as a standard seat.
+    tokenConflicts: (catalog.tokenConflicts ?? []).map(conflict => conflict.id),
   };
   const { answers, receipt } = await askJev({ provider, key, state, questions, context }, { fetchImpl, now });
   const choice = answers[ROUTE_DECISION_QUESTION].choice;
@@ -123,7 +130,7 @@ export async function routeDecide(request, { home, fetchImpl, now } = {}) {
     catalogSha256: catalog.sha256,
     declined,
     role,
-    tokenConflicts: conflicted.map(option => option.id),
+    tokenConflicts: (catalog.tokenConflicts ?? []).map(conflict => conflict.id),
     decision: receipt,
   };
 }

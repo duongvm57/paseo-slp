@@ -234,7 +234,9 @@ test('route-decide rejects invalid input and a decline-sentinel collision', asyn
   const catalog = testCatalog();
   catalog.options.push({ id: ROUTE_DECLINE_CANDIDATE, provider: 'codex', roles: ['peer'], model: 'gpt-5.6-luna', enabled: true, availability: 'ready', priority: 1, suitableFor: [], avoidFor: [], notes: 'collision' });
   writeFileSync(join(repo, '.paseo-slp/slp-routing.json'), json(catalog));
-  await assert.rejects(routeDecide({ repository: repo, brief: 'x' }, { home }), /collides with the Jev decline sentinel/);
+  // The sentinel id is refused at the catalog gate — the decision layer never
+  // sees a pool whose seat collides with it.
+  await assert.rejects(routeDecide({ repository: repo, brief: 'x' }, { home }), /decline sentinel/);
 });
 
 // ---------------------------------------------------------------------------

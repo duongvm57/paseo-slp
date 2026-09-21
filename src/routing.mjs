@@ -18,6 +18,10 @@ export function validateCatalog(catalog) {
   const ids = new Set();
   for (const option of catalog.options) {
     if (!record(option) || !nonempty(option.id) || !/^[a-z][a-z0-9-]*$/.test(option.id) || ids.has(option.id)) throw new Error('Invalid or duplicate routing option id');
+    // The id collides with the Jev decline sentinel — letting a seat take it
+    // would hard-error every route-decide on this pool, so it is refused at
+    // the same shape gate as any other invalid id.
+    if (option.id === ROUTE_DECLINE_CANDIDATE) throw new Error(`Routing option id "${ROUTE_DECLINE_CANDIDATE}" is reserved for the Jev decline sentinel`);
     ids.add(option.id);
     if (!families.includes(option.provider) && !(option.provider === '' && option.enabled !== true)) throw new Error(`Routing option ${option.id}: provider must be one of ${families.join(', ')}`);
     if (!Array.isArray(option.roles) || !option.roles.length || option.roles.some(role => !roles.includes(role))) throw new Error(`Routing option ${option.id}: invalid roles`);
