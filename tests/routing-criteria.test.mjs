@@ -588,12 +588,14 @@ test('the Jev guidance states the vocabulary rules, not just the word list', () 
   }
   assert.ok(!JEV_SUITABILITY_GUIDANCE.includes('model size'), 'no unratified metadata in the tie-break');
   // Wave 2 — the thinking surface is real data now: the guidance must explain
-  // what thinkingOptionId means, that null is provider-baked thinking, that
-  // all-null seats tie, and that an unclear provider order falls back to id.
+  // what thinkingOptionId means, that all-null seats tie, and that an unclear
+  // provider order falls back to id. §7.1 — null must stay neutral: it covers
+  // both the provider-chosen default level and models with no thinking knob.
   for (const phrase of [
     'thinkingOptionId',
+    'provider default',
+    'provider\'s own default level',
     'no separate thinking knob',
-    'baked into the model',
     'all-null seats tie',
     'thinking order is unclear',
   ]) {

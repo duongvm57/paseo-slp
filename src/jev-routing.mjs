@@ -97,7 +97,8 @@ export async function routeDecide(request, { home, fetchImpl, now } = {}) {
     vocabulary: { version: ROUTING_VOCABULARY_VERSION, tokens: JEV_TOKEN_DEFINITIONS },
     // The option surface is fixed-shape — thinkingOptionId ships as explicit
     // null when absent so Jev never guesses whether the key was dropped; null
-    // means the provider has no separate thinking knob (baked into the model).
+    // means provider default — the provider's own default level, or a model
+    // with no separate thinking knob (baked into the model).
     options: usable.map(option => ({
       id: option.id, provider: option.provider, model: option.model,
       thinkingOptionId: option.thinkingOptionId ?? null,
