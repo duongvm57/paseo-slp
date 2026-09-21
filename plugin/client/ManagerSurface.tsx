@@ -24,6 +24,13 @@ import {
 import { activate, catalog, deactivate, reconcile, status, localTarget, setLanguage, getRoleRouting, setRoleRouting, getJev, setJev, setJevKey, testJev, getPeerPool, setPeerPool } from "../shared/contracts.ts";
 import { FAMILY_IDS, FAMILY_LABEL, FAMILY_PICKER_ORDER } from "../shared/families.ts";
 import { PEER_SEAT_ARCHETYPES } from "../shared/archetypes.ts";
+import {
+  HOW_TO_READ,
+  STANDARD_SEAT_TOKENS,
+  SUITABILITY_AXES,
+  SUITABILITY_TOKENS,
+  tokenDefinition,
+} from "../shared/routing-vocabulary.ts";
 import type { CatalogOptionValue, CatalogResult, FamilyName, GetPeerPoolResult, JevViewValue, PeerPoolValue, RoleRoutingValue, StartResult, StatusResult, TargetValue } from "../shared/contracts.ts";
 import {
   DISABLE_REMOVE_NOTICE,
@@ -38,13 +45,19 @@ import {
   buildPeerPool,
   buildRoleChoice,
   conflictLines,
+  convertSeatToCustom,
   createTargetViews,
+  customSeatCopy,
+  customSeatFromArchetype,
+  customSeatIdError,
   emptyPeerPoolForm,
   emptyTargetView,
   errorMessage,
   familyFromProviderId,
   familyHint,
+  formSeatConflict,
   isDaemonHome,
+  legacyImportAllowed,
   newOperationId,
   operationPending,
   operationRows,
@@ -56,13 +69,14 @@ import {
   routingChoiceDiffers,
   routingDiverges,
   samePeerPoolForm,
+  seatManagement,
   startPatch,
   stateHint,
   statusRows,
+  suggestCustomSeatId,
   targetKey,
   recoverPendingStart,
   thinkingOptionsFor,
-  uniqueSeatId,
   visibleConflicts,
 } from "./manager-state.ts";
 import type { PeerPoolForm, PeerSeatForm, ReconcileAction, RoutingRoleForm, TargetView } from "./manager-state.ts";
@@ -546,6 +560,26 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   const [poolBusy, setPoolBusy] = useState(false);
   const [poolSaved, setPoolSaved] = useState(false);
   const [poolCopied, setPoolCopied] = useState(false);
+  // poolData === null is ambiguous between "still reading" and "the read RPC
+  // failed" — poolReadError separates the two (§7.4.E) so an unreadable pool
+  // is never painted as an empty list, and so Save can require a successful
+  // snapshot rather than silently sending expectedSha256:null.
+  const [poolReadError, setPoolReadError] = useState<string | null>(null);
+  // Pool-specific errors (CAS conflict, save/reload failure) land in the
+  // card's notice area, not only the shared lastError line (§7.4.D).
+  const [poolError, setPoolError] = useState<{ message: string; cas: boolean } | null>(null);
+  // Dirty-draft reload confirmation (§7.4.C): Reload on an edited draft shows
+  // "Giữ bản đang sửa" / "Bỏ thay đổi và Reload" before the RPC runs.
+  const [poolReloadConfirm, setPoolReloadConfirm] = useState(false);
+  // §7.4.D convert-to-custom editor state, and the "Đã chọn bộ chuẩn — chưa
+  // lưu" marker after a conflict is resolved toward the standard set.
+  const [convertSeatIndex, setConvertSeatIndex] = useState<number | null>(null);
+  const [convertId, setConvertId] = useState("");
+  const [standardAppliedId, setStandardAppliedId] = useState<string | null>(null);
+  // §7.4.F token lookup: which seat's editor hosts the open section and which
+  // token is selected (null = the four-axis picker view).
+  const [tokenLookupSeat, setTokenLookupSeat] = useState<number | null>(null);
+  const [tokenLookupToken, setTokenLookupToken] = useState<string | null>(null);
   // The expanded seat editor and the archetype picker, tracked by seat index
   // (a renamed seat keeps its editor open); removing any seat closes both.
   const [openSeat, setOpenSeat] = useState<number | null>(null);
@@ -683,6 +717,14 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     setPoolBusy(false);
     setPoolSaved(false);
     setPoolCopied(false);
+    setPoolReadError(null);
+    setPoolError(null);
+    setPoolReloadConfirm(false);
+    setConvertSeatIndex(null);
+    setConvertId("");
+    setStandardAppliedId(null);
+    setTokenLookupSeat(null);
+    setTokenLookupToken(null);
     setOpenSeat(null);
     setAddSeatOpen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- key captures target
@@ -691,6 +733,8 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   // Fetch the peer pool once per target — plugin-owned state, independent of
   // any binding, so it loads with the first status like role routing does.
   // The response carries the sha256 every save sends back as its CAS guard.
+  // A read failure is recorded distinctly (§7.4.E): the card shows
+  // "Không đọc được pool", never an empty seat list or an unlocked editor.
   const poolLoadedFor = useRef<string | null>(null);
   useEffect(() => {
     if (!target || !key || poolLoadedFor.current === key) return;
@@ -699,9 +743,15 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     void (async () => {
       try {
         const result = await callGetPeerPool({ schemaVersion: 1, target });
-        if (!cancelled) setPoolData(result);
-      } catch {
-        if (!cancelled) setPoolData(null);
+        if (!cancelled) {
+          setPoolData(result);
+          setPoolReadError(null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setPoolData(null);
+          setPoolReadError(errorMessage(error));
+        }
       }
     })();
     return () => { cancelled = true; };
@@ -904,6 +954,15 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     storedSeatOptions,
   );
   const poolDiffers = peerPoolDiffers(poolBuild, poolData?.pool ?? null);
+  // §7.4.E — the editor stays locked until the first successful snapshot:
+  // with no read there is no CAS token and no shared baseline to diff.
+  const poolLocked = poolBusy || poolData === null;
+  // §7.4.D — reserved ids whose draft tokens diverge from the package set.
+  // The card notice presses open the seat; the seat row carries the same
+  // marker, and buildPeerPool refuses to Save/Copy while any remain.
+  const conflictedSeats = poolForm.seats
+    .map((seat, index) => ({ index, conflict: formSeatConflict(seat) }))
+    .filter((entry): entry is { index: number; conflict: NonNullable<typeof entry.conflict> } => entry.conflict !== null);
 
   // Every pool edit goes through updatePool — it marks the form dirty and
   // clears the one-shot save/copy confirmations.
@@ -970,15 +1029,75 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
       ),
     }));
 
-  const addSeat = (archetype: (typeof PEER_SEAT_ARCHETYPES)[number]) => () => {
+  // §7.4.C picker actions. A standard add always lands on the exact
+  // canonical id — when the seat already exists (Token conflict included)
+  // the entry just opens it ("Đã có — mở ghế"); it never produces a suffix.
+  const addStandardSeat = (archetype: (typeof PEER_SEAT_ARCHETYPES)[number]) => () => {
+    const existingIndex = poolForm.seats.findIndex(seat => seat.id.trim() === archetype.id);
+    if (existingIndex >= 0) {
+      setOpenSeat(existingIndex);
+      return;
+    }
     updatePool(form => ({
       ...form,
-      seats: [
-        ...form.seats,
-        { ...peerSeatFromArchetype(archetype), id: uniqueSeatId(archetype.id, form.seats.map(seat => seat.id)) },
-      ],
+      seats: [...form.seats, peerSeatFromArchetype(archetype)],
     }));
     setOpenSeat(poolForm.seats.length);
+  };
+
+  // "Tạo ghế riêng từ mẫu": the archetype's tokens/notes copied into an
+  // editable Custom seat — parked (blank binding, disabled) on a suggested
+  // non-reserved id.
+  const addCustomFromTemplate = (archetype: (typeof PEER_SEAT_ARCHETYPES)[number]) => () => {
+    updatePool(form => ({
+      ...form,
+      seats: [...form.seats, customSeatFromArchetype(archetype, form.seats.map(seat => seat.id))],
+    }));
+    setOpenSeat(poolForm.seats.length);
+  };
+
+  // "Tạo bản sao riêng" (§7.4.C): copies the viewed row — binding and
+  // contents — onto a suggested custom id, disabled. The original seat and
+  // its quotaFallback references stay; the copy is not added to fallback.
+  const copySeatAsCustom = (index: number) => () => {
+    updatePool(form => ({
+      ...form,
+      seats: [...form.seats, customSeatCopy(form.seats[index], form.seats.map(seat => seat.id))],
+    }));
+    setOpenSeat(poolForm.seats.length);
+  };
+
+  // §7.4.D "Chuyển ghế này thành ghế riêng": one draft edit renames the seat
+  // and remaps every in-pool quotaFallback reference (order preserved); the
+  // Save that lands it keeps the two sides atomic.
+  const openConvertToCustom = (index: number) => () => {
+    setConvertSeatIndex(index);
+    setConvertId(suggestCustomSeatId(poolForm.seats[index]?.id.trim() || "seat", poolForm.seats.map(seat => seat.id)));
+  };
+  const applyConvertToCustom = () => {
+    if (convertSeatIndex === null) return;
+    const index = convertSeatIndex;
+    updatePool(form => convertSeatToCustom(form, index, convertId));
+    setConvertSeatIndex(null);
+    setConvertId("");
+    setStandardAppliedId(null);
+  };
+
+  // "Dùng bộ chuẩn" (§7.4.D): adopt the package token set into the draft —
+  // not yet saved; the seat keeps its binding and notes.
+  const applyStandardTokens = (index: number) => () => {
+    const seatId = poolForm.seats[index]?.id.trim() ?? "";
+    const standard = STANDARD_SEAT_TOKENS[seatId];
+    if (!standard) return;
+    updatePool(form => ({
+      ...form,
+      seats: form.seats.map((seat, i) =>
+        i === index
+          ? { ...seat, suitableFor: standard.suitableFor.join("\n"), avoidFor: standard.avoidFor.join("\n") }
+          : seat,
+      ),
+    }));
+    setStandardAppliedId(seatId);
   };
 
   // Removing a seat drops its fallback references too — a stale id would
@@ -1003,11 +1122,16 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     }));
 
   // Save dispatches the same poolBuild the gate compared — whole-file write
-  // guarded by the sha256 get-peer-pool returned. A CAS refusal surfaces in
-  // lastError; the operator reloads instead of overwriting newer state.
+  // guarded by the sha256 get-peer-pool returned. A build error is surfaced
+  // AND opens the offending seat's editor; a CAS refusal lands in the card's
+  // notice area (§7.4.D) with a Reload affordance instead of only lastError.
   const savePeerPool = async () => {
     if (!target || !key) return;
-    if ("error" in poolBuild) { update({ lastError: poolBuild.error }, target); return; }
+    if ("error" in poolBuild) {
+      update({ lastError: poolBuild.error }, target);
+      if (poolBuild.seatIndex != null) setOpenSeat(poolBuild.seatIndex);
+      return;
+    }
     const issueKey = key;
     setPoolBusy(true);
     try {
@@ -1029,15 +1153,26 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
       }));
       setPoolDirty(false);
       setPoolSaved(true);
+      setPoolError(null);
+      setStandardAppliedId(null);
+      setConvertSeatIndex(null);
     } catch (error) {
-      update({ lastError: errorMessage(error) }, target);
+      const message = errorMessage(error);
+      update({ lastError: message }, target);
+      const cas = message.includes("peer pool changed");
+      setPoolError({
+        message: cas ? "Pool đã thay đổi kể từ lần đọc; Reload để lấy bản mới." : message,
+        cas,
+      });
     } finally {
       setPoolBusy(false);
     }
   };
 
   // Reload discards in-flight edits and refetches — the recovery path after
-  // a CAS conflict, and the escape after a malformed-file fix elsewhere.
+  // a CAS conflict, and the escape after a malformed-file fix elsewhere. On
+  // a dirty draft the press first offers "Giữ bản đang sửa" /
+  // "Bỏ thay đổi và Reload" (§7.4.C); a failed refetch keeps the draft.
   const reloadPeerPool = async () => {
     if (!target || !key) return;
     const issueKey = key;
@@ -1046,28 +1181,62 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
       const result = await callGetPeerPool({ schemaVersion: 1, target });
       if (keyRef.current !== issueKey) return;
       setPoolData(result);
+      setPoolReadError(null);
+      setPoolError(null);
       setPoolDirty(false);
       setPoolSaved(false);
       setPoolCopied(false);
+      setStandardAppliedId(null);
+      setConvertSeatIndex(null);
     } catch (error) {
-      update({ lastError: errorMessage(error) }, target);
+      const message = errorMessage(error);
+      update({ lastError: message }, target);
+      setPoolError({ message, cas: false });
     } finally {
       setPoolBusy(false);
+    }
+  };
+  const requestReload = () => {
+    if (poolDirty) {
+      setPoolReloadConfirm(true);
+    } else {
+      void reloadPeerPool();
     }
   };
 
   // One-time import of the legacy ~/.paseo/slp-routing.json the server
   // reports — fills the form only; nothing is written until Save, and the
-  // legacy file is never removed. The affordance exists only for an empty
-  // pool with an untouched empty form: importing over authored seats would
-  // discard them with no undo.
-  const canImportLegacy = poolData?.legacy != null && poolData.pool === null && poolForm.seats.length === 0;
+  // legacy file is never removed. The affordance exists only for an absent
+  // pool with a TRULY untouched draft (§7.4.C: seats AND policy/fallback):
+  // importing over authored content would discard it with no undo. Legacy
+  // tokens import verbatim — old tags stay and surface as Token conflicts.
+  const canImportLegacy = legacyImportAllowed(poolData, poolForm, poolDirty);
   const importLegacyPool = () => {
     if (!canImportLegacy || !poolData?.legacy) return;
     setPoolForm(peerPoolForm(poolData.legacy));
     setPoolDirty(true);
     setPoolSaved(false);
     setPoolCopied(false);
+  };
+
+  // "Thử lại catalog" (§7.4.E): the cached error entry is only overwritten
+  // by a fresh RPC — a failed retry keeps the last error visible.
+  const retryCatalog = async (family: FamilyName) => {
+    setCatalogLoadingFor(family);
+    try {
+      const result = await callCatalog({
+        schemaVersion: 1, family,
+        ...(target ? { cwd: target.daemonHome } : {}),
+      });
+      setCatalogs(current => ({ ...current, [family]: result }));
+    } catch (error) {
+      setCatalogs(current => ({
+        ...current,
+        [family]: { schemaVersion: 1, models: [], modes: [], features: [], error: errorMessage(error) },
+      }));
+    } finally {
+      setCatalogLoadingFor(current => (current === family ? null : current));
+    }
   };
 
   // Copy renders the SAME pool the Save gate saw — a malformed form refuses
@@ -1785,21 +1954,61 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
         >
           {jevView?.enabled === true && jevView.capabilities?.routing === true ? (
             <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
-              Jev routing is armed — the enabled seats below are the candidate set Jev picks from.
+              Jev routing is armed — the seats below are the draft candidate set Jev picks from;
+              edits apply only after Save, and a seat marked Token conflict is not a
+              valid standard seat.
             </Text>
           ) : null}
-          {poolData === null ? (
-            <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
-              Pool state unavailable — check the daemon home and reload.
-            </Text>
+          {// §7.4.E — the four read states are distinct: still loading, read
+           // failed (never painted as an empty list), stored file malformed,
+           // and absent. Editing stays locked until a successful snapshot.
+          poolData === null ? (
+            poolReadError !== null ? (
+              <Text style={[styles.mutedSmall, { color: colors.statusDanger }]}>
+                Không đọc được pool: {poolReadError} — use Reload to retry.
+              </Text>
+            ) : (
+              <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                Đang đọc pool…
+              </Text>
+            )
           ) : poolData.error ? (
             <Text style={[styles.mutedSmall, { color: colors.statusDanger }]}>
               The stored pool failed validation: {poolData.error} — saving replaces it.
             </Text>
           ) : poolData.pool === null ? (
             <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-              No pool yet — add seats below, or import a legacy slp-routing.json.
+              Chưa có pool — add seats below, or import a legacy slp-routing.json.
             </Text>
+          ) : null}
+          {// §7.4.D card-level conflict notice — pressing an id opens the seat.
+          conflictedSeats.length > 0 ? (
+            <View style={[styles.roleBox, { borderColor: colors.statusDanger }]}>
+              <Text style={[styles.mutedSmall, { color: colors.statusDanger }]}>
+                Token conflict — these seats carry a reserved standard id but diverging
+                tokens. Resolve each before Save:
+              </Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                {conflictedSeats.map(entry => (
+                  <Pressable key={entry.index} onPress={() => setOpenSeat(entry.index)}>
+                    <Text style={[styles.checkTitle, { color: colors.statusDanger, textDecorationLine: "underline" }]}>
+                      {poolForm.seats[entry.index]?.id}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          ) : null}
+          {// §7.4.D card notice — save/reload failures and the CAS conflict
+           // ("Pool đã thay đổi kể từ lần đọc; Reload để lấy bản mới") live
+           // here, with Reload offered right at the message.
+          poolError !== null ? (
+            <View style={[styles.roleBox, { borderColor: colors.statusDanger }]}>
+              <Text style={[styles.mutedSmall, { color: colors.statusDanger }]}>{poolError.message}</Text>
+              {poolError.cas ? (
+                <Button colors={colors} label="Reload" onPress={requestReload} disabled={poolBusy} />
+              ) : null}
+            </View>
           ) : null}
           {poolData?.legacy && !canImportLegacy ? (
             <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
@@ -1833,7 +2042,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
             value={poolForm.policy}
             onChangeText={text => updatePool(form => ({ ...form, policy: text }))}
             placeholder="Human maintains model suitability and quota…"
-            disabled={poolBusy}
+            disabled={poolLocked}
             multiline
           />
           {poolForm.seats.map((seat, index) => {
@@ -1841,9 +2050,45 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
             const thinking = seat.family !== "" ? thinkingOptionsFor(seatCatalog, seat.model) : null;
             const featureDefs = featureDefsForSeat(seat);
             const open = openSeat === index;
-            const disabled = poolBusy;
+            const disabled = poolLocked;
+            // §7.2 management is by exact id; the draft row's conflict state
+            // is computed against the package token set (unordered compare).
+            const managed = seatManagement(seat) === "package-managed";
+            const conflict = managed ? formSeatConflict(seat) : null;
+            const standardTokens = managed ? STANDARD_SEAT_TOKENS[seat.id.trim()] : undefined;
+            const seatTokenLines = (text: string) =>
+              text.split("\n").map(line => line.trim()).filter(line => line !== "");
+            // One token row: the exact token text, its axis in muted parens,
+            // an optional +/− conflict mark, and a press that opens the
+            // definition lookup at that token.
+            const tokenRows = (tokens: string[], mark: (token: string) => "+" | "−" | null = () => null) =>
+              tokens.length === 0 ? (
+                <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Không có khai báo</Text>
+              ) : (
+                tokens.map((token, tokenIndex) => {
+                  const marked = mark(token);
+                  const def = tokenDefinition(token);
+                  return (
+                    <Pressable
+                      key={`${tokenIndex}:${token}`}
+                      onPress={() => { setTokenLookupSeat(index); setTokenLookupToken(token); }}
+                    >
+                      <Text style={[styles.mutedSmall, {
+                        color: marked === "−" ? colors.statusDanger
+                          : marked === "+" ? colors.statusSuccess
+                          : colors.foreground,
+                      }]}>
+                        {marked !== null ? `${marked} ` : ""}{token}
+                        <Text style={{ color: colors.foregroundMuted }}>
+                          {def ? ` (${def.axis})` : " (custom)"}
+                        </Text>
+                      </Text>
+                    </Pressable>
+                  );
+                })
+              );
             return (
-              <View key={`${index}:${seat.id}`} style={[styles.roleBox, { borderColor: colors.border }]}>
+              <View key={`${index}:${seat.id}`} style={[styles.roleBox, { borderColor: conflict ? colors.statusDanger : colors.border }]}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
                   <Pressable onPress={() => setOpenSeat(open ? null : index)} style={{ flex: 1, gap: 2 }}>
                     <Text style={[styles.roleTitle, { color: colors.foreground }]} numberOfLines={1}>
@@ -1853,6 +2098,12 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                       {(seat.family === "" ? "no provider" : FAMILY_LABEL[seat.family]) +
                         (seat.model ? ` · ${seat.model}` : "") +
                         (seat.modeId ? ` · ${seat.modeId}` : "")}
+                    </Text>
+                    <Text
+                      style={[styles.mutedSmall, { color: conflict ? colors.statusDanger : colors.foregroundMuted }]}
+                      numberOfLines={1}
+                    >
+                      {managed ? "Package-managed" : "Custom"}{conflict ? " · Token conflict" : ""}
                     </Text>
                   </Pressable>
                   <Pressable
@@ -1877,15 +2128,39 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                 </View>
                 {open ? (
                   <>
-                    <Field
-                      colors={colors}
-                      label="Seat ID"
-                      hint="Lowercase letters, digits, dashes — the Lead quotes this id in a launch request"
-                      value={seat.id}
-                      onChangeText={setSeatId(index)}
-                      placeholder="peer-coding"
-                      disabled={disabled}
-                    />
+                    {managed ? (
+                      // §7.4.B — a standard seat's id IS the package
+                      // reference; renaming it is how a reserved name would
+                      // be stolen, so the id is display-only.
+                      <View style={styles.field}>
+                        <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Seat ID</Text>
+                        <Text style={[styles.mutedSmall, { color: colors.foreground }]}>{seat.id}</Text>
+                        <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                          Reserved standard-seat id — package-managed; "Tạo bản sao riêng" below copies it into an editable Custom seat.
+                        </Text>
+                      </View>
+                    ) : (
+                      <>
+                        <Field
+                          colors={colors}
+                          label="Seat ID"
+                          hint="Lowercase letters, digits, dashes — the Lead quotes this id in a launch request. Reserved standard-seat ids are refused."
+                          value={seat.id}
+                          onChangeText={setSeatId(index)}
+                          placeholder="peer-coding"
+                          disabled={disabled}
+                        />
+                        {(() => {
+                          const idError = customSeatIdError(
+                            seat.id,
+                            poolForm.seats.filter((_, i) => i !== index).map(other => other.id.trim()),
+                          );
+                          return idError !== null ? (
+                            <Text style={[styles.mutedSmall, { color: colors.statusDanger }]}>{idError}</Text>
+                          ) : null;
+                        })()}
+                      </>
+                    )}
                     <View style={styles.field}>
                       <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Provider family</Text>
                       <ChipSelect
@@ -1918,9 +2193,17 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                       </Text>
                     ) : null}
                     {seatCatalog?.error ? (
-                      <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
-                        Catalog unavailable: {seatCatalog.error} — enter values manually.
-                      </Text>
+                      <>
+                        <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
+                          Catalog unavailable: {seatCatalog.error} — enter values manually.
+                        </Text>
+                        <Button
+                          colors={colors}
+                          label="Thử lại catalog"
+                          onPress={() => void retryCatalog(seat.family as FamilyName)}
+                          disabled={disabled || catalogLoadingFor === seat.family}
+                        />
+                      </>
                     ) : null}
                     {seatCatalog && seatCatalog.models.length > 0 ? (
                       <OptionPicker
@@ -1944,7 +2227,25 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                         disabled={disabled}
                       />
                     )}
-                    {seatCatalog && seatCatalog.modes.length > 0 ? (
+                    {managed ? (
+                      // §7.4.B — Mode and Features are the package's binding
+                      // shape for a standard seat; shown as a read-only
+                      // summary so a draft can't silently diverge.
+                      <View style={styles.field}>
+                        <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Mode</Text>
+                        <Text style={[styles.mutedSmall, { color: colors.foreground }]}>
+                          {seat.modeId !== "" ? seat.modeId : "Provider/host default"}
+                        </Text>
+                        <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Feature values</Text>
+                        <Text style={[styles.mutedSmall, { color: colors.foreground }]}>
+                          {seat.features.trim() !== ""
+                            ? seat.features
+                            : Object.keys(seat.feature).some(featureId => seat.feature[featureId] !== "")
+                              ? JSON.stringify(seat.feature)
+                              : "Provider/host default"}
+                        </Text>
+                      </View>
+                    ) : seatCatalog && seatCatalog.modes.length > 0 ? (
                       <View style={styles.field}>
                         <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Mode</Text>
                         <ChipSelect
@@ -1972,10 +2273,10 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                         disabled={disabled}
                       />
                     )}
-                    {featureDefs.loading ? (
+                    {managed ? null : featureDefs.loading ? (
                       <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Loading features…</Text>
                     ) : null}
-                    {featureDefs.defs.length > 0 ? (
+                    {managed ? null : featureDefs.defs.length > 0 ? (
                       featureDefs.defs.map(def => (
                         def.type === "toggle" ? (
                           <SwitchRow
@@ -2085,53 +2386,280 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                       <View style={styles.field}>
                         <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Thinking option</Text>
                         <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-                          This model declares no thinking options
+                          Không áp dụng — model không khai thinking option
                         </Text>
                       </View>
                     )}
-                    <Text style={[styles.fieldLabel, { color: colors.foreground }]}>
-                      Routing prose — sent to Jev (write in English)
-                    </Text>
-                    <Field
-                      colors={colors}
-                      label="Suitable for"
-                      hint="One per line — the task shapes this seat handles"
-                      value={seat.suitableFor}
-                      onChangeText={setSeatField(index, "suitableFor")}
-                      placeholder={"bounded coding tasks\nreads and small edits"}
-                      disabled={disabled}
-                      multiline
-                    />
-                    <Field
-                      colors={colors}
-                      label="Avoid for"
-                      hint="One per line — the task shapes it should not take"
-                      value={seat.avoidFor}
-                      onChangeText={setSeatField(index, "avoidFor")}
-                      placeholder={"architecture decisions\nlong-running autonomous work"}
-                      disabled={disabled}
-                      multiline
-                    />
+                    <View style={styles.field}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                        <Text style={[styles.fieldLabel, { color: colors.foreground, flex: 1 }]}>
+                          Task suitability — sent to Jev
+                        </Text>
+                        <Button
+                          colors={colors}
+                          label="Định nghĩa token"
+                          onPress={() => {
+                            setTokenLookupSeat(tokenLookupSeat === index ? null : index);
+                            setTokenLookupToken(null);
+                          }}
+                        />
+                      </View>
+                      {conflict && standardTokens ? (
+                        // §7.4.D — both versions at exact values; the stored
+                        // side marks tokens the standard set would drop (−),
+                        // the standard side marks what it would add (+).
+                        <View style={[styles.roleBox, { borderColor: colors.statusDanger }]}>
+                          <Text style={[styles.mutedSmall, { color: colors.statusDanger }]}>
+                            Token conflict — this seat carries a reserved standard id but
+                            its stored tokens diverge from the package set. It cannot be
+                            routed or saved until resolved.
+                          </Text>
+                          <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>
+                            Nội dung đang lưu/được import
+                          </Text>
+                          <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>suitableFor</Text>
+                          {tokenRows(seatTokenLines(seat.suitableFor), token =>
+                            standardTokens.suitableFor.includes(token) ? null : "−")}
+                          <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>avoidFor</Text>
+                          {tokenRows(seatTokenLines(seat.avoidFor), token =>
+                            standardTokens.avoidFor.includes(token) ? null : "−")}
+                          <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>
+                            Bộ chuẩn của package
+                          </Text>
+                          <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>suitableFor</Text>
+                          {tokenRows([...standardTokens.suitableFor], token =>
+                            seatTokenLines(seat.suitableFor).includes(token) ? null : "+")}
+                          <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>avoidFor</Text>
+                          {tokenRows([...standardTokens.avoidFor], token =>
+                            seatTokenLines(seat.avoidFor).includes(token) ? null : "+")}
+                          <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+                            <Button
+                              colors={colors}
+                              label="Dùng bộ chuẩn"
+                              onPress={applyStandardTokens(index)}
+                              disabled={disabled}
+                            />
+                            <Button
+                              colors={colors}
+                              label="Chuyển ghế này thành ghế riêng"
+                              onPress={openConvertToCustom(index)}
+                              disabled={disabled}
+                            />
+                          </View>
+                        </View>
+                      ) : managed ? (
+                        // §7.4.B — a standard seat's two token lists are the
+                        // package's exact values, read-only; pressing a token
+                        // opens its definition.
+                        <>
+                          <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>suitableFor</Text>
+                          {tokenRows(seatTokenLines(seat.suitableFor))}
+                          <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>avoidFor</Text>
+                          {tokenRows(seatTokenLines(seat.avoidFor))}
+                        </>
+                      ) : (
+                        // Custom seats keep free-form strings — the seat's
+                        // own semantics; they receive no package updates.
+                        <>
+                          <Field
+                            colors={colors}
+                            label="Suitable for"
+                            hint="One per line — task shapes this seat handles. Standard seats use the closed axis:value vocabulary; see Định nghĩa token."
+                            value={seat.suitableFor}
+                            onChangeText={setSeatField(index, "suitableFor")}
+                            placeholder={"work:change\ndomain:software"}
+                            disabled={disabled}
+                            multiline
+                          />
+                          <Field
+                            colors={colors}
+                            label="Avoid for"
+                            hint="One per line — advisory warning only; it does not block a runtime permission"
+                            value={seat.avoidFor}
+                            onChangeText={setSeatField(index, "avoidFor")}
+                            placeholder={"work:design\nflow:staged"}
+                            disabled={disabled}
+                            multiline
+                          />
+                        </>
+                      )}
+                    </View>
+                    {standardAppliedId === seat.id.trim() && !conflict ? (
+                      <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
+                        Đã chọn bộ chuẩn — chưa lưu
+                      </Text>
+                    ) : null}
+                    {convertSeatIndex === index ? (
+                      // §7.4.D convert-to-custom: id input + reserved-name
+                      // error + the quotaFallback remap the one Save will
+                      // carry, and the custom-seat caveat.
+                      <View style={[styles.roleBox, { borderColor: colors.border }]}>
+                        <Text style={[styles.fieldLabel, { color: colors.foreground }]}>
+                          Chuyển "{seat.id}" thành ghế riêng
+                        </Text>
+                        <Field
+                          colors={colors}
+                          label="Custom seat ID"
+                          value={convertId}
+                          onChangeText={setConvertId}
+                          placeholder={`${seat.id}-2`}
+                          disabled={disabled}
+                        />
+                        {(() => {
+                          const idError = customSeatIdError(
+                            convertId,
+                            poolForm.seats.filter((_, i) => i !== index).map(other => other.id.trim()),
+                          );
+                          const remapped = poolForm.quotaFallbackIds.includes(seat.id.trim());
+                          return (
+                            <>
+                              {idError !== null ? (
+                                <Text style={[styles.mutedSmall, { color: colors.statusDanger }]}>{idError}</Text>
+                              ) : null}
+                              <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                                {remapped
+                                  ? `quotaFallback will be remapped in this draft: ${seat.id.trim()} → ${convertId.trim() || "?"}`
+                                  : "No quotaFallback references to remap."}
+                              </Text>
+                              <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                                Custom seats do not receive package token updates; references
+                                outside the pool must be updated separately.
+                              </Text>
+                              <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+                                <Button
+                                  colors={colors}
+                                  label="Áp dụng vào draft"
+                                  onPress={applyConvertToCustom}
+                                  disabled={disabled || idError !== null}
+                                />
+                                <Button
+                                  colors={colors}
+                                  label="Hủy"
+                                  onPress={() => { setConvertSeatIndex(null); setConvertId(""); }}
+                                />
+                              </View>
+                            </>
+                          );
+                        })()}
+                      </View>
+                    ) : null}
+                    {tokenLookupSeat === index ? (
+                      // §7.4.F — the package's token lookup: how-to-read, the
+                      // four axes as pickers, then the selected token's full
+                      // definition (or "Nội dung riêng" for non-package text).
+                      <View style={[styles.roleBox, { borderColor: colors.border }]}>
+                        <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Cách đọc</Text>
+                        {HOW_TO_READ.map(line => (
+                          <Text key={line} style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                            {line}
+                          </Text>
+                        ))}
+                        {SUITABILITY_AXES.map(axis => (
+                          <View key={axis.id} style={{ gap: 2 }}>
+                            <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>
+                              {axis.id} — {axis.question}
+                            </Text>
+                            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                              {SUITABILITY_TOKENS.filter(token => token.axis === axis.id).map(token => (
+                                <Pressable
+                                  key={token.id}
+                                  onPress={() => setTokenLookupToken(token.id)}
+                                  style={[styles.chip, tokenLookupToken === token.id && { borderColor: colors.accent }]}
+                                >
+                                  <Text style={[styles.chipLabel, { color: colors.foreground }]}>{token.id}</Text>
+                                </Pressable>
+                              ))}
+                            </View>
+                          </View>
+                        ))}
+                        {tokenLookupToken !== null ? (() => {
+                          const def = tokenDefinition(tokenLookupToken);
+                          return def ? (
+                            <View style={{ gap: 2 }}>
+                              <Text style={[styles.checkTitle, { color: colors.foreground }]}>{def.id}</Text>
+                              <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                                {def.axis} — {SUITABILITY_AXES.find(axis => axis.id === def.axis)?.question}
+                              </Text>
+                              <Text style={[styles.mutedSmall, { color: colors.foreground }]}>{def.sign}</Text>
+                              <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                                Ví dụ: {def.example}
+                              </Text>
+                              <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                                Phản ví dụ: {def.counterExample}
+                              </Text>
+                              <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                                Ranh giới: {def.boundary}
+                              </Text>
+                            </View>
+                          ) : (
+                            <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                              "{tokenLookupToken}" — Nội dung riêng — package chưa định nghĩa token này.
+                            </Text>
+                          );
+                        })() : null}
+                        <Button
+                          colors={colors}
+                          label="Đóng định nghĩa"
+                          onPress={() => { setTokenLookupSeat(null); setTokenLookupToken(null); }}
+                        />
+                      </View>
+                    ) : null}
                     <Text style={[styles.fieldLabel, { color: colors.foreground }]}>
                       Local only — Jev never sees this
                     </Text>
-                    <Field
-                      colors={colors}
-                      label="Notes"
-                      hint="Why this seat exists, in the working language — required"
-                      value={seat.notes}
-                      onChangeText={setSeatField(index, "notes")}
-                      placeholder="Cost, quota, and judgment notes for the Lead"
-                      disabled={disabled}
-                      multiline
-                    />
-                    <Button
-                      colors={colors}
-                      kind="danger"
-                      label="Remove seat"
-                      onPress={removeSeat(index)}
-                      disabled={disabled}
-                    />
+                    {managed ? (
+                      <View style={styles.field}>
+                        <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Notes</Text>
+                        <Text style={[styles.mutedSmall, { color: colors.foreground }]}>
+                          {seat.notes !== "" ? seat.notes : "—"}
+                        </Text>
+                        <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                          Package-provided — read-only.
+                        </Text>
+                      </View>
+                    ) : (
+                      <Field
+                        colors={colors}
+                        label="Notes"
+                        hint="Why this seat exists, in the working language — required"
+                        value={seat.notes}
+                        onChangeText={setSeatField(index, "notes")}
+                        placeholder="Cost, quota, and judgment notes for the Lead"
+                        disabled={disabled}
+                        multiline
+                      />
+                    )}
+                    <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+                      <Button
+                        colors={colors}
+                        kind="danger"
+                        label="Remove seat"
+                        onPress={removeSeat(index)}
+                        disabled={disabled}
+                      />
+                      {managed ? (
+                        <>
+                          <Button
+                            colors={colors}
+                            label="Tạo bản sao riêng"
+                            onPress={copySeatAsCustom(index)}
+                            disabled={disabled}
+                          />
+                          {!conflict ? (
+                            // §7.4.D — a non-conflicting standard seat can
+                            // voluntarily leave management here; a conflicted
+                            // one gets the same action inside its conflict
+                            // section above.
+                            <Button
+                              colors={colors}
+                              label="Chuyển ghế này thành ghế riêng"
+                              onPress={openConvertToCustom(index)}
+                              disabled={disabled}
+                            />
+                          ) : null}
+                        </>
+                      ) : null}
+                    </View>
                   </>
                 ) : null}
               </View>
@@ -2140,19 +2668,38 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
           {addSeatOpen ? (
             <View style={[styles.roleBox, { borderColor: colors.border }]}>
               <Text style={[styles.fieldLabel, { color: colors.foreground }]}>
-                Start from an archetype — parked until you pick a provider and model
+                Thêm ghế chuẩn — parked until you pick a provider and model
               </Text>
-              {PEER_SEAT_ARCHETYPES.map(archetype => (
-                <Pressable
-                  key={archetype.id}
-                  onPress={addSeat(archetype)}
-                  disabled={poolBusy}
-                  style={({ pressed }) => [styles.pickerRow, pressed && { backgroundColor: colors.surface2 }]}
-                >
-                  <Text style={[styles.checkTitle, { color: colors.foreground }]}>{archetype.id}</Text>
-                  <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>{archetype.notes}</Text>
-                </Pressable>
-              ))}
+              <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                "Tạo ghế riêng từ mẫu" copies the template into an editable Custom
+                seat — custom seats receive no package token updates.
+              </Text>
+              {PEER_SEAT_ARCHETYPES.map(archetype => {
+                const existingIndex = poolForm.seats.findIndex(seat => seat.id.trim() === archetype.id);
+                return (
+                  <View key={archetype.id} style={[styles.roleBox, { borderColor: colors.border }]}>
+                    <Pressable
+                      onPress={addStandardSeat(archetype)}
+                      disabled={poolLocked}
+                      style={({ pressed }) => [styles.pickerRow, pressed && { backgroundColor: colors.surface2 }]}
+                    >
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                        <Text style={[styles.checkTitle, { color: colors.foreground, flex: 1 }]}>{archetype.id}</Text>
+                        <Text style={[styles.mutedSmall, { color: existingIndex >= 0 ? colors.statusWarning : colors.foregroundMuted }]}>
+                          {existingIndex >= 0 ? "Đã có — mở ghế" : "Thêm ghế chuẩn"}
+                        </Text>
+                      </View>
+                      <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>{archetype.notes}</Text>
+                    </Pressable>
+                    <Button
+                      colors={colors}
+                      label="Tạo ghế riêng từ mẫu"
+                      onPress={addCustomFromTemplate(archetype)}
+                      disabled={poolLocked}
+                    />
+                  </View>
+                );
+              })}
               <Button colors={colors} label="Close" onPress={() => setAddSeatOpen(false)} />
             </View>
           ) : (
@@ -2160,7 +2707,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
               colors={colors}
               label="Add seat"
               onPress={() => setAddSeatOpen(true)}
-              disabled={poolBusy}
+              disabled={poolLocked}
             />
           )}
           <View style={styles.field}>
@@ -2170,7 +2717,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
               onToggle={next => updatePool(form => ({ ...form, quotaFallbackEnabled: next }))}
               title="Quota fallback"
               hint="When a picked seat's provider reports quota exhaustion, the Lead may retry one of these seats in order"
-              disabled={poolBusy}
+              disabled={poolLocked}
             />
             {poolForm.quotaFallbackEnabled ? (
               poolForm.seats.length === 0 ? (
@@ -2185,14 +2732,23 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                     checked={poolForm.quotaFallbackIds.includes(seat.id)}
                     onToggle={next => toggleFallbackId(seat.id, next)}
                     title={seat.id || "(unnamed seat)"}
-                    disabled={poolBusy}
+                    disabled={poolLocked}
                   />
                 ))
               )
             ) : null}
           </View>
           {"error" in poolBuild ? (
-            <Text style={[styles.mutedSmall, { color: colors.statusDanger }]}>{poolBuild.error}</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <Text style={[styles.mutedSmall, { color: colors.statusDanger, flex: 1 }]}>{poolBuild.error}</Text>
+              {poolBuild.seatIndex != null ? (
+                <Button
+                  colors={colors}
+                  label={`Mở ghế ${poolForm.seats[poolBuild.seatIndex]?.id ?? ""}`}
+                  onPress={() => setOpenSeat(poolBuild.seatIndex ?? null)}
+                />
+              ) : null}
+            </View>
           ) : null}
           <View style={{ gap: 6 }}>
             <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
@@ -2222,16 +2778,39 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
               colors={colors}
               kind="primary"
               label={poolBusy ? "Saving…" : "Save pool"}
-              disabled={!target || poolBusy || !poolDiffers}
+              // §7.4.C — Save only exists once a read snapshot does; the
+              // button stays clickable on a build error so it can report it,
+              // but sends no RPC in that case.
+              disabled={!target || poolBusy || !poolDiffers || poolData === null}
               onPress={() => void savePeerPool()}
             />
             <Button
               colors={colors}
               label="Reload"
-              onPress={() => void reloadPeerPool()}
+              onPress={requestReload}
               disabled={poolBusy}
             />
           </View>
+          {poolReloadConfirm ? (
+            <View style={[styles.roleBox, { borderColor: colors.statusWarning }]}>
+              <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
+                The draft has unsaved edits — Reload discards them.
+              </Text>
+              <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+                <Button
+                  colors={colors}
+                  label="Giữ bản đang sửa"
+                  onPress={() => setPoolReloadConfirm(false)}
+                />
+                <Button
+                  colors={colors}
+                  kind="danger"
+                  label="Bỏ thay đổi và Reload"
+                  onPress={() => { setPoolReloadConfirm(false); void reloadPeerPool(); }}
+                />
+              </View>
+            </View>
+          ) : null}
         </Card>
       ) : null}
 

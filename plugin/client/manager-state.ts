@@ -3,6 +3,8 @@
 // the client bundle check proves it pulls in no server-only or node code.
 import { AbsolutePath, Id } from "../shared/contracts.ts";
 import { OWNED_PROVIDER_ID_RE, ownedProviderId } from "../shared/families.ts";
+import { isStandardSeatId, seatTokenConflict } from "../shared/routing-vocabulary.ts";
+import type { SeatTokenConflict } from "../shared/routing-vocabulary.ts";
 import type { SeatArchetype } from "../shared/archetypes.ts";
 import type {
   CatalogResult,
@@ -526,7 +528,11 @@ export const PEER_SEAT_ID = /^[a-z][a-z0-9-]*$/;
  *  RoutingRoleForm (`features` is the raw JSON base shown when the provider
  *  declares no feature defs, `feature` the per-definition control values).
  *  `family` mirrors `provider` ("" while the seat is parked); `suitableFor`
- *  and `avoidFor` are one-entry-per-line text. */
+ *  and `avoidFor` are one-entry-per-line text. `custom` is view state only —
+ *  it records that the row was created as a Custom seat so an id typed onto a
+ *  reserved standard name is a reserved-name error, not a silent flip to
+ *  Package-managed (§7.2: the id set decides management, and the form never
+ *  auto-converts a Custom row mid-edit). It is never written to the pool. */
 export interface PeerSeatForm {
   id: string;
   family: FamilyName | "";
@@ -539,6 +545,7 @@ export interface PeerSeatForm {
   suitableFor: string;
   avoidFor: string;
   notes: string;
+  custom: boolean;
 }
 
 export interface PeerPoolForm {
@@ -573,6 +580,9 @@ export function peerSeatForm(option: PeerPoolOptionValue): PeerSeatForm {
     suitableFor: option.suitableFor.join("\n"),
     avoidFor: option.avoidFor.join("\n"),
     notes: option.notes,
+    // A stored seat on a reserved standard id is package-managed (possibly in
+    // Token conflict); every other stored id is a custom seat.
+    custom: !isStandardSeatId(option.id),
   };
 }
 
@@ -599,7 +609,8 @@ export function peerPoolForm(pool: PeerPoolValue | null): PeerPoolForm {
 }
 
 /** Archetype → form seat: parked (blank family/model, disabled) so the Human
- *  picks real catalog values; prose carries the archetype's intent. */
+ *  picks real catalog values; prose carries the archetype's intent. The id
+ *  is the canonical reserved name — a standard seat is never suffixed. */
 export function peerSeatFromArchetype(archetype: SeatArchetype): PeerSeatForm {
   return {
     id: archetype.id,
@@ -613,6 +624,7 @@ export function peerSeatFromArchetype(archetype: SeatArchetype): PeerSeatForm {
     suitableFor: archetype.suitableFor.join("\n"),
     avoidFor: archetype.avoidFor.join("\n"),
     notes: archetype.notes,
+    custom: false,
   };
 }
 
@@ -626,6 +638,82 @@ export function uniqueSeatId(base: string, existing: readonly string[]): string 
     if (!taken.has(candidate)) return candidate;
   }
 }
+
+/** Suggested unused custom id for a base name — `<base>-2`, `-3`… — that can
+ *  never land on a reserved standard id (§7.2). */
+export function suggestCustomSeatId(base: string, existing: readonly string[]): string {
+  const taken = new Set(existing);
+  for (let n = 2; ; n++) {
+    const candidate = `${base}-${n}`;
+    if (!taken.has(candidate) && !isStandardSeatId(candidate)) return candidate;
+  }
+}
+
+/** "Tạo ghế riêng từ mẫu" (§7.4.C): the template's tokens/notes copied into a
+ *  new Custom seat — parked (blank binding, disabled) with a suggested
+ *  non-reserved id. Custom seats do not receive package token updates. */
+export function customSeatFromArchetype(archetype: SeatArchetype, existing: readonly string[]): PeerSeatForm {
+  return { ...peerSeatFromArchetype(archetype), id: suggestCustomSeatId(archetype.id, existing), custom: true };
+}
+
+/** "Tạo bản sao riêng" (§7.4.C): a full copy of the viewed seat — binding and
+ *  contents included — under a suggested custom id, disabled. The original
+ *  seat and its quotaFallback references stay untouched. */
+export function customSeatCopy(seat: PeerSeatForm, existing: readonly string[]): PeerSeatForm {
+  return { ...seat, id: suggestCustomSeatId(seat.id.trim() || "seat", existing), enabled: false, custom: true };
+}
+
+/** Custom-id validation for the seat id input and the convert-to-custom
+ *  dialog (§7.4.D): syntax, duplicates inside the pool and the reserved
+ *  standard names. `existing` is the pool's OTHER seat ids (the seat's own
+ *  current id is not a collision). */
+export function customSeatIdError(id: string, existing: readonly string[]): string | null {
+  const trimmed = id.trim();
+  if (!PEER_SEAT_ID.test(trimmed)) {
+    return `id must match ${PEER_SEAT_ID} (lowercase letters, digits, dashes)`;
+  }
+  if (isStandardSeatId(trimmed)) {
+    return `"${trimmed}" is a reserved standard-seat id — pick a custom id such as "${suggestCustomSeatId(trimmed, existing)}"`;
+  }
+  if (existing.includes(trimmed)) return `"${trimmed}" is already used by another seat`;
+  return null;
+}
+
+/** Management label per §7.2's exact id matching: a reserved id means
+ *  Package-managed — unless the row was created Custom and the reserved name
+ *  is only its (invalid, unsavable) edit text. */
+export const seatManagement = (seat: PeerSeatForm): "package-managed" | "custom" =>
+  seat.custom === true || !isStandardSeatId(seat.id.trim()) ? "custom" : "package-managed";
+
+/** Token conflict on a form seat (§7.4.D): the row carries a reserved
+ *  standard id and its draft tokens diverge from the package set. Compared
+ *  as unordered sets; a Custom row never conflicts — its reserved-name
+ *  problem is reported by customSeatIdError/build instead. */
+export const formSeatConflict = (seat: PeerSeatForm): SeatTokenConflict | null =>
+  seatManagement(seat) === "package-managed"
+    ? seatTokenConflict({ id: seat.id.trim(), suitableFor: lineList(seat.suitableFor), avoidFor: lineList(seat.avoidFor) })
+    : null;
+
+/** "Chuyển ghế này thành ghế riêng" (§7.4.D): rename the seat to a custom id
+ *  and remap every in-pool reference (quotaFallback order preserved) in the
+ *  same draft edit — one action, one Save, no dangling reference. The caller
+ *  validates newId with customSeatIdError first. */
+export function convertSeatToCustom(form: PeerPoolForm, index: number, newId: string): PeerPoolForm {
+  const oldId = form.seats[index]?.id;
+  const seats = form.seats.map((seat, i) =>
+    i === index ? { ...seat, id: newId.trim(), custom: true } : seat);
+  const quotaFallbackIds = form.quotaFallbackIds.map(id => (id === oldId ? newId.trim() : id));
+  return { ...form, seats, quotaFallbackIds };
+}
+
+/** §7.4.C import gate: legacy data exists, the stored pool is absent AND the
+ *  draft is untouched — no seats and no policy/fallback edits. A failed pool
+ *  read (no snapshot) never opens the gate. */
+export const legacyImportAllowed = (
+  data: { legacy: PeerPoolValue | null; pool: PeerPoolValue | null } | null,
+  form: PeerPoolForm,
+  dirty: boolean,
+): boolean => data?.legacy != null && data.pool === null && form.seats.length === 0 && !dirty;
 
 export type PeerSeatBuild = { option: PeerPoolOptionValue } | { error: string };
 
@@ -646,6 +734,19 @@ export function buildPeerSeat(
     return { error: `seat "${form.id.trim() || "?"}": id must match ${PEER_SEAT_ID} (lowercase letters, digits, dashes)` };
   }
   const label = `seat ${id}`;
+  // §7.2 semantic checks — the build is the real gate, not the input's
+  // disabled flag: a Custom row may never carry a reserved standard name, and
+  // a Package-managed row may never store tokens diverging from the package
+  // set (that state is a Token conflict to resolve, not valid content).
+  if (isStandardSeatId(id) && form.custom === true) {
+    return { error: `${label}: "${id}" is a reserved standard-seat id — pick a custom id such as "${suggestCustomSeatId(id, [])}"` };
+  }
+  if (seatManagement(form) === "package-managed") {
+    const conflict = seatTokenConflict({ id, suitableFor: lineList(form.suitableFor), avoidFor: lineList(form.avoidFor) });
+    if (conflict) {
+      return { error: `${label}: Token conflict — the draft tokens differ from the package standard set; open the seat and use "Dùng bộ chuẩn" or "Chuyển ghế này thành ghế riêng"` };
+    }
+  }
   if (form.enabled && form.family === "") return { error: `${label}: an enabled seat needs a provider family` };
   if (form.enabled && form.model.trim() === "") return { error: `${label}: an enabled seat needs a model` };
   const option: Record<string, unknown> = { ...(stored ?? {}) };
@@ -692,12 +793,13 @@ export function buildPeerSeat(
   return { option: option as PeerPoolOptionValue };
 }
 
-export type PeerPoolBuild = { pool: PeerPoolValue } | { error: string };
+export type PeerPoolBuild = { pool: PeerPoolValue } | { error: string; seatIndex?: number };
 
 /** Form → storable PeerPool: seat ids unique, fallback ids unique and drawn
  *  from this pool's seats, and an enabled fallback never empty — the same
  *  constraints validateCatalog enforces on read, surfaced here so the Save
- *  gate can name them before dispatch. */
+ *  gate can name them before dispatch. Seat-level errors carry `seatIndex`
+ *  so the card can offer a button that opens the offending seat's editor. */
 export function buildPeerPool(
   form: PeerPoolForm,
   defsFor: (seat: PeerSeatForm) => CatalogResult["features"],
@@ -707,10 +809,10 @@ export function buildPeerPool(
   if (!policy) return { error: "pool policy is required" };
   const ids = new Set<string>();
   const options: PeerPoolOptionValue[] = [];
-  for (const seat of form.seats) {
+  for (const [index, seat] of form.seats.entries()) {
     const built = buildPeerSeat(seat, storedOptions?.get(seat.id.trim()), defsFor(seat));
-    if ("error" in built) return built;
-    if (ids.has(built.option.id)) return { error: `duplicate seat id "${built.option.id}"` };
+    if ("error" in built) return { error: built.error, seatIndex: index };
+    if (ids.has(built.option.id)) return { error: `duplicate seat id "${built.option.id}"`, seatIndex: index };
     ids.add(built.option.id);
     options.push(built.option);
   }
