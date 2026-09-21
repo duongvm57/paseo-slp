@@ -111,6 +111,62 @@ test('offline CLI prepares from a staged install with no Paseo executable or dae
   assert.equal(existsSync(join(dir, 'not-created')), false);
 });
 
+test('prepare --emit create prints the create record verbatim and --check gates on failures', t => {
+  const dir = fixture(t), installed = join(dir, 'release');
+  install(root, installed);
+  const request = join(dir, 'request.json');
+  writeFileSync(request, json({ workspaceId: 'wks-x', repository: root, assignment: 'emit check', binding }));
+  const env = { PATH: '' };
+  const cli = join(installed, 'bin/slp.mjs');
+  // --emit create is byte-identical to the plan's create member — no trimming
+  // or recomposing of initialPrompt, title, settings or workspaceId.
+  const emitted = JSON.parse(execFileSync(process.execPath, [cli, 'prepare', request, '--emit', 'create'], { env, encoding: 'utf8' }));
+  const full = JSON.parse(execFileSync(process.execPath, [cli, 'prepare', request], { env, encoding: 'utf8' }));
+  assert.deepEqual(emitted, full.create);
+  assert.equal(emitted.provider, 'codex/gpt-5.6-luna');
+  assert.ok(emitted.initialPrompt.includes('SLP role=supervisor'));
+  // --check on a valid request exits 0 with per-stage results.
+  const ok = JSON.parse(execFileSync(process.execPath, [cli, 'prepare', request, '--check'], { env, encoding: 'utf8' }));
+  assert.equal(ok.ok, true);
+  assert.ok(ok.checks.every(check => check.ok));
+  // Missing model: exit 1 and the failing stage is named, before any create.
+  writeFileSync(request, json({ workspaceId: 'wks-x', repository: root, assignment: 'x', binding: { provider: 'codex' } }));
+  const bad = spawnSync(process.execPath, [cli, 'prepare', request, '--check'], { env, encoding: 'utf8' });
+  assert.equal(bad.status, 1);
+  const report = JSON.parse(bad.stdout);
+  assert.equal(report.ok, false);
+  assert.match(report.checks.find(check => check.name === 'settings').error, /model/);
+  // prepare-handoff shares both modes; --check exits 1 on failing stages.
+  const handoffRun = spawnSync(process.execPath, [cli, 'prepare-handoff', request, '--check'], { env, encoding: 'utf8' });
+  assert.equal(handoffRun.status, 1);
+  const handoffReport = JSON.parse(handoffRun.stdout);
+  assert.equal(handoffReport.ok, false);
+  assert.equal(handoffReport.checks.find(check => check.name === 'handoff').ok, false);
+  // Modes are mutually exclusive.
+  const clash = spawnSync(process.execPath, [cli, 'prepare', request, '--check', '--emit', 'create'], { env, encoding: 'utf8' });
+  assert.equal(clash.status, 1);
+  assert.match(clash.stderr, /separate modes/);
+  // Flag-first ordering works too: prepare --check <file> parses the same.
+  const flagFirst = spawnSync(process.execPath, [cli, 'prepare', '--check', request], { env, encoding: 'utf8' });
+  assert.equal(flagFirst.status, 1);
+  assert.deepEqual(JSON.parse(flagFirst.stdout).checks.map(c => c.name), report.checks.map(c => c.name));
+});
+
+test('prepare --schema prints the request contract without a request file, receipt or daemon', () => {
+  const env = { PATH: '' };
+  // Runs straight from the source checkout — no installed.json needed.
+  const schema = JSON.parse(execFileSync(process.execPath, [join(root, 'bin/slp.mjs'), 'prepare', '--schema'], { env, encoding: 'utf8' }));
+  for (const role of ['supervisor', 'lead', 'peer']) assert.ok(schema.examples[role]);
+  assert.ok(schema.bindingSources['catalog routing — required for peer']);
+  const handoff = JSON.parse(execFileSync(process.execPath, [join(root, 'bin/slp.mjs'), 'prepare-handoff', '--schema'], { env, encoding: 'utf8' }));
+  assert.ok(handoff.handoff.resources);
+  assert.equal(handoff.base.repository, schema.base.repository);
+  // --schema takes no request file.
+  const bad = spawnSync(process.execPath, [join(root, 'bin/slp.mjs'), 'prepare', 'x.json', '--schema'], { env, encoding: 'utf8' });
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /takes no request file/);
+});
+
 test('CLI reports a missing target instead of a raw path error', () => {
   const cli = join(root, 'bin/slp.mjs');
   for (const command of ['prepare', 'prepare-handoff', 'snapshot', 'verify', 'routes', 'init']) {
@@ -141,6 +197,133 @@ test('work snapshot detects untracked edits, deletion and executable mode withou
   execFileSync('git', ['-C', dir, 'add', 'owned.txt']);
   rmSync(join(dir, 'owned.txt'));
   assert.deepEqual(snapshot(dir).files, [{ path: 'owned.txt', deleted: true }]);
+  assert.ok(!('incomplete' in snapshot(dir)), 'a tree without gitlinks stays complete');
+});
+
+const gitRun = (dir, args) => execFileSync('git', ['-C', dir, ...args]);
+const gitCommit = (dir, message = 'c') => gitRun(dir, ['-c', 'user.email=t@slp', '-c', 'user.name=t', 'commit', '--quiet', '-m', message]);
+// A real superproject + submodule: upstream is a standalone repo the main repo
+// links at `subPath`. Returns the superproject root, the submodule checkout and
+// the upstream repo for making new commits.
+function submoduleFixture(t, subPath = 'sub') {
+  const base = fixture(t);
+  const upstream = join(base, 'upstream');
+  mkdirSync(upstream);
+  gitRun(upstream, ['init', '--quiet']);
+  writeFileSync(join(upstream, 'u.txt'), 'u1');
+  gitRun(upstream, ['add', 'u.txt']);
+  gitCommit(upstream);
+  const dir = join(base, 'main');
+  mkdirSync(dir);
+  gitRun(dir, ['init', '--quiet']);
+  writeFileSync(join(dir, 'owned.txt'), 'o');
+  gitRun(dir, ['add', 'owned.txt']);
+  gitCommit(dir);
+  gitRun(dir, ['-c', 'protocol.file.allow=always', 'submodule', 'add', '--quiet', upstream, subPath]);
+  gitCommit(dir);
+  return { dir, sub: join(dir, subPath), upstream };
+}
+const gitlinkOf = (snap, path = 'sub') => snap.files.find(entry => entry.path === path);
+
+test('snapshot records a clean initialized gitlink as pointer plus observed HEAD', t => {
+  const { dir, sub } = submoduleFixture(t);
+  const headOid = gitRun(sub, ['rev-parse', 'HEAD']).toString().trim();
+  const snap = snapshot(dir);
+  assert.deepEqual(gitlinkOf(snap), { path: 'sub', kind: 'gitlink', indexOid: headOid, headOid, state: 'clean' });
+  assert.ok(!('incomplete' in snap));
+  assert.equal(snapshot(dir).sha256, snap.sha256, 'snapshot stays deterministic');
+});
+
+test('snapshot digest follows a moved submodule checkout while the staged pointer stays put', t => {
+  const { dir, sub, upstream } = submoduleFixture(t);
+  const first = snapshot(dir);
+  writeFileSync(join(upstream, 'u.txt'), 'u2');
+  gitRun(upstream, ['add', 'u.txt']);
+  gitCommit(upstream);
+  const moved = gitRun(upstream, ['rev-parse', 'HEAD']).toString().trim();
+  gitRun(sub, ['fetch', '--quiet', 'origin']);
+  gitRun(sub, ['checkout', '--quiet', moved]);
+  const after = snapshot(dir);
+  const entry = gitlinkOf(after);
+  assert.equal(entry.headOid, moved);
+  assert.equal(entry.indexOid, first.files.find(e => e.path === 'sub').indexOid, 'index pointer unchanged until staged');
+  assert.equal(entry.state, 'clean');
+  assert.ok(!('incomplete' in after));
+  assert.notEqual(after.sha256, first.sha256, 'headOid is part of the digest');
+});
+
+test('snapshot distinguishes a staged pointer from the checkout it no longer matches', t => {
+  const { dir, sub, upstream } = submoduleFixture(t);
+  const staged = gitRun(sub, ['rev-parse', 'HEAD']).toString().trim();
+  writeFileSync(join(upstream, 'u.txt'), 'u2');
+  gitRun(upstream, ['add', 'u.txt']);
+  gitCommit(upstream);
+  const moved = gitRun(upstream, ['rev-parse', 'HEAD']).toString().trim();
+  gitRun(sub, ['fetch', '--quiet', 'origin']);
+  gitRun(sub, ['checkout', '--quiet', moved]);
+  gitRun(dir, ['add', 'sub']);
+  gitRun(sub, ['checkout', '--quiet', staged]);
+  const entry = gitlinkOf(snapshot(dir));
+  assert.equal(entry.indexOid, moved, 'staging intent is the gitlink identity object');
+  assert.equal(entry.headOid, staged);
+  assert.equal(entry.state, 'clean');
+});
+
+test('snapshot marks dirty or untracked submodule content as unproven scope', t => {
+  const { dir, sub } = submoduleFixture(t);
+  writeFileSync(join(sub, 'u.txt'), 'edited');
+  let snap = snapshot(dir);
+  assert.equal(gitlinkOf(snap).state, 'dirty');
+  assert.deepEqual(snap.incomplete, ['sub']);
+  // A second dirty tree with different content keeps the same digest — the
+  // scope is unproven, so the snapshot must not claim completeness for it.
+  writeFileSync(join(sub, 'u.txt'), 'edited again');
+  const snap2 = snapshot(dir);
+  assert.equal(snap2.sha256, snap.sha256);
+  assert.deepEqual(snap2.incomplete, ['sub']);
+  // Untracked-only content is dirty too.
+  execFileSync('git', ['-C', sub, 'checkout', '--quiet', '--', 'u.txt']);
+  writeFileSync(join(sub, 'untracked.txt'), 'x');
+  snap = snapshot(dir);
+  assert.equal(gitlinkOf(snap).state, 'dirty');
+  assert.deepEqual(snap.incomplete, ['sub']);
+});
+
+test('snapshot reports uninitialized, deleted and replaced gitlink paths without failing', t => {
+  const { dir, sub } = submoduleFixture(t);
+  gitRun(dir, ['submodule', 'deinit', '--force', 'sub']);
+  let snap = snapshot(dir);
+  assert.equal(gitlinkOf(snap).state, 'uninitialized');
+  assert.equal(gitlinkOf(snap).headOid, null);
+  assert.deepEqual(snap.incomplete, ['sub']);
+  gitRun(dir, ['-c', 'protocol.file.allow=always', 'submodule', 'update', '--quiet', '--init', 'sub']);
+  assert.equal(gitlinkOf(snapshot(dir)).state, 'clean');
+  rmSync(sub, { recursive: true, force: true });
+  snap = snapshot(dir);
+  assert.equal(gitlinkOf(snap).state, 'missing');
+  assert.deepEqual(snap.incomplete, ['sub']);
+  // A regular file where the submodule dir was is also missing, not a crash.
+  writeFileSync(sub, 'not a directory');
+  assert.equal(gitlinkOf(snapshot(dir)).state, 'missing');
+});
+
+test('snapshot records a conflicted gitlink index without picking a stage', t => {
+  const { dir, sub } = submoduleFixture(t);
+  const headOid = gitRun(sub, ['rev-parse', 'HEAD']).toString().trim();
+  execFileSync('git', ['-C', dir, 'update-index', '--index-info'], {
+    input: `0 ${'0'.repeat(40)}\tsub\n160000 ${'1'.repeat(40)} 1\tsub\n160000 ${'2'.repeat(40)} 2\tsub\n160000 ${'3'.repeat(40)} 3\tsub\n` });
+  const entry = gitlinkOf(snapshot(dir));
+  assert.equal(entry.indexOid, null, 'conflict must not pick stage 0');
+  assert.equal(entry.state, 'conflicted');
+  assert.equal(entry.headOid, headOid);
+  assert.deepEqual(snapshot(dir).incomplete, ['sub']);
+});
+
+test('snapshot handles a gitlink path containing spaces', t => {
+  const { dir, sub } = submoduleFixture(t, 'my lib');
+  const headOid = gitRun(sub, ['rev-parse', 'HEAD']).toString().trim();
+  const snap = snapshot(dir);
+  assert.deepEqual(gitlinkOf(snap, 'my lib'), { path: 'my lib', kind: 'gitlink', indexOid: headOid, headOid, state: 'clean' });
 });
 
 test('role bundle load paths are the contract: Peer never receives delegation policy', t => {
@@ -164,4 +347,87 @@ test('role bundle load paths are the contract: Peer never receives delegation po
     }
   }
   assert.throws(() => roleBundle(installed, 'engineer'), /Unknown role/);
+});
+
+test('decision-doctrine lines reach the standalone bundles that need them and never reach Peer', t => {
+  const installed = join(fixture(t), 'release');
+  install(root, installed);
+  // The review-gate invariant and the create_agent parentage rule ride
+  // delegation.md (Supervisor + Lead); the re-read trigger and the
+  // protocol-read timing live in the role files. Peer must receive none.
+  const [supervisor, lead] = ['supervisor', 'lead'].map(role => roleBundle(installed, role, {}).instructions);
+  for (const instructions of [supervisor, lead]) {
+    assert.match(instructions, /does not license merging\s+the axes into one seat/, 'review-gate invariant');
+    assert.match(instructions, /cannot carry a new\s+delegation/, 'agent-scoped create_agent rule');
+    // C8 formation pins ride delegation.md into both orchestrating bundles:
+    // the three-way decision table, the formation record, the placement pin
+    // and the post-create parentage verification.
+    assert.match(instructions, /New-team delegation/, 'decision table: new-team row');
+    assert.match(instructions, /Continuation: same team and ownership/, 'decision table: continuation row');
+    assert.match(instructions, /Observe-existing-work/, 'decision table: observe-existing row');
+    assert.match(instructions, /formation record/, 'preflight formation record');
+    assert.match(instructions, /not evidence of parentage/, 'post-create verification');
+    assert.match(instructions, /paseo\.parent-agent-id label must match/, 'inbound-route self-check rides common.md');
+    assert.match(instructions, /distinct from your\s+parent/, 'observe-existing carve-out: recipient need not equal parent');
+    assert.match(instructions, /not a hard block/, 'unexposed label is a recorded gap, not a block');
+    assert.match(instructions, /names no agent\s+recipient/, 'no-named-recipient case is classified, not a block');
+    assert.match(instructions, /not filesystem\s+isolation/, 'workspace placement pin');
+    assert.match(instructions, /send_agent_prompt to a\s+parentless or differently parented/, 'B21 formation-defect trigger');
+    assert.match(instructions, /second workspace\s+for the same team with no isolation reason/, 'B22 placement-defect trigger');
+  }
+  assert.match(lead, /re-read\s+the review-gate rules/);
+  assert.match(lead, /after resume or compaction/);
+  assert.ok(!/re-read\s+the review-gate rules/.test(supervisor), 'the re-read trigger is Lead-scoped');
+  assert.match(supervisor, /before replying to the Human/, 'B12 protocol-read timing');
+  assert.match(lead, /before your first reply/, 'B12 protocol-read timing');
+  // Role-scoped C8 cues: the observe-vs-establish distinction is Supervisor's;
+  // the conditional parent-label fallback and no-adoption rule are Lead's.
+  assert.match(supervisor, /standalone session never makes\s+it your child/, 'Supervisor new-team vs observe cue');
+  assert.ok(!/standalone session never makes\s+it your child/.test(lead), 'Supervisor cue stays role-scoped');
+  assert.match(lead, /does not adopt it/, 'Lead continuity boundary');
+  assert.match(lead, /does not repair a wrong parent/, 'Lead conditional parent-label fallback');
+  assert.ok(!/does not adopt it/.test(supervisor), 'Lead cue stays role-scoped');
+  const peer = roleBundle(installed, 'peer', {}).instructions;
+  assert.ok(!/does not license merging/.test(peer));
+  assert.ok(!/re-read\s+the review-gate rules/.test(peer));
+  assert.ok(!/cannot carry a new\s+delegation/.test(peer));
+  assert.ok(!/New-team delegation|Observe-existing-work|formation record/.test(peer), 'Peer gets no formation doctrine');
+  assert.ok(!/not evidence of parentage|not filesystem\s+isolation/.test(peer));
+  // The inbound-route self-check is a Peer-visible self-check on the seat's own
+  // assignment envelope (common.md), not formation doctrine — it must reach Peer.
+  assert.match(peer, /paseo\.parent-agent-id label must match/, 'inbound-route self-check is Peer-visible');
+  assert.match(peer, /distinct from your\s+parent/, 'Peer self-check keeps the observe-existing carve-out');
+  assert.match(peer, /not a hard block/, 'Peer self-check tolerates an unexposed label');
+  assert.match(peer, /names no agent\s+recipient/, 'Peer self-check classifies the no-recipient case');
+  for (const ref of ['orchestration.md', 'review-gates.md']) {
+    assert.ok(!peer.includes(readFileSync(join(installed, 'src/references', ref), 'utf8')), `Peer must not load ${ref} bytes`);
+  }
+  // The shipped protocol template carries the same doctrine: read-on-landing,
+  // split-axis gate wording, idle retention, create_agent-only seats and the
+  // shared-workspace placement default with the owner-map/receipt record.
+  const template = readFileSync(join(installed, 'src/templates/workspace-protocol.md'), 'utf8');
+  assert.match(template, /when the assignment lands/);
+  assert.match(template, /split-axis seats, never one merged seat/);
+  assert.match(template, /keep accepted Peers idle/);
+  assert.match(template, /assignment that formed the team/, 'idle-retention referent is the team assignment');
+  assert.match(template, /agent-scoped create_agent/);
+  assert.match(template, /share the assignment'?s workspace by default/, 'team-workspace default');
+  assert.match(template, /owner map and creation receipts/, 'formation receipts tactic');
+  // B25: split-seat naming convention — slash suffix, never an "axis" suffix.
+  assert.match(template, /Reviewer — <task> \/ Spec/, 'Spec seat naming convention');
+  assert.match(template, /Reviewer — <task> \/ Std/, 'Std seat naming convention');
+  assert.match(template, /never an "axis" suffix/);
+  // B24: monitoring doctrine enumerates seats by identity, not cwd, and never
+  // infers nonexistence from an empty listing (references ship as locators —
+  // pin the installed bytes directly).
+  const monitoring = readFileSync(join(installed, 'src/references/monitoring.md'), 'utf8');
+  assert.match(monitoring, /never by cwd/, 'seat enumeration is not cwd-scoped');
+  assert.match(monitoring, /empty list_agents result does not prove/, 'empty list is not nonexistence');
+  assert.match(monitoring, /refs\/heads\/<lane>/, 'lane branches carry lane commits');
+  // M2: the single-seat exception is class-listed and Lead-recorded; a
+  // required gate never collapses into one seat.
+  const gates = readFileSync(join(installed, 'src/references/review-gates.md'), 'utf8');
+  assert.match(gates, /change classes the protocol lists\s+explicitly/, 'single-seat exception is class-listed');
+  assert.match(gates, /never single-seat/, 'required gate never collapses to one seat');
+  assert.match(gates, /Lead decides it and\s+records/, 'exception authority and record are pinned');
 });

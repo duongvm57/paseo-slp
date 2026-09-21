@@ -22,6 +22,17 @@ function fixture(t) {
 // Tests cross the same host-config seam as production instead of forging config.json.
 function config(home, value) { writeConfig(configFile(home), value); }
 
+// Managed sessions export SLP_*/PASEO_* launch vars (SLP_MANAGED_RUNTIME,
+// SLP_DAEMON_HOME, ...); a child inheriting them resolves the real daemon home
+// instead of the test fixture. Strip them all, then apply the test's values.
+const unmanagedEnv = extra => {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) {
+    if (key.startsWith('SLP_') || key.startsWith('PASEO_')) delete env[key];
+  }
+  return { ...env, ...extra };
+};
+
 test('integrated install previews, preserves preferences and unrelated config, and rolls back only owned entries', t => {
   const { home, destination } = fixture(t);
   const before = { version: 1, privateSetting: 'not-in-receipt', agents: { providers: {
@@ -86,7 +97,7 @@ test('workspace init creates only protocol, routing and notebook once and preser
   const protocol = join(dir, '.paseo-slp/workspace-protocol.md');
   const routing = join(dir, '.paseo-slp/slp-routing.json');
   const notebook = join(dir, '.paseo-slp/notebook.md');
-  assert.match(readFileSync(protocol, 'utf8'), /Lead reads this file/);
+  assert.match(readFileSync(protocol, 'utf8'), /Supervisor and Lead read this file when the assignment lands/);
   const seeded = readJson(routing).options;
   assert.deepEqual(seeded, readJson(join(root, 'src/templates/slp-routing.json')).options);
   assert.ok(seeded.length > 0 && seeded.every(o => o.enabled === false && o.availability === 'unknown'));
@@ -157,6 +168,29 @@ test('installed adapter injects every role over stdio while preserving host prom
     assert.ok(actual[3].params.collaborationMode.settings.developer_instructions.endsWith(instruction));
     assert.deepEqual(actual.slice(4), messages.slice(4));
     assert.equal(roleBundle(destination, role).orchestrates, role !== 'peer');
+    // The injected bytes carry the required review-gate invariant to the
+    // orchestrating roles and the re-read trigger to Lead alone; both reach
+    // the seat on thread/start and thread/resume (same instruction string).
+    assert.equal(/does not license merging\s+the axes into one seat/.test(instruction), role !== 'peer');
+    assert.equal(/re-read\s+the review-gate rules/.test(instruction), role === 'lead');
+    // The C8 formation pins ride the same delegation block: the decision
+    // table, formation record, placement pin and post-create verification
+    // reach Supervisor and Lead, never Peer.
+    assert.equal(/Observe-existing-work/.test(instruction), role !== 'peer');
+    assert.equal(/Continuation: same team and ownership/.test(instruction), role !== 'peer');
+    assert.equal(/formation record/.test(instruction), role !== 'peer');
+    assert.equal(/not evidence of parentage/.test(instruction), role !== 'peer');
+    assert.equal(/not filesystem\s+isolation/.test(instruction), role !== 'peer');
+    assert.equal(/send_agent_prompt to a\s+parentless or differently parented/.test(instruction), role !== 'peer');
+    assert.equal(/second workspace\s+for the same team with no isolation reason/.test(instruction), role !== 'peer');
+    // The inbound-route self-check rides common.md — a self-check, not formation
+    // doctrine — so it reaches every role including Peer.
+    assert.match(instruction, /paseo\.parent-agent-id label must match/);
+    assert.match(instruction, /distinct from your\s+parent/);
+    assert.match(instruction, /not a hard block/);
+    assert.match(instruction, /names no agent\s+recipient/);
+    assert.equal(/standalone session never makes\s+it your child/.test(instruction), role === 'supervisor');
+    assert.equal(/does not adopt it/.test(instruction), role === 'lead');
     assert.equal(execFileSync(process.execPath, [argv[0], role, '--version'], { env, encoding: 'utf8' }).trim(), 'probe-ok');
   }
 });
@@ -303,7 +337,7 @@ test('a standalone install updates in place and never drops extra files', t => {
 
 test('bare --paseo-home and SLP_HOME resolve the documented defaults', t => {
   const { home, destination } = fixture(t);
-  const env = { ...process.env, PASEO_HOME: home, SLP_HOME: destination };
+  const env = unmanagedEnv({ PASEO_HOME: home, SLP_HOME: destination });
   const result = JSON.parse(execFileSync(process.execPath,
     [join(root, 'bin/slp.mjs'), 'install', '--paseo-home', '--apply'], { env, encoding: 'utf8', timeout: 5000 }));
   assert.equal(result.destination, destination);

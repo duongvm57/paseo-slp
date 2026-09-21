@@ -3,7 +3,10 @@
 A review gate is not one reviewer. When the assignment or protocol requires
 independent review of a stable candidate, run parallel Peer seats on split
 axes so no axis can mask another. A single reviewer is a degenerate gate —
-acceptable only when the protocol explicitly allows it.
+valid only for the change classes the protocol lists explicitly (for example
+docs-only edits that touch no semantics, generated-payload regeneration,
+typo or metadata fixes); a required gate over doctrine, delegation,
+packaging, behaviour or code is never single-seat.
 
 ## Axes
 
@@ -52,4 +55,6 @@ list — a candidate can pass one axis and fail the other, and merged
 rankings let one axis mask the failure. Corrections route to the owning
 lane; re-review returns to the same seat under session continuity. The
 protocol may set seats and axes stricter than this floor; it cannot
-loosen a required gate into one seat.
+loosen a required gate into one seat — a listed-class exception removes
+the requirement rather than relaxing it, and the Lead decides it and
+records the call in the task's brief or reconcile checkpoint.

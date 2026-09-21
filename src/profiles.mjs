@@ -3,6 +3,8 @@ import { dispositionPattern, rejectRouteKeys, verifyProvider,
 
 export const roles = ['supervisor', 'lead', 'peer'];
 export const profileRoles = ['supervisor', 'lead'];
+// Supervisor and Lead orchestrate; Peer owns one bounded outcome and never spawns.
+export const orchestrates = role => role !== 'peer';
 export const families = ['codex', 'pi', 'devin', 'claude'];
 const profilePrefix = 'slp-';
 export const profileId = role => `${profilePrefix}${role}`;

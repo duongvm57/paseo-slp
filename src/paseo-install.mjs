@@ -61,6 +61,10 @@ export function installPaseo(source, destination, home, apply = false) {
   if (!homeWithinInstall || (!homeWithinInstall.startsWith('..') && !isAbsolute(homeWithinInstall))) throw new Error('Paseo home must be outside the installation directory');
   const file = configFile(home);
   if (existsSync(destination)) {
+    // A pre-existing directory that was never installed would crash inside
+    // verifyInstall with a raw ENOENT — report the business condition instead.
+    if (!existsSync(join(destination, 'installed.json')))
+      throw new Error(`Not an installed SLP directory (missing installed.json): ${destination} — install the runtime there first`);
     const manifest = verifyInstall(destination);
     const binding = readJson(join(destination, 'paseo-binding.json'));
     if (binding.configPath !== file.path) throw new Error('Installation belongs to a different Paseo home');
@@ -291,11 +295,16 @@ export function materializeWorkspace(from, repository, apply = false) {
     if (!lstat(path)?.isFile()) throw new Error(`Source checkout lacks .paseo-slp/${name}`);
     return path;
   };
-  const catalog = validateCatalog(readJson(sourceFile('slp-routing.json')));
+  // Read the catalog once and validate those exact bytes: the target keeps
+  // them verbatim so a route.catalogSha256 pinned against the source stays
+  // valid after materialize — reserializing the parsed object would drift
+  // formatting and hash.
+  const catalogBytes = readFileSync(sourceFile('slp-routing.json'));
+  validateCatalog(JSON.parse(catalogBytes.toString('utf8')));
   const protocol = rebaseFrontmatter(readFileSync(sourceFile('workspace-protocol.md'), 'utf8'), source, repository);
   const entries = [
     { path: join(repository, '.paseo-slp/workspace-protocol.md'), bytes: protocol.text },
-    { path: join(repository, '.paseo-slp/slp-routing.json'), bytes: json(catalog) },
+    { path: join(repository, '.paseo-slp/slp-routing.json'), bytes: catalogBytes },
   ];
   const result = stageEntries(entries, repository, apply);
   const protocolFile = result.find(file => file.path.endsWith('workspace-protocol.md'));

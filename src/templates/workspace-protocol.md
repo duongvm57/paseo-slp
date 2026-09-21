@@ -3,7 +3,6 @@ version: '1'
 owner: ''
 applies_to: ''
 last_reviewed: ''
-communication_language: ''
 routing_intent: ''
 agent_mode: ''
 supervisor_notebook: ''
@@ -13,8 +12,10 @@ decided_at: ''
 
 # Workspace Protocol
 
-Lead reads this file before delegation. Supervisor reads it when assigned a
-protocol audit. Lead passes only task-relevant constraints to the Peer.
+Supervisor and Lead read this file when the assignment lands — before any
+reply or decision that depends on repository tactics, not only before
+delegation. Supervisor also reads it when assigned a protocol audit. Lead
+passes only task-relevant constraints to the Peer.
 
 This is a starting template of repository tactics. The Human's current assignment
 controls authority. Complete unknown fields from repository evidence and the
@@ -23,21 +24,18 @@ The defaults below can be adapted under the repository's policy mandate.
 
 ## Status and project characteristics
 
-Owner, version, review date, scope, communication language, routing intent and
+Owner, version, review date, scope, routing intent and
 the Supervisor notebook live in the YAML frontmatter above — update it when
 decisions change; the frontmatter is the single source for those fields.
 
 - Criticality, dominant risks and expensive-to-reverse decisions: establish per repo.
 - External effects and cost/model budget: use explicit assignment boundaries.
-- `communication_language` applies to reports, assignments and handbacks between
-  agents, to agent replies to the Human, and to the causal notebook. Keep
-  technical identifiers, file paths, commands and proper nouns verbatim.
 - `agent_mode` records the intended Paseo modeId for agents spawned in this
   repository (for example `bypass`); empty falls back to the spawn bundle's own
   modeId, and the spawner asks only when neither is set rather than letting
   agents inherit the host default.
 
-## Decision boundaries
+## Decision matrix
 
 Lead selects methods, routes bounded work, reconciles technical decisions and accepts
 project artifacts within the assignment. Human decides product/portfolio changes,
@@ -46,13 +44,18 @@ the grant and external effects. Edits, commits, pushes, deploys, host configurat
 and other repositories each follow the applicable authority; profile permissions
 do not supply it. Record additional repository-specific reserved decisions here.
 
+Mark `must_ask` on every boundary where the Human alone decides: product and
+priority, owner-reserved contracts, irreversible or material-cost trade-offs,
+external effects and subjective acceptance. A missing must_ask answer pauses the
+dependent work — it never defaults to Lead.
+
 ## Task classes and gates
 
 | Class | Starting topology and evidence gate |
 |---|---|
 | Tiny / bounded familiar | One Engineer, focused proof and Lead artifact inspection. Lead may implement tiny tightly coupled work if assignment allows. Independent review optional unless material risk appears. |
-| Cross-module / lifecycle / migration / security | Read-only Architect investigates before implementation; one owner per write scope; independent Reviewer on stable candidate before Lead acceptance. |
-| Foundation / costly architecture lock-in | Independent design lenses or sealed council with distinct mandates; Lead records decision/counterargument/reversal conditions; Engineer then independent review. Human decides owner-only trade-offs. |
+| Cross-module / lifecycle / migration / security | Read-only Architect investigates before implementation; one owner per write scope; independent review gate — split-axis seats, never one merged seat — on the stable candidate before Lead acceptance. |
+| Foundation / costly architecture lock-in | Independent design lenses or sealed council with distinct mandates; Lead records decision/counterargument/reversal conditions; Engineer then the independent review gate. Human decides owner-only trade-offs. |
 | Large dependency in a different domain | Separate bounded lane or dependency Lead within authority; explicit contract, handback and integration owner. |
 
 For council, default to two distinct lenses, at most one challenge/response round
@@ -61,6 +64,11 @@ unresolved decision-changing question worth the cost. These are repo defaults,
 not universal role requirements. Escalate foundation uncertainty before tests pin
 an undecided API or representation. In a new domain, establish enough Human framing
 to locate owner boundaries before foundational implementation.
+
+Keep split-seat titles short: name the seat inside taskLabel —
+`Peer — Reviewer — <task> / Spec` and `Peer — Reviewer — <task> / Std`, QC as
+`Peer — Reviewer — <task> / QC` — never an "axis" suffix. Apply the
+convention to new spawns; seats already running keep their titles.
 
 ## Ownership and integration
 
@@ -101,6 +109,15 @@ maintenance, cost limits and
 settlement boundaries. Provider changes for existing work require a new-session
 handoff; an eligible pool option does not itself grant replacement authority.
 Use paseo-slp-onboarding to update tactics and pool while preserving Human choices.
+Every seat joining the team is created through agent-scoped create_agent so the
+host records the parent link, report route and sidebar tree; prompting a
+standalone session can observe work it already owns but cannot carry a new
+delegation.
+One team's seats share the assignment's workspace by default — read-only review
+seats included; a separate workspace needs a declared worktree, repository or
+lane-isolation reason recorded with its resulting paths. Keep the
+team→parent→workspace→worktree owner map and creation receipts in the owner's
+timeline or an authorized notes path so the Human can trace every lane.
 
 ## Monitoring and heartbeat
 
@@ -114,7 +131,7 @@ receipts, bounded lifetime and settlement follow references/monitoring.md.
 Record the creation/deletion receipts and retain pre-existing monitoring outside
 the task.
 
-## Proof and escalation
+## Candidate, verification, review, and acceptance
 
 Identify established repo checks for each requested outcome; record exact commands
 and the behavior they demonstrate in the assignment. Match evidence to the risk:
@@ -122,6 +139,13 @@ integration/failure/cancellation/migration checks or Human visual/playtest/produ
 evaluation where needed. Coverage and mock-only checks cannot define success.
 Use a deterministic snapshot or exact commit with relevant working changes accounted
 for; record external proof separately. Review and verdict bind to the same candidate.
+Acceptance is not assignment close: keep accepted Peers idle after the accept
+sweep so rework keeps its context, and consider a batch archive when the
+assignment that formed the team closes and rework has settled. A Human stop
+still takes effect immediately; idle retention never runs hidden work or
+delays required cleanup.
+
+## Reopen, dependency, and blocked handling
 
 Lead reconciles REOPEN_REQUEST (failed premise) and DEPENDENCY_REQUEST (another owner,
 API or scope). BLOCKED identifies a missing decision/prerequisite/capability. After
@@ -130,7 +154,7 @@ before retrying; any numeric retry threshold is a repository choice. Owner-only
 decisions go through the assigned Supervisor or directly to Human. At handback,
 record actual proof, unresolved findings and settlement of task-owned resources.
 
-## Repo anti-patterns and evolution
+## Repo anti-patterns
 
 `supervisor_notebook` in the frontmatter records `.paseo-slp/notebook.md`
 (scaffolded by init) or `timeline:<agentId>` with a retrieval note the Human can
@@ -141,6 +165,9 @@ retrieval is unavailable and reports the gap.
 For each observed repo-specific pattern, record signal, evidence/counterevidence,
 suspected mechanism, impact, open question, allowed response and outcome. Begin
 without invented repo patterns; use the installed generic catalog when relevant.
+
+## Evolution
+
 Distill repeated failures into tactics, keep authority changes with Human, and record
 version, review date, causal evidence, counterargument and reversal conditions.
 Review after recurring failures or material architecture change, and check whether

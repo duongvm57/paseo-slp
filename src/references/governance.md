@@ -9,6 +9,9 @@ Human holds final owner authority. Use assigned scope rather than a fixed hierar
 Identify assigned projects/workspaces, existing Lead IDs, objective and boundaries,
 evidence access, reporting route and escalation recipient. Observe an existing Lead
 when that is the assignment; create one when delegated orchestration is requested.
+Observing records the Lead ID, observation scope and an explicit report
+recipient — it never adopts or reparents that Lead, and a working report route
+is not evidence of parentage.
 Several projects may have separate Leads under one observing Supervisor. Keep their
 ownership, evidence and verdicts separate. Read a repository protocol when assigned
 to audit/create/update it; otherwise ask Lead for the relevant constraints.

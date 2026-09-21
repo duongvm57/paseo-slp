@@ -1,0 +1,818 @@
+// Coverage for the pure view-state helpers in plugin/client/manager-state.ts
+// (imported directly — no react), plus an esbuild check that the client entry
+// bundles cleanly against host externals with no server-only or node code.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { buildSync } from 'esbuild';
+import {
+  DISABLE_REMOVE_NOTICE,
+  EXCLUSIVE_WINDOW_NOTICE,
+  RESTORATION_NOTICE,
+  RETAINED_RUNTIME_NOTICE,
+  STATUS_POLL_MS,
+  activationKind,
+  activationLabel,
+  applyFamilyChange,
+  applyPatch,
+  buildRoleChoice,
+  conflictLine,
+  conflictLines,
+  createTargetViews,
+  emptyTargetView,
+  errorMessage,
+  familyHint,
+  isDaemonHome,
+  isOperationId,
+  liveAcceptanceLabel,
+  newOperationId,
+  operationPending,
+  operationRows,
+  pollDelayAfterStart,
+  pollDelayAfterStatus,
+  reconcileProblem,
+  recoverPendingStart,
+  familyFromProviderId,
+  thinkingOptionsFor,
+  roleChoiceEquals,
+  routingChoiceDiffers,
+  routingDiverges,
+  startPatch,
+  shortenSha,
+  visibleConflicts,
+  stateHint,
+  statusRows,
+  targetKey,
+} from '../plugin/client/manager-state.ts';
+
+const root = fileURLToPath(new URL('..', import.meta.url));
+
+const SHA = 'a'.repeat(64);
+const SHA_B = 'b'.repeat(64);
+const OP_ID = '11111111-1111-4111-8111-111111111111';
+
+const operation = (over = {}) => ({
+  operationId: OP_ID,
+  kind: 'activate',
+  phase: 'verifying-runtime',
+  outcome: 'pending',
+  startedAt: '2026-09-18T00:00:00Z',
+  updatedAt: '2026-09-18T00:00:05Z',
+  completedAt: null,
+  ...over,
+});
+
+const family = (name, over = {}) => ({
+  family: name,
+  availability: 'available',
+  binaryPath: `/usr/bin/${name}`,
+  observedVersion: '1.0.0',
+  ...over,
+});
+
+const statusView = (over = {}) => ({
+  schemaVersion: 1,
+  target: { hostId: 'h1', daemonHome: '/h' },
+  state: 'ACTIVE',
+  embeddedCandidateSha256: SHA,
+  binding: {
+    bindingSha256: SHA_B,
+    candidateSha256: SHA,
+    payloadSha256: SHA,
+    launchSetSha256: SHA,
+    runtimePath: '/rt/x',
+    nodePath: '/usr/bin/node',
+    baseline: 'fresh',
+  },
+  families: ['codex', 'pi', 'devin', 'claude'].map(name => family(name)),
+  operation: null,
+  conflicts: [],
+  verifiedAt: '2026-09-18T00:00:10Z',
+  retainedRuntimeCount: 2,
+  communicationLanguage: 'Vietnamese',
+  liveAcceptance: 'not-established-by-this-rpc',
+  ...over,
+});
+
+const startResult = (over = {}) => ({
+  schemaVersion: 1,
+  accepted: true,
+  operation: operation(),
+  conflicts: [],
+  pollAfterMs: 1000,
+  ...over,
+});
+
+// --- inputs -----------------------------------------------------------------
+
+test('isDaemonHome enforces the AbsolutePath contract', () => {
+  assert.equal(isDaemonHome('/home/u/.paseo'), true);
+  assert.equal(isDaemonHome('C:\\daemons\\paseo'), true);
+  assert.equal(isDaemonHome('\\\\srv\\share'), true);
+  assert.equal(isDaemonHome('relative/path'), false);
+  assert.equal(isDaemonHome(''), false);
+  assert.equal(isDaemonHome('/bad\0path'), false);
+  assert.equal(isOperationId(OP_ID), true);
+  assert.equal(isOperationId('not-a-uuid'), false);
+  assert.equal(isOperationId(newOperationId()), true);
+});
+
+// --- per-target isolation ---------------------------------------------------
+
+test('view state is isolated per (hostId, daemonHome) pair', () => {
+  const store = createTargetViews();
+  const a = { hostId: 'h1', daemonHome: '/a' };
+  const b = { hostId: 'h1', daemonHome: '/b' };
+  const c = { hostId: 'h2', daemonHome: '/a' };
+  assert.notEqual(targetKey(a), targetKey(b));
+  assert.notEqual(targetKey(a), targetKey(c));
+  const viewA = { ...emptyTargetView(), notice: 'a-only' };
+  store.set(a, viewA);
+  assert.equal(store.get(a).notice, 'a-only');
+  assert.equal(store.get(b), undefined);
+  assert.equal(store.get(c), undefined);
+});
+
+test('applyPatch stores under the request target and repaints only when displayed', () => {
+  const store = createTargetViews();
+  const a = { hostId: 'h1', daemonHome: '/a' };
+  const b = { hostId: 'h1', daemonHome: '/b' };
+  // Patch for A while A is displayed: stored and repainted.
+  const shown = applyPatch(store, a, { notice: 'for-a' }, targetKey(a));
+  assert.equal(shown.repaint, true);
+  assert.equal(shown.view.notice, 'for-a');
+  assert.equal(store.get(a).notice, 'for-a');
+  // A stale RPC for A landing after the administrator moved to B: the store
+  // still updates under A, but nothing repaints and the merge never touches
+  // B's view or mixes B's fields into A's entry.
+  const stale = applyPatch(store, a, { lastError: 'late' }, targetKey(b));
+  assert.equal(stale.repaint, false);
+  assert.equal(stale.view.notice, 'for-a'); // merged onto A's stored view, not the screen's
+  assert.equal(stale.view.lastError, 'late');
+  assert.equal(store.get(a).lastError, 'late');
+  assert.equal(store.get(b), undefined);
+  // And when no target is displayed at all, store still records the result.
+  const none = applyPatch(store, b, { busy: true }, null);
+  assert.equal(none.repaint, false);
+  assert.equal(store.get(b).busy, true);
+});
+
+// --- polling ----------------------------------------------------------------
+
+test('start response drives the first poll; terminal outcomes stop it', () => {
+  assert.equal(pollDelayAfterStart(startResult()), 1000);
+  assert.equal(pollDelayAfterStart(startResult({ pollAfterMs: 250 })), 250);
+  for (const outcome of ['succeeded', 'failed', 'conflict']) {
+    assert.equal(pollDelayAfterStart(startResult({ operation: operation({ outcome }) })), 0);
+  }
+  assert.equal(pollDelayAfterStart(startResult({ accepted: false, operation: null })), 0);
+  assert.equal(operationPending(operation()), true);
+  assert.equal(operationPending(operation({ outcome: 'succeeded' })), false);
+  assert.equal(operationPending(null), false);
+});
+
+test('status responses poll every STATUS_POLL_MS and stop at terminal', () => {
+  assert.equal(STATUS_POLL_MS, 1000);
+  assert.equal(pollDelayAfterStatus(statusView({ operation: operation() })), 1000);
+  for (const outcome of ['succeeded', 'failed', 'conflict']) {
+    assert.equal(pollDelayAfterStatus(statusView({ operation: operation({ outcome }) })), 0);
+  }
+  assert.equal(pollDelayAfterStatus(statusView({ operation: null })), 0);
+});
+
+test('a dropped start response polls, retries only when absent, never hijacks', () => {
+  // Operation absent -> the identical request may be retried.
+  assert.deepEqual(recoverPendingStart(OP_ID, statusView({ operation: null })), { kind: 'retry' });
+  // Same operation pending -> keep polling; the request already landed.
+  assert.deepEqual(recoverPendingStart(OP_ID, statusView({ operation: operation() })), { kind: 'poll' });
+  // Same operation terminal -> settled, no retry needed.
+  const settled = recoverPendingStart(OP_ID, statusView({ operation: operation({ outcome: 'succeeded', completedAt: '2026-09-18T00:00:09Z' }) }));
+  assert.equal(settled.kind, 'settled');
+  assert.equal(settled.operation.outcome, 'succeeded');
+  // A different pending operation -> unresolved; never adopt a foreign op.
+  const foreign = recoverPendingStart(OP_ID, statusView({ operation: operation({ operationId: '22222222-2222-4222-8222-222222222222' }) }));
+  assert.equal(foreign.kind, 'unresolved');
+});
+
+test('startPatch surfaces conflicts whether accepted or not, and they persist across refresh', () => {
+  const conflict = { code: 'OWNERSHIP_MISMATCH', message: 'drifted entry', path: '/providers/x', expectedSha256: null, actualSha256: null };
+  // accepted + conflicts → reportedConflicts populated, no lastError.
+  const accepted = startPatch(startResult({ accepted: true, conflicts: [conflict] }));
+  assert.deepEqual(accepted.reportedConflicts, [conflict]);
+  assert.equal(accepted.lastError, undefined);
+  assert.equal(accepted.busy, false);
+  assert.deepEqual(accepted.pending, { operationId: OP_ID, nextPollMs: 1000 });
+  // not-accepted + conflicts → visible AND flagged as an error.
+  const rejected = startPatch(startResult({ accepted: false, operation: null, conflicts: [conflict] }));
+  assert.deepEqual(rejected.reportedConflicts, [conflict]);
+  assert.match(rejected.lastError, /OWNERSHIP_MISMATCH/);
+  assert.equal(rejected.pending, null);
+  // accepted + no conflicts → clean.
+  const clean = startPatch(startResult());
+  assert.equal(clean.reportedConflicts, null);
+  // terminal operation → no pending poll.
+  assert.equal(startPatch(startResult({ operation: operation({ outcome: 'succeeded' }) })).pending, null);
+  // A follow-up status refresh must not clear a conflict report the operator
+  // has not seen — reportedConflicts survives unrelated patches.
+  const store = createTargetViews();
+  const target = { hostId: 'h1', daemonHome: '/h' };
+  applyPatch(store, target, { reportedConflicts: [conflict] }, targetKey(target));
+  const after = applyPatch(store, target, { status: statusView(), lastError: null }, targetKey(target));
+  assert.deepEqual(after.view.reportedConflicts, [conflict]);
+});
+
+test('visibleConflicts merges start, operation-status, and status conflicts — deduped', () => {
+  const c1 = { code: 'OWNERSHIP_DRIFT', message: 'drifted entry', path: '/p/1', expectedSha256: null, actualSha256: null };
+  const c2 = { code: 'RUNTIME_INTEGRITY', message: 'hash mismatch', path: '/p/2', expectedSha256: null, actualSha256: null };
+  const c3 = { code: 'RAW_LIVE_DIVERGENCE', message: 'live differs', path: null, expectedSha256: null, actualSha256: null };
+  // (a) status(opId) carrying op-level conflicts → rendered.
+  const withOp = { ...emptyTargetView(), status: statusView({ operation: operation({ conflicts: [c1] }) }) };
+  assert.deepEqual(visibleConflicts(withOp), [c1]);
+  // (b) a succeeded op carrying conflicts stays visible — not swallowed.
+  const succeeded = { ...emptyTargetView(), status: statusView({ operation: operation({ outcome: 'succeeded', completedAt: '2026-09-18T00:00:09Z', conflicts: [c1] }) }) };
+  assert.deepEqual(visibleConflicts(succeeded), [c1]);
+  // (c) no conflicts anywhere → clean.
+  const cleanView = { ...emptyTargetView(), status: statusView({ operation: operation() }) };
+  assert.deepEqual(visibleConflicts(cleanView), []);
+  // (d) the same conflict arriving via start AND status dedupes; distinct merge.
+  const both = {
+    ...emptyTargetView(),
+    reportedConflicts: [c1],
+    status: statusView({ operation: operation({ conflicts: [c1, c2] }), conflicts: [c2, c3] }),
+  };
+  assert.deepEqual(visibleConflicts(both), [c1, c2, c3]);
+  // (e) conflicts live on the target's own view — another target's shows none.
+  const other = { ...emptyTargetView(), status: statusView() };
+  assert.deepEqual(visibleConflicts(other), []);
+});
+
+// --- bounded formatting -----------------------------------------------------
+
+test('conflict rendering truncates messages and bounds the visible list', () => {
+  const conflicts = Array.from({ length: 70 }, (_, i) => ({
+    code: 'OWNERSHIP_MISMATCH',
+    message: `conflict ${i} ${'x'.repeat(400)}`,
+    path: `/providers/${i}`,
+    expectedSha256: SHA,
+    actualSha256: SHA_B,
+  }));
+  const wide = conflictLines(conflicts);
+  assert.equal(wide.length, 9); // 8 shown + overflow marker
+  assert.match(wide[8], /…and 62 more conflicts$/);
+  const compact = conflictLines(conflicts, 4);
+  assert.equal(compact.length, 5);
+  assert.match(compact[4], /…and 66 more conflicts$/);
+  // code + truncated message + path/expected/actual detail stays bounded.
+  assert.ok(wide.every(line => line.length < 360));
+  const line = conflictLine(conflicts[0]);
+  assert.match(line, /^OWNERSHIP_MISMATCH: /);
+  assert.match(line, /expected a{12}…/);
+});
+
+test('error payloads are bounded regardless of input size', () => {
+  const huge = 'e'.repeat(5000);
+  assert.ok(errorMessage(new Error(huge)).length <= 501);
+  assert.ok(errorMessage(huge).length <= 501);
+  assert.equal(errorMessage(new Error('short')), 'short');
+});
+
+// --- status rows: compact vs wide -------------------------------------------
+
+test('wide status rows expose binding detail; compact omits it', () => {
+  const view = statusView();
+  const wide = statusRows(view);
+  const compact = statusRows(view, { compact: true });
+  const labels = rows => rows.map(row => row.label);
+  assert.deepEqual(labels(wide), [
+    'State', 'Daemon home (canonical)', 'Embedded candidate', 'Active candidate', 'Binding',
+    'Runtime', 'Node', 'Launch set', 'Payload', 'Baseline',
+    'Retained runtimes', 'Communication language', 'Last verified', 'Live acceptance',
+  ]);
+  assert.deepEqual(labels(compact), [
+    'State', 'Daemon home (canonical)', 'Embedded candidate', 'Active candidate', 'Binding',
+    'Retained runtimes', 'Communication language', 'Last verified', 'Live acceptance',
+  ]);
+  const wideRow = label => wide.find(row => row.label === label).value;
+  const compactRow = label => compact.find(row => row.label === label).value;
+  // §4: the server-canonicalized home is shown in both layouts — an admin who
+  // typed a symlinked path sees the real target before mutating.
+  assert.equal(wideRow('Daemon home (canonical)'), '/h');
+  assert.equal(compactRow('Daemon home (canonical)'), '/h');
+  assert.equal(wideRow('Runtime'), '/rt/x');
+  assert.equal(wideRow('Embedded candidate'), `${SHA.slice(0, 12)}…`);
+  assert.equal(compactRow('Embedded candidate'), `${SHA.slice(0, 8)}…`);
+  assert.equal(wideRow('Retained runtimes'), '2');
+  assert.equal(wideRow('Communication language'), 'Vietnamese');
+  assert.equal(
+    statusRows(statusView({ communicationLanguage: null })).find(r => r.label === 'Communication language').value,
+    'unset (model default)',
+  );
+  assert.equal(wideRow('Last verified'), '2026-09-18T00:00:10Z');
+  assert.equal(wideRow('Live acceptance'), 'not established by this RPC');
+  // §10: render the literal contract value, never a stronger claim.
+  assert.equal(liveAcceptanceLabel('not-established-by-this-rpc'), 'not established by this RPC');
+  assert.equal(statusRows(statusView({ binding: null, verifiedAt: null })).find(r => r.label === 'Active candidate').value, 'none');
+  assert.equal(statusRows(statusView({ verifiedAt: null })).find(r => r.label === 'Last verified').value, 'never');
+});
+
+test('state hints and operation rows reflect pending vs settled', () => {
+  assert.match(stateHint('RECOVERY_REQUIRED'), /Reconcile/);
+  assert.match(stateHint('ACTIVATING'), /in progress/);
+  assert.equal(stateHint('ACTIVE'), '');
+  const rows = operationRows(operation());
+  assert.deepEqual(rows.map(r => r.label), ['Operation', 'Kind', 'Phase', 'Outcome', 'Started', 'Updated']);
+  assert.ok(operationRows(operation({ outcome: 'succeeded', completedAt: '2026-09-18T00:00:09Z' })).some(r => r.label === 'Completed'));
+});
+
+test('family hints distinguish availability states', () => {
+  assert.match(familyHint(family('codex')), /available — \/usr\/bin\/codex \(1\.0\.0\)/);
+  assert.match(familyHint(family('codex'), { compact: true }), /available \(1\.0\.0\)/);
+  assert.ok(!familyHint(family('codex'), { compact: true }).includes('/usr/bin'));
+  assert.equal(familyHint(family('codex', { availability: 'unavailable' })), 'unavailable');
+  assert.equal(familyHint(family('codex', { availability: 'unresolved' })), 'unresolved');
+});
+
+// --- action derivation --------------------------------------------------------
+
+test('activate label distinguishes first bind, re-verify, and rebind', () => {
+  assert.equal(activationKind(null), 'activate');
+  assert.equal(activationLabel(null), 'Activate');
+  const bound = statusView();
+  assert.equal(activationKind(bound), 'reverify');
+  assert.equal(activationLabel(bound), 'Re-verify binding');
+  const diverged = statusView({ binding: { ...bound.binding, candidateSha256: SHA_B } });
+  assert.equal(activationKind(diverged), 'rebind');
+  assert.equal(activationLabel(diverged), 'Rebind');
+});
+
+test('reconcile complete/restore-before require the interrupted operation id', () => {
+  assert.equal(reconcileProblem('inspect', ''), null);
+  assert.match(reconcileProblem('complete', ''), /requires the interrupted operation ID/);
+  assert.match(reconcileProblem('restore-before', 'not-a-uuid'), /requires the interrupted operation ID/);
+  assert.equal(reconcileProblem('complete', OP_ID), null);
+});
+
+test('sha shortening and status helpers handle nulls', () => {
+  assert.equal(shortenSha(null), 'none');
+  assert.equal(shortenSha(SHA), `${SHA.slice(0, 12)}…`);
+  assert.equal(shortenSha('short'), 'short');
+});
+
+test('routingDiverges compares the stored routing against the live binding', () => {
+  const profiles = (supOver = {}, leadOver = {}) => [
+    { id: 'slp-supervisor', provider: 'slp-pi-supervisor', model: 'pi-model', modeId: null, thinkingOptionId: null, featureValues: null, ...supOver },
+    { id: 'slp-lead', provider: 'slp-devin-lead', model: null, modeId: 'bypass', thinkingOptionId: null, featureValues: { auto_accept: true }, ...leadOver },
+  ];
+  const routing = {
+    schemaVersion: 1,
+    supervisor: { family: 'pi', model: 'pi-model' },
+    lead: { family: 'devin', modeId: 'bypass', featureValues: { auto_accept: true } },
+  };
+
+  // No routing → never diverged (legacy generation).
+  assert.equal(routingDiverges(null, profiles()), false);
+  // Matching provider + set fields → no divergence.
+  assert.equal(routingDiverges(routing, profiles()), false);
+  // Feature-value key order is not divergence.
+  assert.equal(routingDiverges(routing, profiles({}, { featureValues: { auto_accept: true } })), false);
+  // A different bound provider, model, or feature value diverges.
+  assert.equal(routingDiverges(routing, profiles({ provider: 'slp-codex-supervisor' })), true);
+  assert.equal(routingDiverges(routing, profiles({ model: 'other-model' })), true);
+  assert.equal(routingDiverges(routing, profiles({}, { featureValues: { auto_accept: false } })), true);
+  assert.equal(routingDiverges(routing, profiles({}, { modeId: 'plan' })), true);
+  // Absent optional routing fields can never diverge — live values stay.
+  const sparse = { schemaVersion: 1, supervisor: { family: 'pi' }, lead: { family: 'devin' } };
+  assert.equal(routingDiverges(sparse, profiles({ model: 'anything' })), false);
+  // No live profiles yet → nothing to compare.
+  assert.equal(routingDiverges(routing, []), false);
+});
+
+test('the Save diff-gate enables only when the form-built choice differs from stored', () => {
+  // buildRoleChoice is THE build path — the gate and saveRouting share it,
+  // so the matrix below exercises exactly what a press would write.
+  const form = (over = {}) => ({
+    family: 'pi',
+    model: 'pi-model',
+    modeId: '',
+    thinkingOptionId: '',
+    features: '',
+    feature: {},
+    ...over,
+  });
+  const stored = { family: 'pi', model: 'pi-model' };
+  const build = (f, s, defs = []) => buildRoleChoice('supervisor', f, s, defs);
+
+  // Bound + form == stored → equal → Save disabled (a save would be a no-op).
+  const equal = build(form(), stored);
+  assert.equal(routingChoiceDiffers(equal, stored), false);
+  assert.equal(roleChoiceEquals(equal.choice, stored), true);
+
+  // Bound + stored=null + live-prefilled form → differs → enabled — the
+  // reported bug: the shown config is not yet persisted.
+  assert.equal(routingChoiceDiffers(build(form(), undefined), undefined), true);
+  assert.equal(roleChoiceEquals(build(form(), undefined).choice, null), false);
+
+  // An edit differs; editing back to the stored values compares equal again.
+  assert.equal(routingChoiceDiffers(build(form({ model: 'other' }), stored), stored), true);
+  assert.equal(routingChoiceDiffers(build(form({ model: ' pi-model ' }), stored), stored), false);
+
+  // Post-save auto-disable: the server returns the parsed routing unchanged,
+  // so storing the built choice makes the next comparison equal.
+  const saved = build(form(), stored).choice;
+  assert.equal(routingChoiceDiffers(build(form(), saved), saved), false);
+
+  // Malformed feature JSON builds an error, which counts as differing — the
+  // press reaches the save path, which surfaces the build error.
+  const bad = build(form({ features: '{nope' }), stored);
+  assert.ok('error' in bad);
+  assert.match(bad.error, /not valid JSON/);
+  assert.equal(routingChoiceDiffers(bad, stored), true);
+
+  // featureValues canonicalization: key order never differs, but {} vs
+  // absent does — an explicit clear is a real change.
+  const withFeatures = { ...stored, featureValues: { a: 1, b: 2 } };
+  assert.equal(
+    routingChoiceDiffers(build(form({ features: '{"b":2,"a":1}' }), withFeatures), withFeatures),
+    false,
+  );
+  assert.equal(routingChoiceDiffers(build(form({ features: '{}' }), stored), stored), true);
+
+  // Declared controls merge over the raw JSON base: an undeclared key is
+  // preserved and an empty control drops the declared key.
+  const toggleDefs = [{ type: 'toggle', id: 'auto_accept', label: 'Auto', value: false }];
+  const merged = build(
+    form({ features: '{"auto_accept":true,"x":1}', feature: { auto_accept: 'false' } }),
+    stored,
+    toggleDefs,
+  );
+  assert.deepEqual(merged.choice.featureValues, { auto_accept: false, x: 1 });
+});
+
+test('thinkingOptionsFor resolves the picked model or falls back to free text', () => {
+  const catalogResult = (models, over = {}) => ({
+    schemaVersion: 1, models, modes: [], features: [], error: null, ...over,
+  });
+  const options = [
+    { id: 'low', label: 'low' },
+    { id: 'medium', label: 'medium', isDefault: true },
+  ];
+  // Declared options + declared default pass through.
+  assert.deepEqual(
+    thinkingOptionsFor(
+      catalogResult([{ id: 'gpt-5.6', label: 'GPT', thinkingOptions: options, defaultThinkingOptionId: 'medium' }]),
+      'gpt-5.6',
+    ),
+    { options, defaultId: 'medium' },
+  );
+  // The model id trims like featureKeyFor's catalog key.
+  assert.deepEqual(
+    thinkingOptionsFor(catalogResult([{ id: 'm1', label: 'M1' }]), '  m1  '),
+    { options: [], defaultId: null },
+  );
+  // A model that declares no options (devin bakes thinking into model
+  // ids) resolves to an honest empty set — not the free-text fallback.
+  assert.deepEqual(
+    thinkingOptionsFor(catalogResult([{ id: 'swe-2-max', label: 'SWE' }]), 'swe-2-max'),
+    { options: [], defaultId: null },
+  );
+  // Unresolvable → null → free text: no catalog, an errored/empty
+  // catalog, no picked model, or a model the catalog doesn't list.
+  assert.equal(thinkingOptionsFor(null, 'm1'), null);
+  assert.equal(thinkingOptionsFor(catalogResult([], { error: 'Catalog query failed' }), 'm1'), null);
+  assert.equal(thinkingOptionsFor(catalogResult([{ id: 'm1', label: 'M1' }]), ''), null);
+  assert.equal(thinkingOptionsFor(catalogResult([{ id: 'm1', label: 'M1' }]), 'other'), null);
+});
+
+test('applyFamilyChange resets dependents against the new family catalog', () => {
+  // Mirrors the live probe: devin has modes but no thinking options, codex
+  // has modes + thinking options, pi declares zero modes.
+  const catalogResult = (over = {}) => ({
+    schemaVersion: 1, models: [], modes: [], features: [], error: null, ...over,
+  });
+  const devinCatalog = catalogResult({
+    models: [{ id: 'swe-2-max', label: 'SWE Max' }, { id: 'swe-2-medium', label: 'SWE Medium' }],
+    modes: [{ id: 'bypass', label: 'Bypass' }, { id: 'plan', label: 'Plan' }],
+  });
+  const codexCatalog = catalogResult({
+    models: [{
+      id: 'gpt-5.6',
+      label: 'GPT',
+      thinkingOptions: [{ id: 'low', label: 'low' }, { id: 'medium', label: 'medium' }],
+      defaultThinkingOptionId: 'medium',
+    }],
+    modes: [{ id: 'auto', label: 'Auto' }, { id: 'full-access', label: 'Full access' }],
+  });
+  const piCatalog = catalogResult({
+    models: [{ id: 'pi-model', label: 'Pi' }],
+    modes: [],
+  });
+  const form = (over = {}) => ({
+    family: 'devin',
+    model: 'swe-2-max',
+    modeId: 'bypass',
+    thinkingOptionId: '',
+    features: '{"auto_accept":true}',
+    feature: { auto_accept: 'true' },
+    ...over,
+  });
+
+  // Foreign picks clear: swe-2-max is not a codex model and bypass is not a
+  // codex mode; feature values always clear (per-provider ids — auto_accept
+  // must not bleed into a codex profile, raw-JSON keys included).
+  const switched = applyFamilyChange(form(), 'codex', codexCatalog);
+  assert.deepEqual(switched, {
+    family: 'codex', model: '', modeId: '', thinkingOptionId: '', features: '', feature: {},
+  });
+
+  // A model the new catalog lists keeps, and its declared thinking option
+  // keeps with it — the defect case: an unlisted thinking id must NOT
+  // survive to drop the row into free text.
+  const kept = applyFamilyChange(
+    form({ model: 'gpt-5.6', modeId: 'auto', thinkingOptionId: 'medium' }),
+    'codex',
+    codexCatalog,
+  );
+  assert.equal(kept.model, 'gpt-5.6');
+  assert.equal(kept.modeId, 'auto');
+  assert.equal(kept.thinkingOptionId, 'medium');
+  assert.equal(kept.features, '');
+  assert.deepEqual(kept.feature, {});
+  const staleThinking = applyFamilyChange(
+    form({ model: 'gpt-5.6', thinkingOptionId: 'ultra' }),
+    'codex',
+    codexCatalog,
+  );
+  assert.equal(staleThinking.model, 'gpt-5.6');
+  assert.equal(staleThinking.thinkingOptionId, '');
+
+  // pi edge: pi declares zero modes — switching to it always clears modeId.
+  const toPi = applyFamilyChange(form({ model: 'pi-model' }), 'pi', piCatalog);
+  assert.equal(toPi.model, 'pi-model');
+  assert.equal(toPi.modeId, '');
+
+  // Catalog not loaded (undefined) or errored (empty lists) → nothing keeps.
+  const notLoaded = applyFamilyChange(form({ model: 'pi-model' }), 'pi', undefined);
+  assert.equal(notLoaded.model, '');
+  const errored = applyFamilyChange(
+    form(),
+    'codex',
+    catalogResult({ error: 'Catalog query failed' }),
+  );
+  assert.equal(errored.model, '');
+  assert.equal(errored.modeId, '');
+
+  // Same-family re-pick keeps what the catalog declares — features still
+  // clear (the rule is unconditional).
+  const same = applyFamilyChange(form(), 'devin', devinCatalog);
+  assert.equal(same.model, 'swe-2-max');
+  assert.equal(same.modeId, 'bypass');
+  assert.equal(same.features, '');
+  assert.deepEqual(same.feature, {});
+});
+
+test('familyFromProviderId parses managed provider ids for form prefill', () => {
+  assert.equal(familyFromProviderId('slp-pi-supervisor'), 'pi');
+  assert.equal(familyFromProviderId('slp-claude-peer'), 'claude');
+  assert.equal(familyFromProviderId('slp-devin-lead'), 'devin');
+  assert.equal(familyFromProviderId('codex'), null);
+  assert.equal(familyFromProviderId('slp-gpt-lead'), null);
+  assert.equal(familyFromProviderId('slp-pi'), null);
+  assert.equal(familyFromProviderId(null), null);
+});
+
+// --- disclosures --------------------------------------------------------------
+
+test('disclosures carry the mandated meanings verbatim', () => {
+  assert.match(EXCLUSIVE_WINDOW_NOTICE, /exclusive administrative edit window/);
+  assert.match(EXCLUSIVE_WINDOW_NOTICE, /no compare-and-swap/);
+  assert.match(RESTORATION_NOTICE, /semantics, not original JSON bytes/);
+  assert.match(RESTORATION_NOTICE, /never patches mcp\.enabled/);
+  assert.match(RETAINED_RUNTIME_NOTICE, /retains every runtime/);
+  assert.match(DISABLE_REMOVE_NOTICE, /not SLP deactivation/);
+  assert.match(DISABLE_REMOVE_NOTICE, /Deactivate before removing/);
+});
+
+// --- client bundle check -------------------------------------------------------
+
+// Built once per test file — both the bundle-shape test and the routing-UI
+// structural test consume the same output.
+const clientBundle = (() => {
+  let text;
+  return () => {
+    if (text === undefined) {
+      const result = buildSync({
+        entryPoints: [join(root, 'plugin/index.client.tsx')],
+        bundle: true,
+        write: false,
+        format: 'esm',
+        platform: 'neutral',
+        logLevel: 'silent',
+        // Mirrors the host compiler's client externals (compiler.js): the plugin
+        // SDK specifiers plus the host-provided UI runtime.
+        external: [
+          '@getpaseo/plugin*',
+          'zod',
+          'react',
+          'react/jsx-runtime',
+          'react-native',
+          '@tanstack/react-query',
+        ],
+      });
+      text = result.outputFiles[0].text;
+    }
+    return text;
+  };
+})();
+
+const occurrences = (haystack, needle) => haystack.split(needle).length - 1;
+
+test('client entry bundles against host externals with no server-only or node code', () => {
+  const bundle = clientBundle();
+  assert.ok(bundle.length > 0);
+  // The surface and shared contracts were actually inlined.
+  assert.ok(bundle.includes('Daemon home'));
+  assert.ok(bundle.includes('exclusiveAdministrativeWindow'));
+  // Host externals stay external.
+  assert.match(bundle, /from\s*"react"/);
+  assert.match(bundle, /from\s*"react-native"/);
+  assert.match(bundle, /from\s*"zod"/);
+  assert.match(bundle, /from\s*"@getpaseo\/plugin\/client"/);
+  // No node builtins or server modules leaked into the client bundle.
+  // ("node:" also appears as an object key in the binding schema — match imports.)
+  assert.ok(!/from\s*["']node:/.test(bundle));
+  assert.ok(!/import\s*["']node:/.test(bundle));
+  assert.ok(!/require\(/.test(bundle));
+  for (const banned of ['fs', 'path', 'os', 'child_process', 'net', 'crypto']) {
+    assert.ok(
+      !new RegExp(`from\\s*["'](?:node:)?${banned}["']`).test(bundle),
+      `client bundle imports ${banned}`,
+    );
+  }
+  assert.ok(!/index\.server|callPluginRpc/.test(bundle));
+});
+
+test('the routing UI is one card with one save and one divergence warning', () => {
+  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  const bundle = clientBundle();
+
+  // One consolidated "Role profiles" card edits the full profile each role
+  // binds; the old per-role card titles and the separate peer card are gone.
+  // The "routing" metaphor is retired from the card title only — the stored
+  // artifact keeps its role-routing file/RPC names.
+  assert.equal(occurrences(source, '"Role profiles"'), 1, 'exactly one Role profiles card title');
+  assert.equal(occurrences(source, '"Role providers"'), 0);
+  assert.equal(occurrences(source, '"Role routing"'), 0);
+  assert.equal(occurrences(source, '"Supervisor routing"'), 0);
+  assert.equal(occurrences(source, '"Lead routing"'), 0);
+  assert.equal(occurrences(source, '"Peer routing"'), 0);
+  assert.ok(bundle.includes('Role profiles'));
+  assert.ok(!bundle.includes('Role routing'));
+
+  // The "Agent profiles" card and its immediate-apply path are gone —
+  // routing is the sole role→provider configurator; the activate RPC's
+  // profiles/initialProfileFamily inputs stay for scripted use.
+  assert.equal(occurrences(source, '"Agent profiles"'), 0, 'Agent profiles card removed');
+  assert.equal(occurrences(bundle, '"Agent profiles"'), 0, 'Agent profiles card removed from bundle');
+  assert.equal(occurrences(source, 'Apply profile changes'), 0);
+  assert.equal(occurrences(bundle, 'Apply profile changes'), 0);
+  assert.equal(occurrences(source, 'runApplyProfiles'), 0);
+  assert.equal(occurrences(source, 'buildProfiles'), 0);
+  assert.equal(occurrences(source, 'pref('), 0, 'profile prefs machinery gone');
+
+  // One Save action — a single button label and a single dispatch site for
+  // the one set-role-routing call that carries both roles. The label is
+  // "Save" — the card context already names what is saved (spec §9).
+  assert.equal(occurrences(source, '"Save routing"'), 0, 'label shortened to Save');
+  assert.equal(occurrences(source, '"Save"'), 1, 'exactly one Save button');
+  assert.equal(occurrences(source, 'callSetRoleRouting('), 1, 'one set-role-routing call site');
+  assert.equal(occurrences(source, 'saveRouting()'), 1, 'one save dispatch');
+
+  // ONE build path: buildRoleChoice runs only inside routingBuilds (two
+  // roles), and saveRouting consumes the same routingBuilds the gate
+  // compares — never a second construction that could drift.
+  assert.equal(occurrences(source, 'buildRoleChoice('), 2, 'one shared build site, two roles');
+  assert.equal(occurrences(source, 'routingBuilds.'), 4, 'gate + save consume the same builds');
+
+  // The divergence warning renders once on the card, not once per role.
+  assert.equal(
+    occurrences(source, 'Stored role profiles differ from the live binding'),
+    1,
+    'exactly one divergence warning',
+  );
+
+  // The routing card carries the full RoleChoice surface: feature controls
+  // keyed on the routing form's picks plus a thinking-option field.
+  assert.ok(
+    source.includes('const family = routingForm[role].family'),
+    'feature defs fetch keys on the routing form',
+  );
+  assert.equal(occurrences(source, 'featureDefsFor(role)'), 1, 'feature defs resolved once per role');
+  assert.equal(
+    occurrences(source, 'featureDefsFor("'),
+    2,
+    'the shared build merges the same defs for both roles',
+  );
+  assert.equal(occurrences(source, '"Feature values (JSON)"'), 1, 'JSON fallback field present');
+  assert.ok(source.includes('featureDefs.error'), 'feature fetch error surfaced in the fallback');
+  assert.ok(source.includes('Retry feature controls'), 'retry affordance for failed feature fetch');
+  assert.ok(source.includes('errorMessage(error)'), 'fetch rejection recorded, not swallowed');
+
+  // Thinking options resolve per picked model from the catalog (§9
+  // corrected finding): a ChipSelect when the model declares options (a
+  // stored unknown value stays visible via the "(stored)" escape), a
+  // static hint when it declares none, and the free-text Field kept only
+  // as the unresolvable fallback. The stale "catalog does not list" copy
+  // is gone.
+  assert.equal(occurrences(source, 'thinkingOptionsFor('), 1, 'thinking resolves via the catalog helper');
+  assert.equal(occurrences(source, 'thinking === null'), 1, 'free text remains only the fallback path');
+  assert.ok(
+    source.includes('Provider default (${thinking.defaultId})'),
+    'auto entry names the declared default',
+  );
+  assert.ok(source.includes('(stored)'), 'unknown stored option stays visible');
+  assert.ok(source.includes('This model declares no thinking options'), 'empty-options hint present');
+  assert.equal(
+    occurrences(source, 'The catalog does not list thinking options'),
+    0,
+    'stale free-text hint removed',
+  );
+  assert.ok(bundle.includes('This model declares no thinking options'), 'empty-options hint bundled');
+  assert.equal(occurrences(source, '"Thinking option"'), 1, 'thinking option field present');
+
+  // The family picker goes through a dedicated handler — not the generic
+  // single-field write — so dependent picks re-validate against the new
+  // family's catalog (applyFamilyChange) instead of keeping stale foreign
+  // values. "family" is out of setRoutingField's union entirely.
+  assert.equal(occurrences(source, 'setRoutingField(role, "family")'), 0, 'family write must reset dependents');
+  assert.equal(occurrences(source, 'onChange={setRoutingFamily(role)}'), 1, 'family picker uses the dedicated handler');
+  assert.equal(occurrences(source, 'applyFamilyChange('), 1, 'one family-change application site');
+
+  // The Activation card no longer exposes the pre-binding configurators;
+  // the routing card is the sole role→provider configurator in the UI
+  // (the RPC inputs stay for scripted use).
+  assert.equal(occurrences(source, 'Preferred provider family'), 0);
+  assert.equal(occurrences(source, 'Initial profiles'), 0);
+  assert.equal(occurrences(bundle, 'Preferred provider family'), 0);
+  assert.equal(occurrences(bundle, 'Initial profiles'), 0);
+});
+
+test('activation is a prerequisite: it renders above Role profiles and gates Save', () => {
+  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+
+  // Human-mandated order (2026-09-19 round-2 polish): activation is the
+  // prerequisite, so its card sits above the Role profiles card it feeds,
+  // and Role profiles sits above Communication language — the apply action
+  // is adjacent to the "re-activation required" warning that names it.
+  const cardOrder = [
+    'title="Daemon home"',
+    'title="Status"',
+    'title="Activation"',
+    'title="Role profiles"',
+    'title="Communication language"',
+    'title="Advanced"',
+    'title="Maintenance"',
+  ];
+  const positions = cardOrder.map(marker => source.indexOf(marker));
+  positions.forEach((position, index) => {
+    assert.notEqual(position, -1, `card title missing: ${cardOrder[index]}`);
+  });
+  assert.ok(
+    positions.every((position, index) => index === 0 || position > positions[index - 1]),
+    `cards out of order: ${positions.join(', ')}`,
+  );
+
+  // Save is disabled while unbound — an unbound save wrote the routing file
+  // silently (no live profile to diverge from → dead-looking button) and the
+  // unbound prefill falls back to the codex default, so a careless
+  // save + activate could bind the wrong family. The hint names the
+  // prerequisite; the block is UI-only (set-role-routing is unchanged).
+  // While bound the gate is a diff-gate: enabled iff the form-built routing
+  // differs from the stored one (routingDirty no longer participates —
+  // prefill does not set it, which was the reported stuck-disabled bug).
+  const saveButton = source.match(
+    /label=\{routingBusy \? "Saving…" : "Save"\}[\s\S]*?disabled=\{([^}]*)\}/,
+  );
+  assert.ok(saveButton, 'Save button not found');
+  assert.match(saveButton[1], /!statusView\?\.binding/, 'Save is not gated on a live binding');
+  assert.match(saveButton[1], /!routingDiffers/, 'Save is not diff-gated against the stored routing');
+  assert.ok(!/routingDirty/.test(saveButton[1]), 'the dirty flag no longer gates Save');
+  assert.ok(
+    source.includes('Activate first — role profiles are saved against a live binding.'),
+    'activate-first hint missing',
+  );
+
+  // The bound case confirms the save until the next edit; the divergence
+  // warning still owns the diverged state, so the line is suppressed there.
+  assert.ok(
+    source.includes('Saved — matches the live binding.'),
+    'bound-case save feedback missing',
+  );
+
+  // The Activation card's pre-bind note references the Role profiles card
+  // by name — the previous "role profiles above" copy went spatially stale
+  // when the cards reordered.
+  assert.equal(occurrences(source, 'role profiles above'), 0, 'stale spatial copy');
+  assert.ok(source.includes('the Role profiles card'), 'activation note must name the card');
+});

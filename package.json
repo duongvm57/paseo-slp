@@ -11,6 +11,21 @@
     "install:slp": "node bin/slp.mjs install --paseo-home --apply --reload",
     "test": "node --test tests/*.test.mjs",
     "e2e": "node e2e/cli.mjs",
-    "check": "node bin/slp.mjs identity"
+    "check": "node bin/slp.mjs identity",
+    "generate:plugin-payload": "node scripts/generate-plugin-payload.mjs",
+    "check:plugin-payload": "node scripts/generate-plugin-payload.mjs --check",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@getpaseo/client": "0.8.0",
+    "@getpaseo/plugin": "0.8.0",
+    "@getpaseo/protocol": "0.8.0",
+    "@types/node": "24.10.1",
+    "@types/react": "19.1.17",
+    "esbuild": "0.25.12",
+    "react": "19.1.9",
+    "react-native": "0.81.5",
+    "typescript": "5.9.3",
+    "zod": "4.6.5"
   }
 }

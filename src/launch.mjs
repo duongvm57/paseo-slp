@@ -1,10 +1,10 @@
 import { join, isAbsolute, basename } from 'node:path';
-import { statSync, accessSync, readFileSync, constants } from 'node:fs';
-import { savedProfileBinding, roleProvider, roles } from './profiles.mjs';
-import { verifyInstall, snapshot, readJson, files, hash } from './package.mjs';
-import { catalogBinding } from './routing.mjs';
-import { bindingCheck, dispositionPattern } from './binding.mjs';
-import { roleInstructions, orchestrates } from './role-bundle.mjs';
+import { statSync, accessSync, constants } from 'node:fs';
+import { savedProfileBinding, roleProvider, providerId, profileId, roles } from './profiles.mjs';
+import { verifyInstall, snapshot, readJson } from './package.mjs';
+import { catalogBinding, readCatalog } from './routing.mjs';
+import { bindingCheck, dispositionPattern, verifyProvider } from './binding.mjs';
+import { roleInstructions, orchestrates, policyLocators, carrierBlock } from './role-bundle.mjs';
 import { spawnKit } from './spawn-kit.mjs';
 
 // Every Binding source normalises to { binding, routing? } right here, so nothing
@@ -44,8 +44,10 @@ export function resolveBinding(role, request, disposition) {
 
 export function prompt(root, role, assignment, binding) {
   bindingCheck(binding);
+  // Stock providers carry role instructions inside the prompt; the carrier is
+  // appended by plan(), so the inline copy opts out to avoid a duplicate block.
   const instructions = binding.provider === roleProvider(role, binding.provider)
-    ? roleInstructions(root, role) : `SLP role=${role}\n`;
+    ? roleInstructions(root, role, process.env, { carrier: false }) : `SLP role=${role}\n`;
   return `${instructions}\nLaunch binding: ${JSON.stringify(binding)}\nAssignment:\n${assignment}\n`;
 }
 
@@ -61,13 +63,26 @@ function handoffPacket(request) {
   }
   if (!Array.isArray(handoff.resources)) throw new Error('Handoff requires a resources list (including remaining Peer IDs and wake owners)');
   const candidate = snapshot(request.repository);
-  return { ...handoff, candidate: { head: candidate.head, sha256: candidate.sha256 } };
+  const nestedIncomplete = [];
+  const collect = (subs, prefix = '') => subs?.forEach(sub => {
+    sub.incomplete?.forEach(path => nestedIncomplete.push(`${prefix}${sub.path}/${path}`));
+    collect(sub.nested, `${prefix}${sub.path}/`);
+  });
+  collect(candidate.nested);
+  return { ...handoff, candidate: { head: candidate.head, sha256: candidate.sha256,
+    ...(candidate.incomplete ? { incomplete: candidate.incomplete } : {}),
+    ...(nestedIncomplete.length ? { nestedIncomplete } : {}) } };
 }
+
+const unprovenScope = packet => [...(packet?.candidate?.incomplete ?? []), ...(packet?.candidate?.nestedIncomplete ?? [])];
 
 const handoffNotice = (role, packet) => `\nProvider handoff evidence:\n${JSON.stringify(packet, null, 2)}\n` +
   'Before taking ownership, verify the current candidate and old-owner settlement against host/repository evidence. ' +
   'Reconcile existing Peer/workspace/resource ownership with the Human or assigned Supervisor. ' +
   'Parentage has not changed; do not claim control of old descendants or create duplicate writers. ' +
+  (unprovenScope(packet).length
+    ? `Snapshot evidence gap: ${unprovenScope(packet).join(', ')} ${unprovenScope(packet).length > 1 ? 'are' : 'is'} unproven submodule scope — do not claim full-candidate coverage for it. `
+    : '') +
   'Acknowledge the transferred assignment. ' +
   (orchestrates(role) ? 'Use references/provider-routing.md for the handoff procedure.\n' : 'Return bounded findings to Lead; do not manage agents.\n');
 
@@ -111,40 +126,51 @@ function assignmentFile(path) {
 // pre-solve interpretation: entries sort by path so the list carries no
 // bundle/load-order hint, and there are no load-bearing markers or digested
 // content (note #33: seat-side re-derivation is the check that catches upstream
-// premise errors). A declared file absent from the installed package is still
-// listed, marked missing, so the seat learns it is not shipped.
+// premise errors). A receipt-declared file absent from disk is still listed,
+// marked missing, so a broken install stays visible to the seat.
 function orientation(root, role, routing) {
-  const declared = ['docs/contract.md', 'src/common.md', `src/roles/${role}.md`,
-    ...(orchestrates(role) ? ['src/delegation.md'] : []),
-    ...files(root, 'src/references')];
   return {
     installedRoot: root,
     catalogSha256: routing?.catalogSha256 ?? null,
-    policyBytes: declared.map(path => {
-      const absolute = join(root, path);
-      let stat;
-      try { stat = statSync(absolute); }
-      catch (error) { if (error.code !== 'ENOENT') throw error; }
-      if (!stat?.isFile()) return { path: absolute, missing: true };
-      const bytes = readFileSync(absolute);
-      return { path: absolute, bytes: bytes.length, sha256: hash(bytes) };
-    }).sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
+    policyBytes: policyLocators(root, role),
   };
 }
 
 // The carrier is the self-contained block that actually reaches the spawned
 // seat: create_agent transmits only create.initialPrompt, so plan-level
-// spawnKit/orientation alone would never arrive. It repeats the same data in
-// compact text — absolute policy locators (missing markers included) and the
-// approximate kit signatures — with no file contents inlined.
-function carrierBlock(kit, manifest) {
-  const locators = manifest.policyBytes.map(entry => entry.missing
-    ? `- ${entry.path} — declared but not shipped in this install`
-    : `- ${entry.path} — ${entry.bytes} bytes, sha256 ${entry.sha256}`);
-  return `\nSpawn kit — role-scoped Paseo MCP signatures (${kit.note}):\n`
-    + kit.tools.map(tool => `- ${tool}`).join('\n')
-    + '\nPolicy locators — absolute paths; size/sha256 are plan-time values for verifying the file found is the one prepare checked:\n'
-    + locators.join('\n') + '\n';
+// spawnKit/orientation alone would never arrive. carrierBlock() (shared with
+// role-bundle) repeats the same data in compact text — absolute policy
+// locators (missing markers included) and the approximate kit signatures —
+// with no file contents inlined. This caption is pinned by contract: the
+// values are plan-time, measured where prepare ran.
+const planLocatorCaption = 'absolute paths; size/sha256 are plan-time values for verifying the file found is the one prepare checked';
+
+// The prompt-side carrier is dropped only when the target is this package's
+// canonical role wrapper for the requested role AND the request's provider
+// inventory observed it live — the wrapper injects the same carrier at
+// session entry, so shipping both duplicates the block in one session. A
+// bare slp-* prefix or caller env proves nothing about the receiving
+// provider; a legacy or unverified target keeps the fallback carrier. When
+// in doubt the block stays: a duplicate is recoverable, a missing carrier
+// is not.
+function targetInjectsCarrier(role, binding, providers) {
+  try {
+    const family = roleProvider(role, binding.provider);
+    if (binding.provider !== providerId(role, family)) return false;
+    verifyProvider(providers, binding.provider, () => family);
+    return true;
+  } catch { return false; }
+}
+
+// The request-shape rules — one validator shared by plan() and launchCheck so
+// the preflight can never drift from what the planner enforces.
+function requestShape(request, role, disposition) {
+  if (!roles.includes(role)) throw new Error('Unknown role');
+  if (disposition != null && (role !== 'peer' || typeof disposition !== 'string' || !dispositionPattern.test(disposition))) throw new Error('Invalid Peer disposition');
+  for (const key of ['workspaceId', 'repository', 'assignment']) {
+    if (typeof request[key] !== 'string' || !request[key].trim()) throw new Error(`Missing ${key}`);
+  }
+  if (!isAbsolute(request.repository)) throw new Error('Absolute repository required');
 }
 
 function agentTitle(role, disposition, request, packet) {
@@ -161,13 +187,8 @@ function agentTitle(role, disposition, request, packet) {
 function plan(root, request, packet) {
   verifyInstall(root);
   const role = request.role ?? 'supervisor';
-  if (!roles.includes(role)) throw new Error('Unknown role');
   const disposition = request.disposition ?? request.route?.disposition;
-  if (disposition != null && (role !== 'peer' || typeof disposition !== 'string' || !dispositionPattern.test(disposition))) throw new Error('Invalid Peer disposition');
-  for (const key of ['workspaceId', 'repository', 'assignment']) {
-    if (typeof request[key] !== 'string' || !request[key].trim()) throw new Error(`Missing ${key}`);
-  }
-  if (!isAbsolute(request.repository)) throw new Error('Absolute repository required');
+  requestShape(request, role, disposition);
   request = mergeInventory(request);
   const file = assignmentFile(request.assignmentFile);
   const { binding, routing } = resolveBinding(role, request, disposition);
@@ -191,7 +212,9 @@ function plan(root, request, packet) {
       notifyOnFinish: true,
       provider: `${binding.provider}/${binding.model}`,
       workspaceId: request.workspaceId,
-      initialPrompt: prompt(root, role, assignment, binding) + carrierBlock(kit, manifest) + (packet ? handoffNotice(role, packet) : ''),
+      initialPrompt: prompt(root, role, assignment, binding)
+        + (targetInjectsCarrier(role, binding, request.providers) ? '' : carrierBlock(kit, manifest.policyBytes, planLocatorCaption))
+        + (packet ? handoffNotice(role, packet) : ''),
       settings: {
         ...(binding.modeId ? { modeId: binding.modeId } : {}),
         ...(binding.thinkingOptionId ? { thinkingOptionId: binding.thinkingOptionId } : {}),
@@ -206,3 +229,168 @@ function plan(root, request, packet) {
 
 export const launchPlan = (root, request) => plan(root, request, null);
 export const handoffPlan = (root, request) => plan(root, request, handoffPacket(request));
+
+// The provider id the request points at, for the live-verification diagnostic
+// when binding resolution already failed — a lookup of the same fields the
+// resolvers read, never a second resolution rule.
+function providerGuess(role, request) {
+  if (typeof request.binding?.provider === 'string') return request.binding.provider;
+  if (role === 'peer' || request.route?.optionId != null) {
+    try {
+      const catalog = readCatalog(request.repository, request.paseoHome);
+      const option = catalog.options.find(item => item.id === request.route?.optionId);
+      return option ? providerId(role, option.provider) : undefined;
+    } catch { return undefined; }
+  }
+  const id = request.route?.profileId ?? profileId(role);
+  return request.profiles?.find(profile => profile.id === id)?.provider;
+}
+
+// prepare --check: the same stages plan() runs, in the same order, with each
+// failure captured into a named check instead of aborting — one report lists
+// every blocker. No second rule set: each step calls the validators the
+// planner itself calls, and the final 'plan' step is the planner verbatim.
+// Provider live verification is its own check so a complete profile is never
+// conflated with a verified provider: 'binding' can fail on a missing profile
+// while 'provider' still reports the target's observed state, or the profile
+// resolves cleanly while 'provider' refuses configured-only inventory.
+export function launchCheck(root, request, { handoff = false } = {}) {
+  if (request === null || typeof request !== 'object' || Array.isArray(request)) {
+    return { ok: false, checks: [{ name: 'request', ok: false, error: 'Request must be a JSON object' }] };
+  }
+  const checks = [];
+  const step = (name, fn) => {
+    try {
+      const detail = fn();
+      checks.push(detail === undefined ? { name, ok: true } : { name, ok: true, detail });
+      return detail;
+    } catch (error) {
+      checks.push({ name, ok: false, error: error.message });
+      return undefined;
+    }
+  };
+  step('install', () => { verifyInstall(root); });
+  let merged = request;
+  step('inventoryFile', () => { merged = mergeInventory(request); });
+  step('assignmentFile', () => { assignmentFile(merged.assignmentFile); });
+  const role = request.role ?? 'supervisor';
+  const disposition = request.disposition ?? request.route?.disposition;
+  step('request', () => requestShape(request, role, disposition));
+  const resolved = step('binding', () => {
+    const result = resolveBinding(role, merged, disposition);
+    roleProvider(role, result.binding.provider); // plan()'s own post-resolution check
+    return result;
+  });
+  const binding = resolved?.binding;
+  const provider = binding?.provider ?? providerGuess(role, merged);
+  // Live verification is mandatory for profile/catalog resolutions (their
+  // resolvers embed verifyProvider); for a pure explicit binding the planner
+  // only uses it to dedup the carrier, so an unverified provider is reported
+  // as advisory, not a failure — the prompt keeps the fallback block.
+  const providerRequired = role === 'peer' || merged.route?.optionId != null || merged.profiles != null;
+  if (provider === undefined) {
+    checks.push(providerRequired
+      ? { name: 'provider', ok: false, error: 'Target provider undetermined — resolve the binding first' }
+      : { name: 'provider', ok: true, detail: 'no provider to verify — prompt carrier retained' });
+  } else {
+    step('provider', () => {
+      try {
+        verifyProvider(merged.providers, provider, id => roleProvider(role, id));
+        return `live-verified: ${provider}`;
+      } catch (error) {
+        if (!providerRequired) return `not live-verified (${error.message}) — prompt carrier retained`;
+        throw error;
+      }
+    });
+  }
+  if (binding) step('settings', () => bindingCheck(binding));
+  else checks.push({ name: 'settings', ok: true, skipped: true, detail: 'skipped — no resolved binding to check' });
+  const warnings = binding && binding.modeId == null ? ['no modeId in binding — spawn inherits caller default'] : [];
+  if (handoff) step('handoff', () => { handoffPacket(request); });
+  step('plan', () => { (handoff ? handoffPlan : launchPlan)(root, request); });
+  return { ok: checks.every(check => check.ok), checks, ...(warnings.length ? { warnings } : {}) };
+}
+
+// prepare --schema: the request contract plan() consumes, emitted so Humans
+// and tools can author request files without a request file, an installed
+// receipt or a daemon. Descriptive only — it validates nothing; --check runs
+// the planner's own validators against a real request.
+export function requestSchema(handoff = false) {
+  const doc = {
+    description: 'Request contract for slp.mjs prepare — descriptive only; --check runs the same stages the planner runs',
+    base: {
+      repository: 'required — absolute path to the work repository',
+      workspaceId: 'required — the existing Paseo workspace ID the seat joins',
+      assignment: 'required — bounded objective: scope, authority, report-recipient agent ID, verification and handback',
+      role: 'supervisor | lead | peer — default supervisor',
+      taskLabel: 'optional — at most 100 chars, single line; defaults to the repository directory name',
+      assignmentFile: 'optional — absolute path to the per-seat full assignment; referenced read-first, never inlined',
+      inventoryFile: 'optional — absolute path to a {providers, profiles} object; inline arrays (even []) take precedence',
+      paseoHome: 'optional — absolute daemon home for the user-scope routing catalog fallback',
+    },
+    bindingSources: {
+      'saved profiles — supervisor/lead': {
+        profiles: 'list_profiles array; the slp-<role> profile must exist with model and settings configured',
+        providers: 'live list_providers array from the same daemon — configured-provenance entries are refused',
+        'route.profileId': 'optional — defaults to slp-<role>',
+      },
+      'catalog routing — required for peer': {
+        'route.optionId': 'an option id from the routes output',
+        'route.catalogSha256': 'the sha256 routes returned — stale or missing fails',
+        'route.disposition': 'peer only — the bounded specialism (engineer, architect, reviewer, scout, …)',
+        providers: 'live list_providers array; the option’s canonical slp-<family>-<role> wrapper must be observed',
+      },
+      'explicit binding — supervisor/lead': {
+        binding: '{ provider, model, modeId?, thinkingOptionId?, features? }; provider is a stock family or the canonical slp-<family>-<role> wrapper',
+      },
+    },
+    notes: [
+      'The planner emits a plan only — it never creates agents or mutates host state.',
+      'prepare --check <request.json> reports each stage failure; prepare <request.json> --emit create prints only the create_agent argument record.',
+      'Peer launches only through the project pool option: an explicit binding is refused, and profiles may accompany the request for discovery but never select the runtime.',
+    ],
+    examples: {
+      supervisor: {
+        repository: '<absolute path to the repository>',
+        workspaceId: '<existing workspace id, e.g. wks-…>',
+        role: 'supervisor',
+        taskLabel: '<short task label>',
+        assignment: '<bounded objective: scope, authority, report-recipient agent ID, verification, handback>',
+        profiles: [{ id: 'slp-supervisor', provider: 'slp-codex-supervisor', model: '<model configured in the profile>', modeId: '<configured mode>', featureValues: {} }],
+        providers: [{ id: 'slp-codex-supervisor', enabled: true, status: 'available', extends: 'codex' }],
+      },
+      lead: {
+        repository: '<absolute path to the repository>',
+        workspaceId: '<existing workspace id, e.g. wks-…>',
+        role: 'lead',
+        taskLabel: '<short task label>',
+        assignment: '<bounded objective: scope, authority, report-recipient agent ID, verification, handback>',
+        profiles: [{ id: 'slp-lead', provider: 'slp-codex-lead', model: '<model configured in the profile>', modeId: '<configured mode>', featureValues: {} }],
+        providers: [{ id: 'slp-codex-lead', enabled: true, status: 'available', extends: 'codex' }],
+      },
+      peer: {
+        repository: '<absolute path to the repository>',
+        workspaceId: '<existing workspace id, e.g. wks-…>',
+        role: 'peer',
+        disposition: '<engineer | architect | reviewer | scout | …>',
+        taskLabel: '<short task label>',
+        assignment: '<bounded objective: scope, authority, report-recipient agent ID, verification, handback>',
+        providers: [{ id: 'slp-<family>-peer', enabled: true, status: 'available', extends: '<family transport>' }],
+        route: { optionId: '<option id from routes output>', catalogSha256: '<sha256 from routes output>' },
+      },
+    },
+  };
+  if (!handoff) return doc;
+  return {
+    ...doc,
+    description: 'Request contract for slp.mjs prepare-handoff — the prepare base fields plus old-owner settlement evidence',
+    handoff: {
+      previousAgentId: 'required — the agent being replaced',
+      reason: 'required — why the seat changes hands',
+      authority: 'required — who authorized the replacement',
+      state: 'required — the old seat’s settlement state',
+      previousOwner: { settled: 'required true', evidence: 'required — settlement receipt text; quota failure or idle alone is insufficient' },
+      resources: 'required array — remaining Peer IDs, wake owners and unsettled descendants',
+    },
+  };
+}

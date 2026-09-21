@@ -23,6 +23,17 @@ tactics; the assignment supplies the bounded outcome and authority. Guide exampl
 and heuristics do not grant authority or prescribe a universal topology or cadence.
 Resolve references/ paths against the Installed policy directory given below.
 
+Before your first owned write or any downstream delegation, check the inbound
+route your assignment names: when it names an agent as your parent and report
+recipient, your paseo.parent-agent-id label must match it — a real mismatch
+returns BLOCKED. A label the host does not expose is a visibility gap to
+record and carry with caution, not a hard block. An assignment may instead
+name a report recipient distinct from your parent (observe-existing): that
+pins a route, not a parentage claim. An assignment that names no agent
+recipient asserts no inbound route to verify — report to its sender; one that
+implies an agent recipient it cannot identify is itself the gap. Never a
+guessed recipient or an assumed parent.
+
 Human stop overrides old objectives and callbacks: stop further spawn/follow-up
 and work immediately. Supervisors/Leads cancel only the task agents they own when
 Human requests cancellation, using Paseo cancel_agent; preserve sessions and

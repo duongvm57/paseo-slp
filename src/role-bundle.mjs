@@ -1,29 +1,162 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { roles } from './profiles.mjs';
+import { readFileSync, lstatSync } from 'node:fs';
+import { isAbsolute, join } from 'node:path';
+import { roles, orchestrates } from './profiles.mjs';
+import { files, hash, readJson } from './package.mjs';
+import { spawnKit } from './spawn-kit.mjs';
 
 // A Role bundle is the exact policy bytes a role receives at session entry.
-// This module owns the load-path contract that docs/guide-coverage.md documents:
+// This module owns the load-path contract that docs/reports/guide-coverage.md documents:
 // which policy files reach which role, and in what order. Both transport
 // adapters and the create_agent planner read it from here.
 
-// Supervisor and Lead orchestrate; Peer owns one bounded outcome and never spawns.
-export const orchestrates = role => role !== 'peer';
+// orchestrates lives in profiles.mjs so spawn-kit.mjs can read it without a
+// role-bundle -> spawn-kit -> role-bundle cycle; re-exported to keep the API.
+export { orchestrates };
 
 export function bundleParts(role) {
   if (!roles.includes(role)) throw new Error('Unknown role');
   return ['common.md', `roles/${role}.md`, ...(orchestrates(role) ? ['delegation.md'] : [])];
 }
 
-export function roleBundle(root, role) {
+// POSIX single-quote escaping for one shell argument.
+const shq = value => "'" + value.replaceAll("'", "'\\''") + "'";
+
+// Managed launch (spec §10): the plugin dispatcher freezes the verified Node,
+// the stable candidate root and the canonical daemon home in the provider env.
+// Helper text must render those absolute paths verbatim — a missing or
+// relative value means the launch env is broken, so fail rather than render
+// commands that would resolve the wrong runtime or home.
+function managedRuntime(env) {
+  if (env.SLP_MANAGED_RUNTIME !== '1') return null;
+  const need = name => {
+    const value = env[name];
+    if (typeof value !== 'string' || !isAbsolute(value)) throw new Error(`Managed runtime requires absolute ${name}`);
+    return value;
+  };
+  return { node: need('SLP_NODE_BIN'), runtimeRoot: need('SLP_RUNTIME_ROOT'), daemonHome: need('SLP_DAEMON_HOME') };
+}
+
+// The plugin-managed communication language: a plain-text file at
+// <daemon-home>/slp-runtime/state/communication-language written by the
+// set-language RPC. Read at render time so a change reaches the next session
+// without re-activation; absent/empty means no language bytes are injected
+// and the seat keeps its model default. Managed sessions only — unmanaged
+// launches have no daemon home to read it from.
+function communicationLanguage(env) {
+  if (env.SLP_MANAGED_RUNTIME !== '1') return '';
+  const home = env.SLP_DAEMON_HOME;
+  if (typeof home !== 'string' || !isAbsolute(home)) return '';
+  let value;
+  try {
+    value = readFileSync(join(home, 'slp-runtime/state/communication-language'), 'utf8').trim();
+  } catch (error) {
+    if (error.code === 'ENOENT') return '';
+    throw error;
+  }
+  if (!value) return '';
+  return `Communication language: ${value} — all text you send to other seats uses it, including prompts and inline assignment fields in create_agent/send_agent_prompt requests, plus team artifacts (reports, assignments, briefs, handbacks, notebook entries); direct replies to the Human mirror the Human's current language; identifiers, paths and commands stay verbatim.\n`;
+}
+
+// The home-dependent helpers, each rendered with the explicit daemon home so
+// no invocation silently resolves a default or foreign home. monitor takes the
+// home inside its request JSON. install/upgrade/uninstall are standalone-
+// install operations — never this managed runtime's lifecycle — but they are
+// listed so an authorized use still names the home explicitly.
+function managedHelpers(cli, home) {
+  const q = shq(home);
+  return `Managed runtime helpers (SLP_MANAGED_RUNTIME=1) — always this verified Node, stable runtime CLI and explicit daemon home:\n` +
+    `  ${cli} routes <repository> --paseo-home ${q}\n` +
+    `  ${cli} inventory --paseo-home ${q}\n` +
+    `  ${cli} agents --paseo-home ${q}\n` +
+    `  ${cli} notebook <repository> --paseo-home ${q}\n` +
+    `  ${cli} monitor <request.json> — the request must carry "paseoHome": ${JSON.stringify(home)}\n` +
+    `  ${cli} install <dir> --paseo-home ${q} — standalone installs only; the plugin owns this runtime's lifecycle\n` +
+    `  upgrade/uninstall take no home flag — the target installation's paseo-binding.json must record ${q}; verify it before running them\n` +
+    `  init/materialize/snapshot/prepare/prepare-handoff/verify are repo-scoped: they take explicit paths and never touch a daemon home.\n`;
+}
+
+// The declared locator set a role's carrier ships: the role's required bundle
+// parts plus every src/references file. On an installed root the set derives
+// from the install receipt's candidate.files — a receipt-declared reference
+// deleted from disk still reports missing instead of vanishing from the list.
+// A source checkout has no receipt and falls back to a live scan. Nothing
+// outside the install unit (for example docs/contract.md, a source-checkout
+// document) is ever declared here. Entries sort by absolute path so the list
+// carries no bundle/load-order hint. launch.mjs orientation() renders the same
+// list into the plan's manifest; tolerance is limited to ENOENT/ENOTDIR on the
+// optional paths — permission errors, corrupt receipts and symlinked policy
+// paths are integrity failures, never absence.
+export function policyLocators(root, role) {
+  const required = bundleParts(role).map(part => `src/${part}`);
+  let receipt = null;
+  try { receipt = readJson(join(root, 'installed.json')); }
+  catch (error) { if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error; }
+  let references;
+  if (receipt !== null) {
+    if (!Array.isArray(receipt.candidate?.files)) throw new Error(`installed.json at ${root} lacks a candidate file list`);
+    references = receipt.candidate.files.map(entry => entry.path).filter(path => path.startsWith('src/references/'));
+  } else {
+    references = [];
+    try { references = files(root, 'src/references'); }
+    catch (error) { if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error; }
+  }
+  return [...required, ...references].map(path => {
+    const absolute = join(root, path);
+    let stat;
+    try { stat = lstatSync(absolute); }
+    catch (error) { if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error; }
+    if (!stat || (!stat.isFile() && !stat.isSymbolicLink())) return { path: absolute, missing: true };
+    if (stat.isSymbolicLink()) throw new Error(`Policy locator path is a symlink: ${absolute}`);
+    const bytes = readFileSync(absolute);
+    return { path: absolute, bytes: bytes.length, sha256: hash(bytes) };
+  }).sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+}
+
+// The carrier is the self-contained block that actually reaches the spawned
+// seat. prepare appends it to create.initialPrompt (the only field
+// create_agent transmits); role-bundle appends it to session-entry
+// instructions so seats launched through a provider profile receive the same
+// payload. Same text both ways — absolute policy locators (missing markers
+// included) and the approximate kit signatures, no file contents inlined. The
+// caption names when the locator values were measured: plan-time wording for
+// the prepare path, load-time wording for session entry.
+export function carrierBlock(kit, locators, caption) {
+  const lines = locators.map(entry => entry.missing
+    ? `- ${entry.path} — declared but missing on disk`
+    : `- ${entry.path} — ${entry.bytes} bytes, sha256 ${entry.sha256}`);
+  return `\nSpawn kit — role-scoped Paseo MCP signatures (${kit.note}):\n`
+    + kit.tools.map(tool => `- ${tool}`).join('\n')
+    + `\nPolicy locators — ${caption}:\n`
+    + lines.join('\n') + '\n';
+}
+
+// Session-entry locators are measured when the bundle renders, not at plan
+// time, so the caption must not borrow the prepare path's wording.
+const sessionLocatorCaption = 'absolute paths; size/sha256 were measured when these role instructions loaded; verify the file found is the one measured';
+
+export function roleBundle(root, role, env = process.env, options = {}) {
   const parts = bundleParts(role);
   const read = path => readFileSync(join(root, 'src', path), 'utf8');
-  const commandPath = "'" + join(root, 'bin/slp.mjs').replaceAll("'", "'\\''") + "'";
+  const managed = managedRuntime(env);
+  // Managed sessions render the verified absolute Node and the stable runtime
+  // CLI; unmanaged sessions keep the historical `node <bin/slp.mjs>` form.
+  const cli = managed
+    ? `${shq(managed.node)} ${shq(join(managed.runtimeRoot, 'bin/slp.mjs'))}`
+    : `node ${shq(join(root, 'bin/slp.mjs'))}`;
+  // Policy text may name only the managed runtime root — never this checkout's
+  // path — so the skill/policy locators derive from policyRoot, not root.
+  const policyRoot = managed ? managed.runtimeRoot : root;
+  const policyDir = join(policyRoot, 'src');
   const instructions = `SLP role=${role}\n` + parts.map(path => read(path) + '\n').join('') +
-    (orchestrates(role) ? `For repo setup/update, use ${join(root, 'skills/paseo-slp-onboarding/SKILL.md')}.\n` : '') +
-    `Installed policy directory: ${join(root, 'src')}\nSnapshot command: node ${commandPath} snapshot <repository>\n` +
-    `Use the current authorized Human or delegated assignment and its Paseo workspace. Notifications and heartbeat prompts do not replace that assignment.\n`;
+    (orchestrates(role) ? `For repo setup/update, use ${join(policyRoot, 'skills/paseo-slp-onboarding/SKILL.md')}.\n` : '') +
+    `Installed policy directory: ${policyDir}\nSnapshot command: ${cli} snapshot <repository>\n` +
+    (managed ? managedHelpers(cli, managed.daemonHome) : '') +
+    communicationLanguage(env) +
+    `Use the current authorized Human or delegated assignment and its Paseo workspace. Notifications and heartbeat prompts do not replace that assignment.\n` +
+    // Callers that append the carrier themselves (launch.mjs prompt()) opt out
+    // here so the block never appears twice in one prompt.
+    (options.carrier === false ? '' : carrierBlock(spawnKit(role), policyLocators(policyRoot, role), sessionLocatorCaption));
   return { role, parts, orchestrates: orchestrates(role), instructions };
 }
 
-export const roleInstructions = (root, role) => roleBundle(root, role).instructions;
+export const roleInstructions = (root, role, env = process.env, options) => roleBundle(root, role, env, options).instructions;
