@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { buildSync } from 'esbuild';
 import {
   DISABLE_REMOVE_NOTICE,
@@ -1057,4 +1057,25 @@ test('featureDefsForSeat is declared before poolBuild calls it eagerly', () => {
   const use = source.indexOf('const poolBuild = buildPeerPool(');
   assert.ok(decl !== -1 && use !== -1, 'featureDefsForSeat/poolBuild must exist');
   assert.ok(decl < use, 'featureDefsForSeat must be declared before poolBuild uses it');
+});
+
+test('the Manager UI renders in English — no Vietnamese strings in plugin/client', () => {
+  // Human override (wave 5): §7.4's Vietnamese action names are source
+  // identifiers only; every user-visible label renders in English.
+  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  for (const label of [
+    'Add a standard seat', 'Already present — open seat',
+    'Create a custom seat from template', 'Create a custom copy',
+    'Token definitions', 'Convert this seat to a custom seat',
+    'How to read', 'Apply the standard set', 'Apply to draft',
+    'Keep current edits', 'Discard changes and Reload',
+  ]) {
+    assert.ok(source.includes(label), `missing EN label: ${label}`);
+  }
+  // No Vietnamese letters remain in any client source — comments included.
+  const viRe = /[\u00C0-\u1EF9]/u;
+  for (const name of readdirSync(join(root, 'plugin/client')).filter(f => /\.tsx?$/.test(f))) {
+    const hit = readFileSync(join(root, 'plugin/client', name), 'utf8').split('\n').find(l => viRe.test(l));
+    assert.equal(hit, undefined, `Vietnamese text remains in ${name}: ${hit}`);
+  }
 });

@@ -429,7 +429,7 @@ test('picker actions: standard lands on the canonical id, custom copy is suggest
   assert.equal(standard.id, 'security-review', 'standard add uses the exact canonical id — never a suffix');
   assert.equal(standard.custom, false);
   assert.equal(standard.enabled, false, 'parked until the Human binds a runtime');
-  // "Tạo ghế riêng từ mẫu": template content on a suggested non-reserved id.
+  // "Create a custom seat from template": template content on a suggested non-reserved id.
   const fromTemplate = customSeatFromArchetype(archetype, ['security-review']);
   assert.equal(fromTemplate.id, 'security-review-2');
   assert.equal(fromTemplate.custom, true);

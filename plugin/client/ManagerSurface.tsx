@@ -577,10 +577,10 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   // card's notice area, not only the shared lastError line (§7.4.D).
   const [poolError, setPoolError] = useState<{ message: string; cas: boolean } | null>(null);
   // Dirty-draft reload confirmation (§7.4.C): Reload on an edited draft shows
-  // "Giữ bản đang sửa" / "Bỏ thay đổi và Reload" before the RPC runs.
+  // "Keep current edits" / "Discard changes and Reload" before the RPC runs.
   const [poolReloadConfirm, setPoolReloadConfirm] = useState(false);
-  // §7.4.D convert-to-custom editor state, and the "Đã chọn bộ chuẩn — chưa
-  // lưu" marker after a conflict is resolved toward the standard set.
+  // §7.4.D convert-to-custom editor state, and the "Standard set selected —
+  // not yet saved" marker after a conflict is resolved toward the standard set.
   const [convertSeatIndex, setConvertSeatIndex] = useState<number | null>(null);
   const [convertId, setConvertId] = useState("");
   const [standardAppliedId, setStandardAppliedId] = useState<string | null>(null);
@@ -746,7 +746,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   // any binding, so it loads with the first status like role routing does.
   // The response carries the sha256 every save sends back as its CAS guard.
   // A read failure is recorded distinctly (§7.4.E): the card shows
-  // "Không đọc được pool", never an empty seat list or an unlocked editor.
+  // "Could not read the pool", never an empty seat list or an unlocked editor.
   const poolLoadedFor = useRef<string | null>(null);
   useEffect(() => {
     if (!target || !key || poolLoadedFor.current === key) return;
@@ -1071,7 +1071,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
 
   // §7.4.C picker actions. A standard add always lands on the exact
   // canonical id — when the seat already exists (Token conflict included)
-  // the entry just opens it ("Đã có — mở ghế"); it never produces a suffix.
+  // the entry just opens it ("Already present — open seat"); it never produces a suffix.
   const addStandardSeat = (archetype: (typeof PEER_SEAT_ARCHETYPES)[number]) => () => {
     const existingIndex = poolForm.seats.findIndex(seat => seat.id.trim() === archetype.id);
     if (existingIndex >= 0) {
@@ -1085,7 +1085,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     setOpenSeat(poolForm.seats.length);
   };
 
-  // "Tạo ghế riêng từ mẫu": the archetype's tokens/notes copied into an
+  // "Create a custom seat from template": the archetype's tokens/notes copied into an
   // editable Custom seat — parked (blank binding, disabled) on a suggested
   // non-reserved id.
   const addCustomFromTemplate = (archetype: (typeof PEER_SEAT_ARCHETYPES)[number]) => () => {
@@ -1096,7 +1096,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     setOpenSeat(poolForm.seats.length);
   };
 
-  // "Tạo bản sao riêng" (§7.4.C): copies the viewed row — binding and
+  // "Create a custom copy" (§7.4.C): copies the viewed row — binding and
   // contents — onto a suggested custom id, disabled. The original seat and
   // its quotaFallback references stay; the copy is not added to fallback.
   const copySeatAsCustom = (index: number) => () => {
@@ -1107,7 +1107,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     setOpenSeat(poolForm.seats.length);
   };
 
-  // §7.4.D "Chuyển ghế này thành ghế riêng": one draft edit renames the seat
+  // §7.4.D "Convert this seat to a custom seat": one draft edit renames the seat
   // and remaps every in-pool quotaFallback reference (order preserved); the
   // Save that lands it keeps the two sides atomic.
   const openConvertToCustom = (index: number) => () => {
@@ -1123,7 +1123,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     setStandardAppliedId(null);
   };
 
-  // "Dùng bộ chuẩn" (§7.4.D): adopt the package token set into the draft —
+  // "Apply the standard set" (§7.4.D): adopt the package token set into the draft —
   // not yet saved; the seat keeps its binding and notes.
   const applyStandardTokens = (index: number) => () => {
     const seatId = poolForm.seats[index]?.id.trim() ?? "";
@@ -1208,7 +1208,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
       update({ lastError: message }, target);
       const cas = message.includes("peer pool changed");
       setPoolError({
-        message: cas ? "Pool đã thay đổi kể từ lần đọc; Reload để lấy bản mới." : message,
+        message: cas ? "The pool changed since the last read; Reload to fetch the new version." : message,
         cas,
       });
     } finally {
@@ -1218,8 +1218,8 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
 
   // Reload discards in-flight edits and refetches — the recovery path after
   // a CAS conflict, and the escape after a malformed-file fix elsewhere. On
-  // a dirty draft the press first offers "Giữ bản đang sửa" /
-  // "Bỏ thay đổi và Reload" (§7.4.C); a failed refetch keeps the draft.
+  // a dirty draft the press first offers "Keep current edits" /
+  // "Discard changes and Reload" (§7.4.C); a failed refetch keeps the draft.
   const reloadPeerPool = async () => {
     if (!target || !key) return;
     const issueKey = key;
@@ -1266,7 +1266,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     setPoolCopied(false);
   };
 
-  // "Thử lại catalog" (§7.4.E): the cached error entry is only overwritten
+  // "Retry catalog" (§7.4.E): the cached error entry is only overwritten
   // by a fresh RPC — a failed retry keeps the last error visible.
   const retryCatalog = async (family: FamilyName) => {
     setCatalogLoadingFor(family);
@@ -1999,11 +1999,11 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
           poolData === null ? (
             poolReadError !== null ? (
               <Text style={[styles.mutedSmall, { color: colors.statusDanger }]}>
-                Không đọc được pool: {poolReadError} — use Reload to retry.
+                Could not read the pool: {poolReadError} — use Reload to retry.
               </Text>
             ) : (
               <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-                Đang đọc pool…
+                Reading the pool…
               </Text>
             )
           ) : poolData.error ? (
@@ -2012,7 +2012,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
             </Text>
           ) : poolData.pool === null ? (
             <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-              Chưa có pool — add seats below, or import a legacy slp-routing.json.
+              No pool yet — add seats below, or import a legacy slp-routing.json.
             </Text>
           ) : null}
           {// §7.4.D card-level conflict notice — pressing an id opens the seat.
@@ -2034,7 +2034,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
             </View>
           ) : null}
           {// §7.4.D card notice — save/reload failures and the CAS conflict
-           // ("Pool đã thay đổi kể từ lần đọc; Reload để lấy bản mới") live
+           // ("The pool changed since the last read; Reload to fetch the new version") live
            // here, with Reload offered right at the message.
           poolError !== null ? (
             <View style={[styles.roleBox, { borderColor: colors.statusDanger }]}>
@@ -2095,7 +2095,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
             // definition lookup at that token.
             const tokenRows = (tokens: string[], mark: (token: string) => "+" | "−" | null = () => null) =>
               tokens.length === 0 ? (
-                <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Không có khai báo</Text>
+                <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>No declarations</Text>
               ) : (
                 tokens.map((token, tokenIndex) => {
                   const marked = mark(token);
@@ -2168,7 +2168,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                         <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Seat ID</Text>
                         <Text style={[styles.mutedSmall, { color: colors.foreground }]}>{seat.id}</Text>
                         <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-                          Reserved standard-seat id — package-managed; "Tạo bản sao riêng" below copies it into an editable Custom seat.
+                          Reserved standard-seat id — package-managed; "Create a custom copy" below copies it into an editable Custom seat.
                         </Text>
                       </View>
                     ) : (
@@ -2231,7 +2231,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                         </Text>
                         <Button
                           colors={colors}
-                          label="Thử lại catalog"
+                          label="Retry catalog"
                           onPress={() => void retryCatalog(seat.family as FamilyName)}
                           disabled={disabled || catalogLoadingFor === seat.family}
                         />
@@ -2418,7 +2418,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                       <View style={styles.field}>
                         <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Thinking option</Text>
                         <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-                          Không áp dụng — model không khai thinking option
+                          Not applicable — the model declares no thinking option
                         </Text>
                       </View>
                     )}
@@ -2429,7 +2429,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                         </Text>
                         <Button
                           colors={colors}
-                          label="Định nghĩa token"
+                          label="Token definitions"
                           onPress={() => {
                             setTokenLookupSeat(tokenLookupSeat === index ? null : index);
                             setTokenLookupToken(null);
@@ -2455,7 +2455,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                             routed or saved until resolved.
                           </Text>
                           <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>
-                            Nội dung đang lưu/được import
+                            Currently stored/imported content
                           </Text>
                           <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>suitableFor</Text>
                           {tokenRows(lineList(seat.suitableFor), token =>
@@ -2464,7 +2464,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                           {tokenRows(lineList(seat.avoidFor), token =>
                             standardTokens.avoidFor.includes(token) ? null : "−")}
                           <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>
-                            Bộ chuẩn của package
+                            The package's standard set
                           </Text>
                           <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>suitableFor</Text>
                           {tokenRows([...standardTokens.suitableFor], token =>
@@ -2475,13 +2475,13 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                           <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
                             <Button
                               colors={colors}
-                              label="Dùng bộ chuẩn"
+                              label="Apply the standard set"
                               onPress={applyStandardTokens(index)}
                               disabled={disabled}
                             />
                             <Button
                               colors={colors}
-                              label="Chuyển ghế này thành ghế riêng"
+                              label="Convert this seat to a custom seat"
                               onPress={openConvertToCustom(index)}
                               disabled={disabled}
                             />
@@ -2504,7 +2504,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                           <Field
                             colors={colors}
                             label="Suitable for"
-                            hint="One per line — task shapes this seat handles. Standard seats use the closed axis:value vocabulary; see Định nghĩa token."
+                            hint="One per line — task shapes this seat handles. Standard seats use the closed axis:value vocabulary; see Token definitions."
                             value={seat.suitableFor}
                             onChangeText={setSeatField(index, "suitableFor")}
                             placeholder={"work:change\ndomain:software"}
@@ -2523,7 +2523,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                           />
                           {// §7.4.F — entered strings are pressable: a
                            // standard token opens its packaged definition, a
-                           // free/legacy string resolves to "Nội dung riêng"
+                           // free/legacy string resolves to "custom content"
                            // instead of borrowing a near-match's meaning.
                           lineList(seat.suitableFor).length + lineList(seat.avoidFor).length > 0 ? (
                             <>
@@ -2539,7 +2539,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                     </View>
                     {standardAppliedId === seat.id.trim() && !conflict ? (
                       <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
-                        Đã chọn bộ chuẩn — chưa lưu
+                        Standard set selected — not yet saved
                       </Text>
                     ) : null}
                     {convertSeatIndex === index ? (
@@ -2548,7 +2548,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                       // carry, and the custom-seat caveat.
                       <View style={[styles.roleBox, { borderColor: colors.border }]}>
                         <Text style={[styles.fieldLabel, { color: colors.foreground }]}>
-                          Chuyển "{seat.id}" thành ghế riêng
+                          Convert "{seat.id}" to a custom seat
                         </Text>
                         <Field
                           colors={colors}
@@ -2581,13 +2581,13 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                               <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
                                 <Button
                                   colors={colors}
-                                  label="Áp dụng vào draft"
+                                  label="Apply to draft"
                                   onPress={applyConvertToCustom}
                                   disabled={disabled || idError !== null}
                                 />
                                 <Button
                                   colors={colors}
-                                  label="Hủy"
+                                  label="Cancel"
                                   onPress={() => { setConvertSeatIndex(null); setConvertId(""); }}
                                 />
                               </View>
@@ -2599,9 +2599,9 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                     {tokenLookupSeat === index ? (
                       // §7.4.F — the package's token lookup: how-to-read, the
                       // four axes as pickers, then the selected token's full
-                      // definition (or "Nội dung riêng" for non-package text).
+                      // definition (or "custom content" for non-package text).
                       <View style={[styles.roleBox, { borderColor: colors.border }]}>
-                        <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Cách đọc</Text>
+                        <Text style={[styles.fieldLabel, { color: colors.foreground }]}>How to read</Text>
                         {HOW_TO_READ.map(line => (
                           <Text key={line} style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
                             {line}
@@ -2646,13 +2646,13 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                             </View>
                           ) : (
                             <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-                              "{tokenLookupToken}" — Nội dung riêng — package chưa định nghĩa token này.
+                              "{tokenLookupToken}" — custom content — the package does not define this token.
                             </Text>
                           );
                         })() : null}
                         <Button
                           colors={colors}
-                          label="Đóng định nghĩa"
+                          label="Close definitions"
                           onPress={() => { setTokenLookupSeat(null); setTokenLookupToken(null); }}
                         />
                       </View>
@@ -2694,7 +2694,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                         <>
                           <Button
                             colors={colors}
-                            label="Tạo bản sao riêng"
+                            label="Create a custom copy"
                             onPress={copySeatAsCustom(index)}
                             disabled={disabled}
                           />
@@ -2705,7 +2705,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                             // section above.
                             <Button
                               colors={colors}
-                              label="Chuyển ghế này thành ghế riêng"
+                              label="Convert this seat to a custom seat"
                               onPress={openConvertToCustom(index)}
                               disabled={disabled}
                             />
@@ -2721,10 +2721,10 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
           {addSeatOpen ? (
             <View style={[styles.roleBox, { borderColor: colors.border }]}>
               <Text style={[styles.fieldLabel, { color: colors.foreground }]}>
-                Thêm ghế chuẩn — parked until you pick a provider and model
+                Add a standard seat — parked until you pick a provider and model
               </Text>
               <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-                "Tạo ghế riêng từ mẫu" copies the template into an editable Custom
+                "Create a custom seat from template" copies the template into an editable Custom
                 seat — custom seats receive no package token updates.
               </Text>
               {PEER_SEAT_ARCHETYPES.map(archetype => {
@@ -2739,14 +2739,14 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                         <Text style={[styles.checkTitle, { color: colors.foreground, flex: 1 }]}>{archetype.id}</Text>
                         <Text style={[styles.mutedSmall, { color: existingIndex >= 0 ? colors.statusWarning : colors.foregroundMuted }]}>
-                          {existingIndex >= 0 ? "Đã có — mở ghế" : "Thêm ghế chuẩn"}
+                          {existingIndex >= 0 ? "Already present — open seat" : "Add a standard seat"}
                         </Text>
                       </View>
                       <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>{archetype.notes}</Text>
                     </Pressable>
                     <Button
                       colors={colors}
-                      label="Tạo ghế riêng từ mẫu"
+                      label="Create a custom seat from template"
                       onPress={addCustomFromTemplate(archetype)}
                       disabled={poolLocked}
                     />
@@ -2852,13 +2852,13 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
               <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
                 <Button
                   colors={colors}
-                  label="Giữ bản đang sửa"
+                  label="Keep current edits"
                   onPress={() => setPoolReloadConfirm(false)}
                 />
                 <Button
                   colors={colors}
                   kind="danger"
-                  label="Bỏ thay đổi và Reload"
+                  label="Discard changes and Reload"
                   onPress={() => { setPoolReloadConfirm(false); void reloadPeerPool(); }}
                 />
               </View>

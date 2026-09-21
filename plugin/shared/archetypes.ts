@@ -1,5 +1,5 @@
 // plugin/shared/archetypes.ts — the 12 standard Peer seat archetypes the
-// Manager's "Thêm ghế chuẩn" picker seeds from. Pure data; token content comes
+// Manager's "Add a standard seat" picker seeds from. Pure data; token content comes
 // from shared/routing-vocabulary.ts, the mirror of the package's canonical
 // vocabulary (src/routing-vocabulary.mjs, docs/spec/routing-criteria.md §6).
 //

@@ -645,14 +645,14 @@ export function suggestCustomSeatId(base: string, existing: readonly string[]): 
   }
 }
 
-/** "Tạo ghế riêng từ mẫu" (§7.4.C): the template's tokens/notes copied into a
+/** "Create a custom seat from template" (§7.4.C): the template's tokens/notes copied into a
  *  new Custom seat — parked (blank binding, disabled) with a suggested
  *  non-reserved id. Custom seats do not receive package token updates. */
 export function customSeatFromArchetype(archetype: SeatArchetype, existing: readonly string[]): PeerSeatForm {
   return { ...peerSeatFromArchetype(archetype), id: suggestCustomSeatId(archetype.id, existing), custom: true };
 }
 
-/** "Tạo bản sao riêng" (§7.4.C): a full copy of the viewed seat — binding and
+/** "Create a custom copy" (§7.4.C): a full copy of the viewed seat — binding and
  *  contents included — under a suggested custom id, disabled. The original
  *  seat and its quotaFallback references stay untouched. */
 export function customSeatCopy(seat: PeerSeatForm, existing: readonly string[]): PeerSeatForm {
@@ -693,7 +693,7 @@ export const formSeatConflict = (seat: PeerSeatForm): SeatTokenConflict | null =
     ? seatTokenConflict({ id: seat.id.trim(), suitableFor: lineList(seat.suitableFor), avoidFor: lineList(seat.avoidFor) })
     : null;
 
-/** "Chuyển ghế này thành ghế riêng" (§7.4.D): rename the seat to a custom id
+/** "Convert this seat to a custom seat" (§7.4.D): rename the seat to a custom id
  *  and remap every in-pool reference (quotaFallback order preserved) in the
  *  same draft edit — one action, one Save, no dangling reference. The caller
  *  validates newId with customSeatIdError first. */
@@ -746,7 +746,7 @@ export function buildPeerSeat(
   if (seatManagement(form) === "package-managed") {
     const conflict = seatTokenConflict({ id, suitableFor: lineList(form.suitableFor), avoidFor: lineList(form.avoidFor) });
     if (conflict) {
-      return { error: `${label}: Token conflict — the draft tokens differ from the package standard set; open the seat and use "Dùng bộ chuẩn" or "Chuyển ghế này thành ghế riêng"` };
+      return { error: `${label}: Token conflict — the draft tokens differ from the package standard set; open the seat and use "Apply the standard set" or "Convert this seat to a custom seat"` };
     }
   }
   if (form.enabled && form.family === "") return { error: `${label}: an enabled seat needs a provider family` };
