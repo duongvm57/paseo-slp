@@ -95,21 +95,24 @@ bản — nằm ở link kiến trúc phía trên.
 Package phân phối dưới dạng Paseo plugin. Cài lên daemon chạy công việc:
 
 ```bash
-# Pin vào một release — plugin nằm trong thư mục plugin/ của repo:
-paseo plugin install duongvm57/paseo-slp:plugin --ref v0.2.0
+# Từ repo — plugin nằm trong thư mục plugin/ của repo:
+paseo plugin install duongvm57/paseo-slp-plugin:plugin
 
-# Bám nhánh main thay vì pin release:
-paseo plugin install duongvm57/paseo-slp:plugin --ref main
+# Pin vào một release cụ thể — ví dụ khi cần cài bản cũ:
+paseo plugin install duongvm57/paseo-slp-plugin:plugin --ref v0.2.0
 
 # Từ checkout local (development):
 paseo plugin install /absolute/path/to/paseo-slp/plugin
 ```
 
-`duongvm57/paseo-slp` là dạng rút gọn của GitHub; tham số source nhận mọi
-thứ `git clone` chấp nhận, kể cả URL HTTPS/SSH đầy đủ hoặc
+`duongvm57/paseo-slp-plugin` là dạng rút gọn của GitHub; tham số source nhận
+mọi thứ `git clone` chấp nhận, kể cả URL HTTPS/SSH đầy đủ hoặc
 `file:///absolute/path/to/paseo-slp` cho clone local. Hậu tố `:plugin` chọn
-thư mục con. `--ref` là tag hoặc commit thì pin checkout; là branch thì bám
-nhánh và dịch chuyển khi `paseo plugin update`. Daemon checkout
+thư mục con. Không có `--ref` thì plugin bám default branch và `paseo plugin
+update` kéo commit mới; muốn pin vào một version cụ thể thì truyền `--ref` với
+một tag trong
+[Releases](https://github.com/duongvm57/paseo-slp-plugin/releases) — tag và
+commit thì pin, branch thì dịch chuyển. Daemon checkout
 ref vào thư mục quản lý `$PASEO_HOME/plugins/paseo-slp/<id>/` rồi chạy bước
 `build` trong manifest (`npm install` trong `plugin/`) trước khi nạp. Kiểm
 tra bằng `paseo plugin ls` — plugin phải đạt trạng thái `running`.
@@ -261,7 +264,7 @@ giữ parentage và dùng finish notifications.
 Skill onboarding dạy agent cách cài đặt bộ pack này cho một repo.
 
 ```bash
-npx skills add duongvm57/paseo-slp --skill paseo-slp-onboarding
+npx skills add duongvm57/paseo-slp-plugin --skill paseo-slp-onboarding
 ```
 
 - `paseo-slp-onboarding` — phỏng vấn bạn về quyết định pool Peer, ngôn ngữ
@@ -275,7 +278,7 @@ Agent chưa có skill? Dán prompt này vào agent bất kỳ:
 
 ```text
 Help me understand and set up Paseo SLP. Read
-https://raw.githubusercontent.com/duongvm57/paseo-slp/main/docs/agent-guide.md
+https://raw.githubusercontent.com/duongvm57/paseo-slp-plugin/main/docs/agent-guide.md
 first, then walk me through it step by step.
 ```
 
@@ -354,8 +357,8 @@ npx skills@latest add /absolute/path/to/paseo-slp \
 ```
 
 Sau khi package được publish lên GitHub, thay đường dẫn local bằng
-URL/repository đã publish, ví dụ `duongvm57/paseo-slp`. Dùng project mode
-hoặc thêm `--global` như trên; truyền `--agent <name>` nếu muốn chỉ cài cho
+URL/repository đã publish, ví dụ `duongvm57/paseo-slp-plugin`. Dùng project
+mode hoặc thêm `--global` như trên; truyền `--agent <name>` nếu muốn chỉ cài cho
 một agent thay vì mọi agent được phát hiện. Với lệnh này, project skill nằm ở
 `.agents/skills`, global skill nằm ở `~/.agents/skills`; Codex và Pi discover
 trực tiếp hai scope đó, còn installer cũng link chúng vào thư mục skill riêng

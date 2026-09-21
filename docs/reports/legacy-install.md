@@ -17,7 +17,7 @@ npm run install:slp
 Without a local clone, straight from GitHub:
 
 ```bash
-npx --yes --package github:duongvm57/paseo-slp -- paseo-slp install --paseo-home --apply --reload
+npx --yes --package github:duongvm57/paseo-slp-plugin -- paseo-slp install --paseo-home --apply --reload
 ```
 
 This installs the Markdown policies and CLI into the platform data

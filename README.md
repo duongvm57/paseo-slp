@@ -98,21 +98,24 @@ The pack ships as a Paseo plugin. Install it on the daemon that runs the
 work:
 
 ```bash
-# Pinned to a release — the plugin lives in the repo's plugin/ subdirectory:
-paseo plugin install duongvm57/paseo-slp:plugin --ref v0.2.0
+# From the repo — the plugin lives in the repo's plugin/ subdirectory:
+paseo plugin install duongvm57/paseo-slp-plugin:plugin
 
-# Tracking main instead of a pinned release:
-paseo plugin install duongvm57/paseo-slp:plugin --ref main
+# Pinned to a specific release — e.g. to install an older version:
+paseo plugin install duongvm57/paseo-slp-plugin:plugin --ref v0.2.0
 
 # From a local checkout (development):
 paseo plugin install /absolute/path/to/paseo-slp/plugin
 ```
 
-`duongvm57/paseo-slp` is GitHub shorthand; the source argument takes anything
-`git clone` accepts, including a full HTTPS/SSH URL or
+`duongvm57/paseo-slp-plugin` is GitHub shorthand; the source argument takes
+anything `git clone` accepts, including a full HTTPS/SSH URL or
 `file:///absolute/path/to/paseo-slp` for a local clone. The `:plugin` suffix
-selects the subdirectory. A tag or commit `--ref` pins the checkout; a branch
-ref tracks and moves on `paseo plugin update`. The daemon checks out
+selects the subdirectory. Without `--ref` the plugin follows the default
+branch and `paseo plugin update` pulls newer commits; pass `--ref` with a tag
+from [Releases](https://github.com/duongvm57/paseo-slp-plugin/releases) to
+pin a specific version instead — tags and commits pin, branches move. The
+daemon checks out
 the ref into a managed directory under `$PASEO_HOME/plugins/paseo-slp/<id>/`
 and runs the manifest's `build` step (`npm install` inside `plugin/`) before
 loading it. Verify with `paseo plugin ls` — the plugin should reach
@@ -273,7 +276,7 @@ finish notifications.
 The onboarding skill teaches your agent how to set up this pack for a repo.
 
 ```bash
-npx skills add duongvm57/paseo-slp --skill paseo-slp-onboarding
+npx skills add duongvm57/paseo-slp-plugin --skill paseo-slp-onboarding
 ```
 
 - `paseo-slp-onboarding` — interviews you for the Peer pool decision
@@ -288,7 +291,7 @@ No skills installed? Paste this into any agent:
 
 ```text
 Help me understand and set up Paseo SLP. Read
-https://raw.githubusercontent.com/duongvm57/paseo-slp/main/docs/agent-guide.md
+https://raw.githubusercontent.com/duongvm57/paseo-slp-plugin/main/docs/agent-guide.md
 first, then walk me through it step by step.
 ```
 
@@ -368,8 +371,8 @@ npx skills@latest add /absolute/path/to/paseo-slp \
 ```
 
 Once the package is published to GitHub, replace the local path with the
-published URL/repository, e.g. `duongvm57/paseo-slp`. Use project mode or add
-`--global` as above; pass `--agent <name>` to target one agent instead of
+published URL/repository, e.g. `duongvm57/paseo-slp-plugin`. Use project
+mode or add `--global` as above; pass `--agent <name>` to target one agent instead of
 every detected one. Project skills land in `.agents/skills`, global skills
 in `~/.agents/skills`; Codex and Pi discover both scopes directly, and the
 installer also links them into each agent's own skills directory (e.g.
