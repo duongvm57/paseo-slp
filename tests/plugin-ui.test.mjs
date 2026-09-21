@@ -37,6 +37,8 @@ import {
   peerPoolEquals,
   peerPoolForm,
   peerSeatFromArchetype,
+  customSeatCopy,
+  samePeerPoolForm,
   pollDelayAfterStart,
   pollDelayAfterStatus,
   reconcileProblem,
@@ -1084,5 +1086,170 @@ test('the Manager UI renders in English — no Vietnamese strings in plugin/clie
   for (const name of readdirSync(join(root, 'plugin/client')).filter(f => /\.tsx?$/.test(f))) {
     const hit = readFileSync(join(root, 'plugin/client', name), 'utf8').split('\n').find(l => viRe.test(l));
     assert.equal(hit, undefined, `Vietnamese text remains in ${name}: ${hit}`);
+  }
+});
+
+// --- wave 7: Draft-clarity design application --------------------------------
+
+test('the Peer pool card reports draft state and seat counts', () => {
+  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  const peerCard = source.slice(
+    source.indexOf('title="Peer pool"'),
+    source.indexOf('title="Communication language"'),
+  );
+  // Header badge: amber draft, else the saved/absent state (mockup dirty badge).
+  for (const label of ['Unsaved changes', 'Saved pool', 'No saved pool']) {
+    assert.ok(peerCard.includes(`label="${label}"`), `missing badge label: ${label}`);
+  }
+  // Summary line: saved/absent + N seats in draft, with enabled/disabled and
+  // the OVERLAPPING conflicted count.
+  assert.ok(peerCard.includes(' in draft`'), 'summary missing the draft seat count');
+  assert.ok(peerCard.includes('enabled'), 'summary missing the enabled count');
+  assert.ok(peerCard.includes('disabled'), 'summary missing the disabled count');
+  assert.ok(peerCard.includes('conflicted'), 'summary missing the conflicted count');
+});
+
+test('seat rows state the parked lifecycle explicitly', () => {
+  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  for (const state of ['Enabled in draft', 'Disabled · configured', 'Disabled · needs provider/model']) {
+    assert.ok(source.includes(`"${state}"`), `missing seat state: ${state}`);
+  }
+  // Enabled is a deliberate switch — the flow hint names the path and no
+  // binding infers enablement.
+  assert.ok(source.includes('Choose provider/model → enable → Save pool'), 'parked flow hint missing');
+});
+
+test('the standard-seat picker filters and closes at the top', () => {
+  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  const peerCard = source.slice(
+    source.indexOf('title="Peer pool"'),
+    source.indexOf('title="Communication language"'),
+  );
+  assert.ok(peerCard.includes('Filter by name or description'), 'picker filter missing');
+  assert.ok(peerCard.includes('pickerQuery'), 'filter state missing');
+  assert.ok(peerCard.includes('No templates match this filter'), 'empty-filter state missing');
+  // SeatTemplateRow is module-level — its labels live outside the card slice.
+  assert.ok(source.includes('Notes & custom option'), 'per-row notes expander missing');
+  assert.ok(source.includes('Already present — open seat'), 'duplicate-add affordance missing');
+  // Close sits in the picker header — before the archetype list renders.
+  const closeIdx = peerCard.indexOf('label="Close"', peerCard.indexOf('Standard seat picker'));
+  const listIdx = peerCard.indexOf('SeatTemplateRow', peerCard.indexOf('Standard seat picker'));
+  assert.ok(closeIdx !== -1 && listIdx !== -1 && closeIdx < listIdx, 'picker Close must precede the rows');
+  // All twelve canonical archetypes still come from the package list.
+  assert.ok(peerCard.includes('PEER_SEAT_ARCHETYPES'), 'archetype list feeds the picker');
+});
+
+test('CAS confirmation renders at the control that triggered it', () => {
+  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  assert.ok(source.includes('"notice" | "footer" | null'), 'origin-typed confirm state missing');
+  assert.ok(source.includes('requestReload("notice")'), 'notice-origin reload missing');
+  assert.ok(source.includes('requestReload("footer")'), 'footer-origin reload missing');
+  assert.ok(source.includes('poolReloadConfirm === "notice"'), 'notice-local confirm missing');
+  assert.ok(source.includes('poolReloadConfirm === "footer"'), 'footer-local confirm missing');
+  // "Keep current edits" is focused by default via keepEditsRef.
+  assert.ok(source.includes('keepEditsRef'), 'keep-edits focus target missing');
+  assert.ok(source.includes('Keep current edits'), 'keep-edits action missing');
+  assert.ok(source.includes('Discard changes and Reload'), 'discard action missing');
+  // "Open seat" on the conflict notice scrolls/focuses the editor.
+  assert.ok(source.includes('seatRowRefs'), 'seat-row scroll target missing');
+});
+
+test('saving and reloading are separate pending states with their own labels', () => {
+  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  assert.ok(source.includes('setPoolSaving(true)'), 'save busy flag missing');
+  assert.ok(source.includes('setPoolReloading(true)'), 'reload busy flag missing');
+  assert.ok(source.includes('poolSaving ? "Saving…"'), 'Saving… label missing');
+  assert.ok(source.includes('poolReloading ? "Reloading…"'), 'Reloading… label missing');
+});
+
+test('the Jev card splits saved settings from the draft and invalidates tests', () => {
+  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  const jevCard = source.slice(source.indexOf('title="Jev"'), source.indexOf('</Card>', source.indexOf('title="Jev"')));
+  // Saved-provider strip names the SAVED provider, not the draft pick.
+  assert.ok(jevCard.includes('Saved provider'), 'saved-provider strip missing');
+  assert.ok(jevCard.includes('jevView.provider'), 'saved strip reads the stored provider');
+  assert.ok(jevCard.includes('Unsaved settings'), 'unsaved-settings header missing');
+  assert.ok(jevCard.includes('Apply before key actions'), 'dirty-draft key lock missing');
+  // Key/test actions name the saved provider.
+  for (const label of ['Save ${', 'Remove ${', 'Test ${']) {
+    assert.ok(jevCard.includes(`\`${label}`), `named key action missing: ${label}`);
+  }
+  assert.ok(jevCard.includes('JEV_KIND_LABEL[jevView.provider?.kind ?? jevKind]'), 'key actions must name the saved provider');
+  // Dirty settings lock the key/test actions.
+  assert.ok(jevCard.includes('jevKeyBusy || jevDirty'), 'save-key lock missing');
+  assert.ok(jevCard.includes('jevTestBusy || jevDirty'), 'test lock missing');
+  // Any settings edit (kind/model/baseUrl/toggles) invalidates the prior
+  // test result — five call sites — and a pending key input does too.
+  assert.equal(occurrences(jevCard, 'markJevEdited()'), 5, 'every settings edit must invalidate the test');
+  assert.ok(jevCard.includes('setJevKeyInput(text); setJevTest(null)'), 'pending key must invalidate the test');
+  assert.ok(jevCard.includes('Unsaved key — save it before testing'), 'pending-key marker missing');
+  // Per-field errors land at their own fields.
+  assert.ok(jevCard.includes('jevModelError'), 'model field error missing');
+  assert.ok(jevCard.includes('jevUrlError'), 'baseUrl field error missing');
+  // Load states are distinct: loading, error+Retry, loaded.
+  assert.ok(jevCard.includes('Loading Jev settings…'), 'loading branch missing');
+  assert.ok(jevCard.includes('Could not load Jev settings'), 'error branch missing');
+  assert.ok(jevCard.includes('loadJev(target)'), 'Retry path missing');
+  // Endpoint preview follows provider-specific rules.
+  assert.ok(jevCard.includes('/v1/systemone'), 'typesafe endpoint preview missing');
+  assert.ok(jevCard.includes('/api/alpha/decisions'), 'openrouter endpoint preview missing');
+});
+
+test('token lookup offers underlined mono buttons that focus the definition', () => {
+  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  assert.ok(source.includes('textDecorationLine: "underline"'), 'token underline style missing');
+  assert.ok(source.includes('accessibilityLabel={`Define ${token}`}'), 'Define X labels missing');
+  assert.ok(source.includes('"Show token definitions"'), 'Show label missing');
+  assert.ok(source.includes('"Hide token definitions"'), 'Hide label missing');
+  // Custom strings are lookupable — the definition states the package has none.
+  assert.ok(
+    source.includes('Custom content — the package does not define this token'),
+    'custom-token definition text missing',
+  );
+  // Conflict marks cover BOTH lists plus the net summary.
+  assert.ok(source.includes('Added:'), 'added-marks summary missing');
+  assert.ok(source.includes('Removed:'), 'removed-marks summary missing');
+  // Selecting a token scrolls/focuses the exact definition.
+  assert.ok(source.includes('definitionRefs'), 'definition scroll target missing');
+  // No token-definition drawer was introduced.
+  assert.ok(!/drawer/i.test(source), 'a token drawer must not be introduced');
+});
+
+test('seat rows key on the stable draft uid, not the editable id', () => {
+  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  assert.ok(source.includes('key={seat.uid}'), 'seat rows must key on the draft uid');
+  assert.ok(!source.includes('key={`${index}:${seat.id}`}'), 'index:id key would remount on rename');
+});
+
+test('draft uids are fresh per seat, ignored by form equality, and copied fresh', () => {
+  const form = peerPoolForm({
+    version: 1, policy: 'p', quotaFallback: { enabled: false, optionId: null },
+    options: [{ id: 'a', provider: 'codex', roles: ['peer'], model: 'm', enabled: true, availability: 'ready', modeId: '', thinkingOptionId: '', features: {}, suitableFor: ['w'], avoidFor: [], notes: 'n' }],
+  });
+  assert.equal(form.seats.length, 1);
+  assert.equal(typeof form.seats[0].uid, 'string');
+  assert.ok(form.seats[0].uid.length > 0, 'uid must be non-empty');
+  // A fresh form over the same pool differs only in uid — never dirty-looking.
+  const again = peerPoolForm({
+    version: 1, policy: 'p', quotaFallback: { enabled: false, optionId: null },
+    options: [{ id: 'a', provider: 'codex', roles: ['peer'], model: 'm', enabled: true, availability: 'ready', modeId: '', thinkingOptionId: '', features: {}, suitableFor: ['w'], avoidFor: [], notes: 'n' }],
+  });
+  assert.notEqual(form.seats[0].uid, again.seats[0].uid, 'uids must be unique per draft row');
+  assert.ok(samePeerPoolForm(form, again), 'uid difference must not mark the form changed');
+  // A custom copy is a distinct draft row — not a second handle on one row.
+  const copy = customSeatCopy(form.seats[0], []);
+  assert.notEqual(copy.uid, form.seats[0].uid, 'custom copy needs a fresh uid');
+});
+
+test('custom controls carry RN accessibility props and stale mockup strings stay out', () => {
+  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  for (const prop of ['accessibilityRole=', 'accessibilityLabel=', 'accessibilityState=', 'accessibilityLiveRegion=']) {
+    assert.ok(source.includes(prop), `missing a11y prop: ${prop}`);
+  }
+  assert.ok(source.includes('accessibilityRole="switch"'), 'seat enable switch role missing');
+  assert.ok(source.includes('accessibilityRole="checkbox"'), 'check-row role missing');
+  // Stale mockup vocabulary must not leak in (pre-wave-6 fallback + chrome).
+  for (const stale of ['Allowed preference', 'Try B → A', 'optionIds', 'Design notes']) {
+    assert.ok(!source.includes(stale), `stale mockup string present: ${stale}`);
   }
 });

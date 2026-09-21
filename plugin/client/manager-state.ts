@@ -535,8 +535,12 @@ export const PEER_SEAT_ID = /^[a-z][a-z0-9-]*$/;
  *  auto-converts a Custom row mid-edit). It is never written to the pool.
  *  `storedId` is the id the row carried when the pool snapshot loaded — a
  *  rename/convert changes `id` but keeps `storedId`, so buildPeerSeat still
- *  spreads the stored option's passthrough fields the form does not model. */
+ *  spreads the stored option's passthrough fields the form does not model.
+ *  `uid` is draft-only identity: it keys the rendered row so editing `id`
+ *  never remounts the editor (the row is the same draft seat), and it is
+ *  never written to the pool or compared for dirt. */
 export interface PeerSeatForm {
+  uid: string;
   id: string;
   storedId?: string;
   family: FamilyName | "";
@@ -565,6 +569,12 @@ export interface PeerPoolForm {
 export const lineList = (text: string): string[] =>
   text.split("\n").map(line => line.trim()).filter(line => line !== "");
 
+/** Draft-row identity — a module counter so every seat row gets a stable,
+ *  collision-free uid regardless of how its `id` is edited (spec §7.4 row
+ *  stability: typing a custom id must not remount the row). */
+let seatUidCounter = 0;
+const newSeatUid = (): string => `draft-seat-${++seatUidCounter}`;
+
 /** Stored option → form seat (the Load path). Stored `features` seed both
  *  the raw-JSON base and the per-definition controls — same prefill the role
  *  form gives stored featureValues. */
@@ -574,6 +584,7 @@ export function peerSeatForm(option: PeerPoolOptionValue): PeerSeatForm {
     feature[featureId] = String(value ?? "");
   }
   return {
+    uid: newSeatUid(),
     id: option.id,
     family: option.provider === "" ? "" : option.provider,
     model: option.model,
@@ -619,6 +630,7 @@ export function peerPoolForm(pool: PeerPoolValue | null): PeerPoolForm {
  *  is the canonical reserved name — a standard seat is never suffixed. */
 export function peerSeatFromArchetype(archetype: SeatArchetype): PeerSeatForm {
   return {
+    uid: newSeatUid(),
     id: archetype.id,
     family: "",
     model: "",
@@ -657,7 +669,9 @@ export function customSeatFromArchetype(archetype: SeatArchetype, existing: read
  *  contents included — under a suggested custom id, disabled. The original
  *  seat and its quotaFallback references stay untouched. */
 export function customSeatCopy(seat: PeerSeatForm, existing: readonly string[]): PeerSeatForm {
-  return { ...seat, id: suggestCustomSeatId(seat.id.trim() || "seat", existing), enabled: false, custom: true };
+  // Fresh uid — the copy is a distinct draft row, not a second handle on the
+  // original's identity.
+  return { ...seat, uid: newSeatUid(), id: suggestCustomSeatId(seat.id.trim() || "seat", existing), enabled: false, custom: true };
 }
 
 /** Custom-id validation for the seat id input and the convert-to-custom
@@ -867,9 +881,15 @@ export const peerPoolDiffers = (
 ): boolean => "error" in build || !peerPoolEquals(build.pool, stored);
 
 /** Structural form equality for the prefill effect — the same re-render
- *  guard sameRoleForm gives the role form. */
+ *  guard sameRoleForm gives the role form. `uid` is draft identity, not
+ *  content: a snapshot-prefill that differs only in fresh uids keeps the
+ *  current form so rendered rows keep their keys. */
+const withoutSeatUids = (form: PeerPoolForm): unknown => ({
+  ...form,
+  seats: form.seats.map(({ uid: _uid, ...seat }) => seat),
+});
 export const samePeerPoolForm = (a: PeerPoolForm, b: PeerPoolForm): boolean =>
-  JSON.stringify(a) === JSON.stringify(b);
+  JSON.stringify(withoutSeatUids(a)) === JSON.stringify(withoutSeatUids(b));
 
 // The view patch a start response produces. Conflicts are surfaced whenever
 // they are present — accepted or not (an accepted reconcile inspect can still

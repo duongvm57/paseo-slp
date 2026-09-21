@@ -21,7 +21,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { activate, catalog, deactivate, reconcile, status, localTarget, setLanguage, getRoleRouting, setRoleRouting, getJev, setJev, setJevKey, testJev, getPeerPool, setPeerPool } from "../shared/contracts.ts";
+import { activate, catalog, deactivate, reconcile, status, localTarget, setLanguage, getRoleRouting, setRoleRouting, getJev, setJev, setJevKey, testJev, getPeerPool, setPeerPool, JevProvider } from "../shared/contracts.ts";
 import { FAMILY_IDS, FAMILY_LABEL, FAMILY_PICKER_ORDER } from "../shared/families.ts";
 import { PEER_SEAT_ARCHETYPES } from "../shared/archetypes.ts";
 import {
@@ -32,6 +32,7 @@ import {
   tokenDefinition,
 } from "../shared/routing-vocabulary.ts";
 import type { CatalogOptionValue, CatalogResult, FamilyName, GetPeerPoolResult, JevViewValue, PeerPoolValue, RoleRoutingValue, StartResult, StatusResult, TargetValue } from "../shared/contracts.ts";
+import type { SeatArchetype } from "../shared/archetypes.ts";
 import {
   DISABLE_REMOVE_NOTICE,
   EXCLUSIVE_WINDOW_NOTICE,
@@ -94,17 +95,43 @@ type Colors = PluginTheme["colors"];
 // than the settings-form kit so the flow can read like a wizard.
 // ---------------------------------------------------------------------------
 
-function Card({ colors, title, subtitle, children }: {
+function Card({ colors, title, subtitle, trailing, children }: {
   colors: Colors;
   title?: string;
   subtitle?: string;
+  /** Header-side slot — the state badge a card reports (mockup card-head). */
+  trailing?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <View style={[styles.card, { backgroundColor: colors.surface1, borderColor: colors.border }]}>
-      {title ? <Text style={[styles.cardTitle, { color: colors.foreground }]}>{title}</Text> : null}
+      {title || trailing ? (
+        <View style={styles.cardHeadRow}>
+          {title ? <Text style={[styles.cardTitle, { color: colors.foreground, flex: 1 }]}>{title}</Text> : null}
+          {trailing}
+        </View>
+      ) : null}
       {subtitle ? <Text style={[styles.muted, { color: colors.foregroundMuted }]}>{subtitle}</Text> : null}
       {children}
+    </View>
+  );
+}
+
+/** Compact status badge — the mockup's .badge tones mapped onto the host's
+ *  semantic color slots (no hardcoded palette). */
+function Badge({ colors, label, tone = "neutral" }: {
+  colors: Colors;
+  label: string;
+  tone?: "draft" | "good" | "managed" | "bad" | "neutral";
+}) {
+  const color = tone === "draft" ? colors.statusWarning
+    : tone === "good" ? colors.statusSuccess
+    : tone === "managed" ? colors.accent
+    : tone === "bad" ? colors.statusDanger
+    : colors.foregroundMuted;
+  return (
+    <View style={[styles.badge, { borderColor: color, backgroundColor: colors.surface2 }]}>
+      <Text style={[styles.badgeLabel, { color }]}>{label}</Text>
     </View>
   );
 }
@@ -130,6 +157,9 @@ function Button({ colors, label, onPress, disabled, kind = "ghost" }: {
     <Pressable
       onPress={onPress}
       disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: disabled === true }}
       style={({ pressed }) => [
         styles.button,
         base,
@@ -154,6 +184,8 @@ function CheckRow({ colors, checked, onToggle, title, hint, disabled }: {
     <Pressable
       onPress={() => onToggle(!checked)}
       disabled={disabled}
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked, disabled: disabled === true }}
       style={({ pressed }) => [styles.checkRow, disabled && { opacity: 0.45 }, pressed && !disabled && { opacity: 0.75 }]}
     >
       <View style={[
@@ -221,6 +253,8 @@ function ChipSelect<T extends string>({ colors, value, options, onChange, disabl
             key={option.value}
             onPress={() => onChange(option.value)}
             disabled={disabled}
+            accessibilityRole="button"
+            accessibilityState={{ selected: active, disabled: disabled === true }}
             style={({ pressed }) => [
               styles.chip,
               { borderColor: active ? colors.accent : colors.border },
@@ -263,6 +297,8 @@ function Field({ colors, label, hint, value, onChangeText, placeholder, disabled
         autoCorrect={false}
         secureTextEntry={secure === true}
         multiline={multiline === true}
+        accessibilityLabel={label}
+        accessibilityState={{ disabled: disabled === true }}
         style={[
           styles.input,
           { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.surface0 },
@@ -304,7 +340,13 @@ function OptionPicker({ colors, label, hint, options, value, onChange, disabled,
           <Text style={[styles.pickerSelectedLabel, { color: colors.foreground }]} numberOfLines={1}>
             {effective.label !== effective.id ? `${effective.label} · ${effective.id}` : effective.id}
           </Text>
-          <Pressable onPress={() => onChange("")} disabled={disabled} style={({ pressed }) => [pressed && { opacity: 0.6 }]}>
+          <Pressable
+            onPress={() => onChange("")}
+            disabled={disabled}
+            accessibilityRole="button"
+            accessibilityLabel={`Change ${label}`}
+            style={({ pressed }) => [pressed && { opacity: 0.6 }]}
+          >
             <Text style={[styles.pickerClear, { color: colors.accent }]}>Change</Text>
           </Pressable>
         </View>
@@ -323,6 +365,7 @@ function OptionPicker({ colors, label, hint, options, value, onChange, disabled,
         editable={!disabled}
         autoCapitalize="none"
         autoCorrect={false}
+        accessibilityLabel={`Filter ${label}`}
         style={[styles.input, { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.surface0 }, disabled && { opacity: 0.5 }]}
       />
       <ScrollView style={[styles.pickerList, { borderColor: colors.border, backgroundColor: colors.surface0 }]} nestedScrollEnabled>
@@ -331,6 +374,8 @@ function OptionPicker({ colors, label, hint, options, value, onChange, disabled,
             key={option.id}
             onPress={() => onChange(option.id)}
             disabled={disabled}
+            accessibilityRole="button"
+            accessibilityLabel={`Select ${option.label !== option.id ? `${option.label} ${option.id}` : option.id}`}
             style={({ pressed }) => [styles.pickerRow, pressed && { backgroundColor: colors.surface2 }]}
           >
             <Text style={[styles.pickerRowLabel, { color: colors.foreground }]} numberOfLines={1}>
@@ -362,6 +407,8 @@ function Collapse({ colors, title, subtitle, open, onToggle, children }: {
     <View style={[styles.card, { backgroundColor: colors.surface1, borderColor: colors.border }]}>
       <Pressable
         onPress={() => onToggle(!open)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
         style={({ pressed }) => [styles.collapseHeader, pressed && { opacity: 0.75 }]}
       >
         <Text style={[styles.collapseChevron, { color: colors.foregroundMuted }]}>{open ? "▾" : "▸"}</Text>
@@ -371,6 +418,66 @@ function Collapse({ colors, title, subtitle, open, onToggle, children }: {
         </View>
       </Pressable>
       {open ? <View style={styles.collapseBody}>{children}</View> : null}
+    </View>
+  );
+}
+
+/** One archetype row in the standard-seat picker (mockup pick-row): compact
+ *  id + badge, the primary add/open action, and notes + custom creation
+ *  tucked behind a per-row expandable. */
+function SeatTemplateRow({ colors, archetype, exists, onAdd, onCustom, disabled }: {
+  colors: Colors;
+  archetype: SeatArchetype;
+  exists: boolean;
+  onAdd(): void;
+  onCustom(): void;
+  disabled?: boolean;
+}) {
+  const [notesOpen, setNotesOpen] = useState(false);
+  return (
+    <View style={[styles.pickRow, { borderTopColor: colors.border }]}>
+      <View style={[styles.cardHeadRow, { justifyContent: "space-between" }]}>
+        <Text style={[styles.checkTitle, styles.mono, { color: colors.foreground }]} numberOfLines={1}>
+          {archetype.id}
+        </Text>
+        <Badge colors={colors} label={exists ? "In draft" : "Standard"} tone={exists ? "neutral" : "managed"} />
+      </View>
+      <View style={{ flexDirection: "row", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <Button
+          colors={colors}
+          kind="primary"
+          label={exists ? "Already present — open seat" : "Add a standard seat"}
+          onPress={onAdd}
+          disabled={disabled}
+        />
+        <Pressable
+          onPress={() => setNotesOpen(current => !current)}
+          accessibilityRole="button"
+          accessibilityLabel="Notes and custom option"
+          accessibilityState={{ expanded: notesOpen }}
+          style={({ pressed }) => [pressed && { opacity: 0.6 }]}
+        >
+          <Text style={[styles.mutedSmall, { color: colors.accent }]}>
+            {notesOpen ? "Hide notes" : "Notes & custom option"}
+          </Text>
+        </Pressable>
+      </View>
+      {notesOpen ? (
+        <View style={{ gap: 6 }}>
+          <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>{archetype.notes}</Text>
+          <View>
+            <Button
+              colors={colors}
+              label="Create a custom seat from template"
+              onPress={onCustom}
+              disabled={disabled}
+            />
+          </View>
+          <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+            Custom seats receive no package token updates.
+          </Text>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -445,6 +552,19 @@ const styles = StyleSheet.create({
   pickerList: { borderWidth: 1, borderRadius: 8, maxHeight: 220 },
   pickerRow: { paddingVertical: 8, paddingHorizontal: 10 },
   pickerRowLabel: { fontSize: 13 },
+  // Draft-clarity mockup tokens mapped onto host theme slots — card-head
+  // row, badges, tinted notices, mono identity text, underlined token links.
+  cardHeadRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  badge: { borderWidth: 1, borderRadius: 5, paddingVertical: 2, paddingHorizontal: 7 },
+  badgeLabel: { fontSize: 11, fontWeight: "700", lineHeight: 16 },
+  eyebrow: { fontSize: 11, fontWeight: "700", letterSpacing: 1.2, textTransform: "uppercase" },
+  noticeBox: { borderWidth: 1, borderRadius: 8, padding: 12, gap: 6 },
+  confirmBox: { borderWidth: 1, borderRadius: 7, padding: 12, gap: 8 },
+  mono: { fontFamily: "monospace" },
+  tokenText: { fontFamily: "monospace", fontSize: 12, textDecorationLine: "underline" },
+  savedProvider: { borderLeftWidth: 3, borderRadius: 6, padding: 12, gap: 4 },
+  seatState: { fontSize: 12, lineHeight: 16, fontWeight: "600" },
+  pickRow: { borderTopWidth: 1, paddingVertical: 10, gap: 6 },
 });
 
 // ---------------------------------------------------------------------------
@@ -472,6 +592,9 @@ const JEV_KIND_DEFAULT = {
   openrouter: { model: "typesafe/jev-1.13", baseUrl: "https://openrouter.ai", keyLabel: "OpenRouter API key", keyFile: "jev-openrouter.key", keyPlaceholder: "sk-or-v1-…" },
   typesafe: { model: "jev-1.13.0", baseUrl: "https://api.typesafe.ai", keyLabel: "TypeSafe API key", keyFile: "jev-typesafe.key", keyPlaceholder: "ts-…" },
 } as const;
+// Display names for the key/test actions — they name the SAVED provider the
+// daemon will actually call, never the dirty draft pick.
+const JEV_KIND_LABEL = { openrouter: "OpenRouter", typesafe: "TypeSafe" } as const;
 
 /** Status rows that are audit/debug metadata — rendered inside the collapsed
  *  "Details" section so the card stays scannable. Everything else (state,
@@ -565,7 +688,11 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   const [poolData, setPoolData] = useState<GetPeerPoolResult | null>(null);
   const [poolForm, setPoolForm] = useState<PeerPoolForm>(emptyPeerPoolForm);
   const [poolDirty, setPoolDirty] = useState(false);
-  const [poolBusy, setPoolBusy] = useState(false);
+  // Saving and Reloading are separate pending states (mockup busy-state
+  // finding): each control labels its own in-flight work, while both lock
+  // pool mutations through the derived poolBusy below.
+  const [poolSaving, setPoolSaving] = useState(false);
+  const [poolReloading, setPoolReloading] = useState(false);
   const [poolSaved, setPoolSaved] = useState(false);
   const [poolCopied, setPoolCopied] = useState(false);
   // poolData === null is ambiguous between "still reading" and "the read RPC
@@ -578,7 +705,9 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   const [poolError, setPoolError] = useState<{ message: string; cas: boolean } | null>(null);
   // Dirty-draft reload confirmation (§7.4.C): Reload on an edited draft shows
   // "Keep current edits" / "Discard changes and Reload" before the RPC runs.
-  const [poolReloadConfirm, setPoolReloadConfirm] = useState(false);
+  // The confirmation renders AT the control that invoked it (CAS locality):
+  // "notice" beside the conflict notice's Reload, "footer" beside the card's.
+  const [poolReloadConfirm, setPoolReloadConfirm] = useState<"notice" | "footer" | null>(null);
   // §7.4.D convert-to-custom editor state, and the "Standard set selected —
   // not yet saved" marker after a conflict is resolved toward the standard set.
   const [convertSeatIndex, setConvertSeatIndex] = useState<number | null>(null);
@@ -590,8 +719,23 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   const [tokenLookupToken, setTokenLookupToken] = useState<string | null>(null);
   // The expanded seat editor and the archetype picker, tracked by seat index
   // (a renamed seat keeps its editor open); removing any seat closes both.
+  // pickerQuery filters the picker rows by template id/notes.
   const [openSeat, setOpenSeat] = useState<number | null>(null);
   const [addSeatOpen, setAddSeatOpen] = useState(false);
+  const [pickerQuery, setPickerQuery] = useState("");
+  // Best-effort scroll/focus targets (CAS locality + token lookup): on
+  // react-native-web a host ref resolves to the DOM node, so a guarded
+  // scrollIntoView/focus call works there and is a no-op elsewhere — the
+  // host gives RN primitives no focus contract beyond this.
+  const seatRowRefs = useRef(new Map<number, View | null>());
+  const lookupRefs = useRef(new Map<number, View | null>());
+  const definitionRefs = useRef(new Map<number, View | null>());
+  const keepEditsRef = useRef<View | null>(null);
+  const scrollFocusNode = (node: unknown, focus = false) => {
+    const dom = node as { scrollIntoView?: (options?: { block?: string }) => void; focus?: () => void } | null;
+    dom?.scrollIntoView?.({ block: "nearest" });
+    if (focus) dom?.focus?.();
+  };
   // Jev: per-daemon config + key — the key value lives only in jevKeyInput
   // until Save, is cleared right after, and status reports hasKey only.
   // Provider kind is selectable (OpenRouter relay vs TypeSafe first-party);
@@ -609,6 +753,25 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   const [jevKeyBusy, setJevKeyBusy] = useState(false);
   const [jevTest, setJevTest] = useState<{ ok: boolean; detail: string | null } | null>(null);
   const [jevTestBusy, setJevTestBusy] = useState(false);
+  // Jev load state split (mockup recovery finding): a get-jev failure is a
+  // distinct error branch with Retry, not an eternal "loading…".
+  const [jevLoadError, setJevLoadError] = useState<string | null>(null);
+  // Per-field validation errors — the model rule sits at the Model field and
+  // the URL rule at Base URL, never pooled into one message (mockup Jev
+  // field-error finding). Sourced from the shared JevProvider schema so the
+  // client and daemon reject the same shapes.
+  const [jevModelError, setJevModelError] = useState<string | null>(null);
+  const [jevUrlError, setJevUrlError] = useState<string | null>(null);
+  // Any settings edit (provider/model/baseUrl/toggles) invalidates the prior
+  // test result AND the key actions — they run against the SAVED provider,
+  // not the draft. A pending key input likewise voids the last test.
+  const markJevEdited = () => {
+    setJevDirty(true);
+    setJevSaved(false);
+    setJevTest(null);
+    setJevModelError(null);
+    setJevUrlError(null);
+  };
   const [store] = useState(createTargetViews);
   const [view, setView] = useState<TargetView>(emptyTargetView);
 
@@ -700,21 +863,26 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   }, [key]);
 
   // Fetch the Jev view once per target — the config is plugin-owned and
-  // independent of any binding, so it loads with the first status.
+  // independent of any binding, so it loads with the first status. loadJev is
+  // also the Retry path after a failed load (jevLoadError branch below).
   const jevLoadedFor = useRef<string | null>(null);
+  const loadJev = useCallback(async (forTarget: TargetValue) => {
+    setJevLoadError(null);
+    try {
+      const result = await callGetJev({ schemaVersion: 1, target: forTarget });
+      setJevView(result.jev);
+    } catch (error) {
+      setJevView(null);
+      setJevLoadError(errorMessage(error));
+    }
+  }, [callGetJev]);
   useEffect(() => {
     if (!target || !key || jevLoadedFor.current === key) return;
     jevLoadedFor.current = key;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const result = await callGetJev({ schemaVersion: 1, target });
-        if (!cancelled) setJevView(result.jev);
-      } catch {
-        if (!cancelled) setJevView(null);
-      }
-    })();
-    return () => { cancelled = true; };
+    setJevView(null);
+    setJevModelError(null);
+    setJevUrlError(null);
+    void loadJev(target);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- key captures target
   }, [key]);
 
@@ -726,12 +894,17 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     setPoolData(null);
     setPoolForm(emptyPeerPoolForm());
     setPoolDirty(false);
-    setPoolBusy(false);
+    setPoolSaving(false);
+    setPoolReloading(false);
     setPoolSaved(false);
     setPoolCopied(false);
     setPoolReadError(null);
     setPoolError(null);
-    setPoolReloadConfirm(false);
+    setPoolReloadConfirm(null);
+    setPickerQuery("");
+    seatRowRefs.current.clear();
+    lookupRefs.current.clear();
+    definitionRefs.current.clear();
     setConvertSeatIndex(null);
     setConvertId("");
     setStandardAppliedId(null);
@@ -793,9 +966,27 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   }, [jevView, jevDirty]);
 
   // Provider kind drives the model pin and the baseUrl default/rule — the
-  // same contract src/jev.mjs readJevConfig enforces daemon-side.
+  // same contract src/jev.mjs readJevConfig enforces daemon-side. The shared
+  // JevProvider schema validates client-side first so a rejected field lands
+  // its error AT that field instead of one pooled message.
   const saveJev = async () => {
     if (!target) return;
+    const provider = {
+      kind: jevKind,
+      baseUrl: jevBaseUrl.trim() === "" ? JEV_KIND_DEFAULT[jevKind].baseUrl : jevBaseUrl.trim(),
+      model: jevModel.trim() === "" ? JEV_KIND_DEFAULT[jevKind].model : jevModel.trim(),
+    };
+    const parsed = JevProvider.safeParse(provider);
+    if (!parsed.success) {
+      const fieldError = (field: string) =>
+        parsed.error.issues.find(issue => issue.path[0] === field)?.message ?? null;
+      setJevModelError(fieldError("model"));
+      setJevUrlError(fieldError("baseUrl"));
+      update({ lastError: parsed.error.issues[0]?.message ?? "Invalid Jev provider settings" }, target);
+      return;
+    }
+    setJevModelError(null);
+    setJevUrlError(null);
     setJevBusy(true);
     try {
       const result = await callSetJev({
@@ -996,6 +1187,8 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   const poolDiffers = peerPoolDiffers(poolBuild, poolData?.pool ?? null);
   // §7.4.E — the editor stays locked until the first successful snapshot:
   // with no read there is no CAS token and no shared baseline to diff.
+  // Either pending pool op locks mutations; the labels stay per-operation.
+  const poolBusy = poolSaving || poolReloading;
   const poolLocked = poolBusy || poolData === null;
   // §7.4.D — reserved ids whose draft tokens diverge from the package set.
   // The card notice presses open the seat; the seat row carries the same
@@ -1158,6 +1351,10 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     setTokenLookupSeat(null);
     setTokenLookupToken(null);
     setStandardAppliedId(current => (current === removedId ? null : current));
+    // Indexes shift on removal — ref targets keyed by index are stale.
+    seatRowRefs.current.clear();
+    lookupRefs.current.clear();
+    definitionRefs.current.clear();
   };
 
   const setFallbackId = (seatId: string) =>
@@ -1175,7 +1372,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
       return;
     }
     const issueKey = key;
-    setPoolBusy(true);
+    setPoolSaving(true);
     try {
       const result = await callSetPeerPool({
         schemaVersion: 1,
@@ -1207,7 +1404,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
         cas,
       });
     } finally {
-      setPoolBusy(false);
+      setPoolSaving(false);
     }
   };
 
@@ -1218,7 +1415,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   const reloadPeerPool = async () => {
     if (!target || !key) return;
     const issueKey = key;
-    setPoolBusy(true);
+    setPoolReloading(true);
     try {
       const result = await callGetPeerPool({ schemaVersion: 1, target });
       if (keyRef.current !== issueKey) return;
@@ -1235,12 +1432,15 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
       update({ lastError: message }, target);
       setPoolError({ message, cas: false });
     } finally {
-      setPoolBusy(false);
+      setPoolReloading(false);
     }
   };
-  const requestReload = () => {
+  const requestReload = (origin: "notice" | "footer") => {
     if (poolDirty) {
-      setPoolReloadConfirm(true);
+      setPoolReloadConfirm(origin);
+      // "Keep current edits" is the safe default — focus it once the
+      // confirmation renders (best-effort on the host's DOM backend).
+      setTimeout(() => scrollFocusNode(keepEditsRef.current, true), 0);
     } else {
       void reloadPeerPool();
     }
@@ -1980,13 +2180,26 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
           colors={colors}
           title="Peer pool"
           subtitle="User-scope seats a Lead picks per task. Supervisor and Lead keep their saved profiles — only Peer routes here."
+          // Draft-state badge beside the card title (mockup dirty-badge):
+          // amber while edits are unsaved, else the saved/absent state.
+          trailing={
+            poolDirty ? (
+              <Badge colors={colors} label="Unsaved changes" tone="draft" />
+            ) : poolData?.pool != null ? (
+              <Badge colors={colors} label="Saved pool" tone="good" />
+            ) : (
+              <Badge colors={colors} label="No saved pool" />
+            )
+          }
         >
           {jevView?.enabled === true && jevView.capabilities?.routing === true ? (
-            <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
-              Jev routing is armed — the seats below are the draft candidate set Jev picks from;
-              edits apply only after Save, and a seat marked Token conflict is not a
-              valid standard seat.
-            </Text>
+            <View style={[styles.noticeBox, { borderColor: colors.accent, backgroundColor: colors.surface2 }]}>
+              <Text style={[styles.mutedSmall, { color: colors.foreground }]}>
+                Jev routing is armed — the seats below are the draft candidate set Jev picks from;
+                edits apply only after Save, and a seat marked Token conflict is not a
+                valid standard seat.
+              </Text>
+            </View>
           ) : null}
           {// §7.4.E — the four read states are distinct: still loading, read
            // failed (never painted as an empty list), stored file malformed,
@@ -2010,32 +2223,102 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
               No pool yet — add seats below, or import a legacy slp-routing.json.
             </Text>
           ) : null}
-          {// §7.4.D card-level conflict notice — pressing an id opens the seat.
+          {// Pool summary (mockup finding 7): the saved-state line plus the
+           // enabled/disabled/conflicted counts — conflicted is an
+           // OVERLAPPING count (a conflicted seat is also enabled or
+           // disabled), not a third bucket.
+          poolData !== null ? (
+            <View style={[styles.field, { borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: 12 }]}>
+              <View style={[styles.cardHeadRow, { justifyContent: "space-between" }]}>
+                <Text style={[styles.checkTitle, { color: colors.foreground }]}>
+                  {poolData.pool != null
+                    ? `Saved pool · ${poolForm.seats.length} seat${poolForm.seats.length === 1 ? "" : "s"} in draft`
+                    : `No saved pool — ${poolForm.seats.length} seat${poolForm.seats.length === 1 ? "" : "s"} in draft`}
+                </Text>
+              </View>
+              <View style={{ flexDirection: "row", gap: 14, flexWrap: "wrap" }}>
+                <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                  <Text style={{ color: colors.foreground, fontWeight: "700" }}>{poolForm.seats.filter(seat => seat.enabled).length}</Text> enabled
+                </Text>
+                <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                  <Text style={{ color: colors.foreground, fontWeight: "700" }}>{poolForm.seats.filter(seat => !seat.enabled).length}</Text> disabled
+                </Text>
+                <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                  <Text style={{ color: colors.foreground, fontWeight: "700" }}>{conflictedSeats.length}</Text> conflicted
+                </Text>
+              </View>
+            </View>
+          ) : null}
+          {// §7.4.D card-level conflict notice — pressing a seat opens its
+           // editor and scrolls it into view (CAS/open-seat locality).
           conflictedSeats.length > 0 ? (
-            <View style={[styles.roleBox, { borderColor: colors.statusDanger }]}>
-              <Text style={[styles.mutedSmall, { color: colors.statusDanger }]}>
-                Token conflict — these seats carry a reserved standard id but diverging
-                tokens. Resolve each before Save:
+            <View style={[styles.noticeBox, { borderColor: colors.statusDanger, backgroundColor: colors.surface2 }]} accessibilityLiveRegion="polite">
+              <Text style={[styles.checkTitle, { color: colors.statusDanger }]}>
+                {conflictedSeats.length === 1 ? "1 seat needs token resolution" : `${conflictedSeats.length} seats need token resolution`}
+              </Text>
+              <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                These seats carry a reserved standard id but diverging tokens — resolve each before Save or Copy.
               </Text>
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
                 {conflictedSeats.map(entry => (
-                  <Pressable key={entry.index} onPress={() => setOpenSeat(entry.index)}>
-                    <Text style={[styles.checkTitle, { color: colors.statusDanger, textDecorationLine: "underline" }]}>
-                      {poolForm.seats[entry.index]?.id}
-                    </Text>
-                  </Pressable>
+                  <Button
+                    key={entry.index}
+                    colors={colors}
+                    label={`Open seat ${poolForm.seats[entry.index]?.id ?? ""}`}
+                    onPress={() => {
+                      setOpenSeat(entry.index);
+                      setTimeout(() => scrollFocusNode(seatRowRefs.current.get(entry.index), true), 50);
+                    }}
+                  />
                 ))}
               </View>
             </View>
           ) : null}
           {// §7.4.D card notice — save/reload failures and the CAS conflict
            // ("The pool changed since the last read; Reload to fetch the new version") live
-           // here, with Reload offered right at the message.
+           // here, with Reload offered right at the message and the
+           // dirty-draft confirmation rendered at this control's origin.
           poolError !== null ? (
-            <View style={[styles.roleBox, { borderColor: colors.statusDanger }]}>
+            <View style={[styles.noticeBox, { borderColor: colors.statusDanger, backgroundColor: colors.surface2 }]} accessibilityLiveRegion="polite">
+              <Text style={[styles.checkTitle, { color: colors.statusDanger }]}>
+                {poolError.cas ? "Pool version conflict" : "Pool operation failed"}
+              </Text>
               <Text style={[styles.mutedSmall, { color: colors.statusDanger }]}>{poolError.message}</Text>
+              <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Your draft is preserved.</Text>
               {poolError.cas ? (
-                <Button colors={colors} label="Reload" onPress={requestReload} disabled={poolBusy} />
+                <View>
+                  <Button
+                    colors={colors}
+                    label={poolReloading ? "Reloading…" : "Reload"}
+                    onPress={() => requestReload("notice")}
+                    disabled={poolBusy}
+                  />
+                </View>
+              ) : null}
+              {poolReloadConfirm === "notice" ? (
+                <View style={[styles.confirmBox, { borderColor: colors.statusWarning, backgroundColor: colors.surface0 }]} accessibilityRole="alert">
+                  <Text style={[styles.checkTitle, { color: colors.foreground }]}>Discard your unsaved changes?</Text>
+                  <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                    Reload replaces this draft only after the saved pool loads successfully.
+                  </Text>
+                  <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+                    <Pressable
+                      ref={keepEditsRef}
+                      onPress={() => setPoolReloadConfirm(null)}
+                      accessibilityRole="button"
+                      accessibilityLabel="Keep current edits"
+                      style={({ pressed }) => [styles.button, { backgroundColor: colors.accent, borderColor: colors.accent }, pressed && { opacity: 0.75 }]}
+                    >
+                      <Text style={[styles.buttonLabel, { color: colors.accentForeground }]}>Keep current edits</Text>
+                    </Pressable>
+                    <Button
+                      colors={colors}
+                      kind="danger"
+                      label="Discard changes and Reload"
+                      onPress={() => { setPoolReloadConfirm(null); void reloadPeerPool(); }}
+                    />
+                  </View>
+                </View>
               ) : null}
             </View>
           ) : null}
@@ -2074,6 +2357,12 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
             disabled={poolLocked}
             multiline
           />
+          {poolForm.seats.length > 0 ? (
+            <View style={[styles.cardHeadRow, { justifyContent: "space-between" }]}>
+              <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Seats · draft order</Text>
+              <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Enable only when configured</Text>
+            </View>
+          ) : null}
           {poolForm.seats.map((seat, index) => {
             const seatCatalog = seat.family !== "" ? catalogs[seat.family] : undefined;
             const thinking = seat.family !== "" ? thinkingOptionsFor(seatCatalog, seat.model) : null;
@@ -2085,6 +2374,14 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
             const managed = seatManagement(seat) === "package-managed";
             const conflict = managed ? formSeatConflict(seat) : null;
             const standardTokens = managed ? STANDARD_SEAT_TOKENS[seat.id.trim()] : undefined;
+            // Parked semantics (mockup finding 6): the row states the draft
+            // lifecycle explicitly — enabled is a deliberate switch, never
+            // inferred from a filled binding.
+            const seatState = seat.enabled
+              ? "Enabled in draft"
+              : seat.family !== "" && seat.model.trim() !== ""
+                ? "Disabled · configured"
+                : "Disabled · needs provider/model";
             // One token row: the exact token text, its axis in muted parens,
             // an optional +/− conflict mark, and a press that opens the
             // definition lookup at that token.
@@ -2092,51 +2389,57 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
               tokens.length === 0 ? (
                 <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>No declarations</Text>
               ) : (
-                tokens.map((token, tokenIndex) => {
-                  const marked = mark(token);
-                  const def = tokenDefinition(token);
-                  return (
-                    <Pressable
-                      key={`${tokenIndex}:${token}`}
-                      onPress={() => { setTokenLookupSeat(index); setTokenLookupToken(token); }}
-                    >
-                      <Text style={[styles.mutedSmall, {
-                        color: marked === "−" ? colors.statusDanger
-                          : marked === "+" ? colors.statusSuccess
-                          : colors.foreground,
-                      }]}>
-                        {marked !== null ? `${marked} ` : ""}{token}
-                        <Text style={{ color: colors.foregroundMuted }}>
-                          {def ? ` (${def.axis})` : " (custom)"}
+                // .token style — underlined mono buttons named "Define X";
+                // a press opens the lookup at exactly this definition and
+                // scrolls it into view (mockup findings 9–10).
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                  {tokens.map((token, tokenIndex) => {
+                    const marked = mark(token);
+                    const def = tokenDefinition(token);
+                    return (
+                      <Pressable
+                        key={`${tokenIndex}:${token}`}
+                        onPress={() => {
+                          setTokenLookupSeat(index);
+                          setTokenLookupToken(token);
+                          setTimeout(() => scrollFocusNode(
+                            definitionRefs.current.get(index) ?? lookupRefs.current.get(index),
+                            true,
+                          ), 50);
+                        }}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Define ${token}`}
+                      >
+                        <Text style={[styles.tokenText, {
+                          color: marked === "−" ? colors.statusDanger
+                            : marked === "+" ? colors.statusSuccess
+                            : colors.accent,
+                        }]}>
+                          {marked !== null ? `${marked} ` : ""}{token}
+                          <Text style={{ color: colors.foregroundMuted, textDecorationLine: "none" }}>
+                            {def ? ` (${def.axis})` : " (custom)"}
+                          </Text>
                         </Text>
-                      </Text>
-                    </Pressable>
-                  );
-                })
+                      </Pressable>
+                    );
+                  })}
+                </View>
               );
             return (
-              <View key={`${index}:${seat.id}`} style={[styles.roleBox, { borderColor: conflict ? colors.statusDanger : colors.border }]}>
+              // key is the stable draft uid — editing `id` must not remount
+              // the row (mockup finding 2: typing in the Custom ID field
+              // preserved the focused input node).
+              <View
+                key={seat.uid}
+                ref={node => { seatRowRefs.current.set(index, node); }}
+                style={[styles.roleBox, { borderColor: conflict ? colors.statusDanger : colors.border }]}
+              >
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                  <Pressable onPress={() => setOpenSeat(open ? null : index)} style={{ flex: 1, gap: 2 }}>
-                    <Text style={[styles.roleTitle, { color: colors.foreground }]} numberOfLines={1}>
-                      {seat.id || "(unnamed seat)"}
-                    </Text>
-                    <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]} numberOfLines={1}>
-                      {(seat.family === "" ? "no provider" : FAMILY_LABEL[seat.family]) +
-                        (seat.model ? ` · ${seat.model}` : "") +
-                        (seat.modeId ? ` · ${seat.modeId}` : "")}
-                    </Text>
-                    <Text
-                      style={[styles.mutedSmall, { color: conflict ? colors.statusDanger : colors.foregroundMuted }]}
-                      numberOfLines={1}
-                    >
-                      {managed ? "Package-managed" : "Custom"}{conflict ? " · Token conflict" : ""}
-                    </Text>
-                  </Pressable>
                   <Pressable
                     onPress={() => setSeatEnabled(index)(!seat.enabled)}
                     disabled={disabled}
                     accessibilityRole="switch"
+                    accessibilityLabel={`Enable ${seat.id || "unnamed seat"} in draft`}
                     accessibilityState={{ checked: seat.enabled, disabled }}
                     style={[styles.switchTrack, { backgroundColor: seat.enabled ? colors.accent : colors.border }]}
                   >
@@ -2148,13 +2451,46 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                   </Pressable>
                   <Pressable
                     onPress={() => setOpenSeat(open ? null : index)}
-                    style={({ pressed }) => [pressed && { opacity: 0.6 }]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${open ? "Close" : "Open"} editor for ${seat.id || "unnamed seat"}`}
+                    accessibilityState={{ expanded: open }}
+                    style={{ flex: 1, gap: 2 }}
                   >
-                    <Text style={[styles.collapseChevron, { color: colors.foregroundMuted }]}>{open ? "▾" : "▸"}</Text>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      <Text style={[styles.roleTitle, styles.mono, { color: colors.foreground }]} numberOfLines={1}>
+                        {seat.id || "(unnamed seat)"}
+                      </Text>
+                      <Badge colors={colors} label={managed ? "Package-managed" : "Custom"} tone={managed ? "managed" : "neutral"} />
+                      {conflict ? <Badge colors={colors} label="Token conflict" tone="bad" /> : null}
+                    </View>
+                    <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]} numberOfLines={1}>
+                      {(seat.family === "" ? "No provider" : FAMILY_LABEL[seat.family]) +
+                        (seat.model ? ` · ${seat.model}` : " · No model") +
+                        (seat.modeId ? ` · ${seat.modeId}` : "")}
+                    </Text>
+                    <Text
+                      style={[styles.seatState, { color: seat.enabled ? colors.accent : colors.foregroundMuted }]}
+                      numberOfLines={1}
+                    >
+                      {seatState}
+                    </Text>
                   </Pressable>
+                  <Button
+                    colors={colors}
+                    label={open ? "Close" : "Edit"}
+                    onPress={() => setOpenSeat(open ? null : index)}
+                    disabled={disabled}
+                  />
                 </View>
                 {open ? (
                   <>
+                    {!seat.enabled ? (
+                      // Parked flow hint (mockup finding 6): the editor
+                      // states the enable path before the fields.
+                      <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                        Choose provider/model → enable → Save pool
+                      </Text>
+                    ) : null}
                     {managed ? (
                       // §7.4.B — a standard seat's id IS the package
                       // reference; renaming it is how a reserved name would
@@ -2424,10 +2760,12 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                         </Text>
                         <Button
                           colors={colors}
-                          label="Token definitions"
+                          label={tokenLookupSeat === index ? "Hide token definitions" : "Show token definitions"}
                           onPress={() => {
-                            setTokenLookupSeat(tokenLookupSeat === index ? null : index);
+                            const opening = tokenLookupSeat !== index;
+                            setTokenLookupSeat(opening ? index : null);
                             setTokenLookupToken(null);
+                            if (opening) setTimeout(() => scrollFocusNode(lookupRefs.current.get(index)), 50);
                           }}
                         />
                       </View>
@@ -2467,6 +2805,23 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                           <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>avoidFor</Text>
                           {tokenRows([...standardTokens.avoidFor], token =>
                             lineList(seat.avoidFor).includes(token) ? null : "+")}
+                          {// Added/Removed summary across BOTH lists (mockup
+                           // finding 9): the marks above are per-token; this
+                           // line states the net difference in one read.
+                          }
+                          <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                            {(() => {
+                              const added = ["suitableFor", "avoidFor"].flatMap(k =>
+                                standardTokens[k as "suitableFor" | "avoidFor"]
+                                  .filter(t => !lineList(seat[k as "suitableFor" | "avoidFor"]).includes(t))
+                                  .map(t => `${k}: ${t}`));
+                              const removed = ["suitableFor", "avoidFor"].flatMap(k =>
+                                lineList(seat[k as "suitableFor" | "avoidFor"])
+                                  .filter(t => !standardTokens[k as "suitableFor" | "avoidFor"].includes(t))
+                                  .map(t => `${k}: ${t}`));
+                              return `Added: ${added.join(", ") || "none"} · Removed: ${removed.join(", ") || "none"}`;
+                            })()}
+                          </Text>
                           <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
                             <Button
                               colors={colors}
@@ -2595,8 +2950,21 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                       // §7.4.F — the package's token lookup: how-to-read, the
                       // four axes as pickers, then the selected token's full
                       // definition (or "custom content" for non-package text).
-                      <View style={[styles.roleBox, { borderColor: colors.border }]}>
-                        <Text style={[styles.fieldLabel, { color: colors.foreground }]}>How to read</Text>
+                      <View
+                        ref={node => { lookupRefs.current.set(index, node); }}
+                        role="region"
+                        accessibilityLabel="Token definitions"
+                        style={[styles.noticeBox, { borderColor: colors.accent, backgroundColor: colors.surface2 }]}
+                      >
+                        <View style={[styles.cardHeadRow, { justifyContent: "space-between" }]}>
+                          <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Token definitions</Text>
+                          <Button
+                            colors={colors}
+                            label="Close definitions"
+                            onPress={() => { setTokenLookupSeat(null); setTokenLookupToken(null); }}
+                          />
+                        </View>
+                        <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>How to read</Text>
                         {HOW_TO_READ.map(line => (
                           <Text key={line} style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
                             {line}
@@ -2611,10 +2979,15 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                               {SUITABILITY_TOKENS.filter(token => token.axis === axis.id).map(token => (
                                 <Pressable
                                   key={token.id}
-                                  onPress={() => setTokenLookupToken(token.id)}
+                                  onPress={() => {
+                                    setTokenLookupToken(token.id);
+                                    setTimeout(() => scrollFocusNode(definitionRefs.current.get(index), true), 50);
+                                  }}
+                                  accessibilityRole="button"
+                                  accessibilityLabel={`Define ${token.id}`}
                                   style={[styles.chip, tokenLookupToken === token.id && { borderColor: colors.accent }]}
                                 >
-                                  <Text style={[styles.chipLabel, { color: colors.foreground }]}>{token.id}</Text>
+                                  <Text style={[styles.chipLabel, styles.mono, { color: colors.foreground }]}>{token.id}</Text>
                                 </Pressable>
                               ))}
                             </View>
@@ -2622,34 +2995,41 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                         ))}
                         {tokenLookupToken !== null ? (() => {
                           const def = tokenDefinition(tokenLookupToken);
-                          return def ? (
-                            <View style={{ gap: 2 }}>
-                              <Text style={[styles.checkTitle, { color: colors.foreground }]}>{def.id}</Text>
-                              <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-                                {def.axis} — {SUITABILITY_AXES.find(axis => axis.id === def.axis)?.question}
-                              </Text>
-                              <Text style={[styles.mutedSmall, { color: colors.foreground }]}>{def.sign}</Text>
-                              <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-                                Example: {def.example}
-                              </Text>
-                              <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-                                Counter-example: {def.counterExample}
-                              </Text>
-                              <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-                                Boundary: {def.boundary}
-                              </Text>
+                          return (
+                            <View
+                              ref={node => { definitionRefs.current.set(index, node); }}
+                              role="region"
+                              accessibilityLabel={`Definition of ${tokenLookupToken}`}
+                              style={[styles.noticeBox, { borderColor: colors.border, backgroundColor: colors.surface0, gap: 2 }]}
+                            >
+                              <Text style={[styles.checkTitle, styles.mono, { color: colors.foreground }]}>{tokenLookupToken}</Text>
+                              {def ? (
+                                <>
+                                  <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                                    {def.axis} — {SUITABILITY_AXES.find(axis => axis.id === def.axis)?.question}
+                                  </Text>
+                                  <Text style={[styles.mutedSmall, { color: colors.foreground }]}>{def.sign}</Text>
+                                  <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                                    Example: {def.example}
+                                  </Text>
+                                  <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                                    Counter-example: {def.counterExample}
+                                  </Text>
+                                  <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                                    Boundary: {def.boundary}
+                                  </Text>
+                                </>
+                              ) : (
+                                // A custom string is lookupable too — its
+                                // "definition" states the package carries no
+                                // meaning for it (mockup finding 9).
+                                <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                                  Custom content — the package does not define this token.
+                                </Text>
+                              )}
                             </View>
-                          ) : (
-                            <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-                              "{tokenLookupToken}" — custom content — the package does not define this token.
-                            </Text>
                           );
                         })() : null}
-                        <Button
-                          colors={colors}
-                          label="Close definitions"
-                          onPress={() => { setTokenLookupSeat(null); setTokenLookupToken(null); }}
-                        />
                       </View>
                     ) : null}
                     <Text style={[styles.fieldLabel, { color: colors.foreground }]}>
@@ -2714,57 +3094,77 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
             );
           })}
           {addSeatOpen ? (
-            <View style={[styles.roleBox, { borderColor: colors.border }]}>
-              <Text style={[styles.fieldLabel, { color: colors.foreground }]}>
-                Add a standard seat — parked until you pick a provider and model
-              </Text>
+            // §7.4.C picker (mockup finding 5): Close at the top, a
+            // name/description filter over the twelve canonical archetypes,
+            // compact rows, and notes/custom creation expanded per row.
+            <View
+              style={[styles.noticeBox, { borderColor: colors.accent, backgroundColor: colors.surface0 }]}
+              role="region"
+              accessibilityLabel="Standard seat picker"
+            >
+              <View style={[styles.cardHeadRow, { justifyContent: "space-between" }]}>
+                <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Add a standard seat</Text>
+                <Button colors={colors} label="Close" onPress={() => setAddSeatOpen(false)} />
+              </View>
               <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-                "Create a custom seat from template" copies the template into an editable Custom
-                seat — custom seats receive no package token updates.
+                Twelve package templates. New seats start disabled with no provider or model;
+                "Create a custom seat from template" copies a template into an editable Custom seat.
               </Text>
-              {PEER_SEAT_ARCHETYPES.map(archetype => {
-                const existingIndex = poolForm.seats.findIndex(seat => seat.id.trim() === archetype.id);
-                return (
-                  <View key={archetype.id} style={[styles.roleBox, { borderColor: colors.border }]}>
-                    <Pressable
-                      onPress={addStandardSeat(archetype)}
-                      disabled={poolLocked}
-                      style={({ pressed }) => [styles.pickerRow, pressed && { backgroundColor: colors.surface2 }]}
-                    >
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                        <Text style={[styles.checkTitle, { color: colors.foreground, flex: 1 }]}>{archetype.id}</Text>
-                        <Text style={[styles.mutedSmall, { color: existingIndex >= 0 ? colors.statusWarning : colors.foregroundMuted }]}>
-                          {existingIndex >= 0 ? "Already present — open seat" : "Add a standard seat"}
-                        </Text>
-                      </View>
-                      <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>{archetype.notes}</Text>
-                    </Pressable>
-                    <Button
+              <Field
+                colors={colors}
+                label="Filter by name or description"
+                value={pickerQuery}
+                onChangeText={setPickerQuery}
+                placeholder="Search 12 archetypes…"
+                disabled={poolLocked}
+              />
+              <ScrollView style={{ maxHeight: 385 }} nestedScrollEnabled>
+                {PEER_SEAT_ARCHETYPES
+                  .filter(archetype =>
+                    `${archetype.id} ${archetype.notes}`
+                      .toLowerCase()
+                      .includes(pickerQuery.trim().toLowerCase()))
+                  .map(archetype => (
+                    <SeatTemplateRow
+                      key={archetype.id}
                       colors={colors}
-                      label="Create a custom seat from template"
-                      onPress={addCustomFromTemplate(archetype)}
+                      archetype={archetype}
+                      exists={poolForm.seats.some(seat => seat.id.trim() === archetype.id)}
+                      onAdd={addStandardSeat(archetype)}
+                      onCustom={addCustomFromTemplate(archetype)}
                       disabled={poolLocked}
                     />
-                  </View>
-                );
-              })}
-              <Button colors={colors} label="Close" onPress={() => setAddSeatOpen(false)} />
+                  ))}
+                {PEER_SEAT_ARCHETYPES.every(archetype =>
+                  !`${archetype.id} ${archetype.notes}`
+                    .toLowerCase()
+                    .includes(pickerQuery.trim().toLowerCase())) ? (
+                  <Text style={[styles.mutedSmall, { color: colors.foregroundMuted, paddingVertical: 8 }]} accessibilityLiveRegion="polite">
+                    No templates match this filter.
+                  </Text>
+                ) : null}
+              </ScrollView>
             </View>
           ) : (
             <Button
               colors={colors}
-              label="Add seat"
-              onPress={() => setAddSeatOpen(true)}
+              kind="primary"
+              label="Add a standard seat"
+              onPress={() => { setPickerQuery(""); setAddSeatOpen(true); }}
               disabled={poolLocked}
             />
           )}
+          {// §7.4.C quota fallback — the wave-6 contract: ONE designated
+           // option, one retry, no ordering. The mockup's multi-select +
+           // order numbers predate wave 6 and are deliberately not ported.
+          }
           <View style={styles.field}>
             <SwitchRow
               colors={colors}
               checked={poolForm.quotaFallbackEnabled}
               onToggle={next => updatePool(form => ({ ...form, quotaFallbackEnabled: next }))}
               title="Quota fallback"
-              hint="When a picked seat's provider reports quota exhaustion, the Lead may make one retry on the designated seat"
+              hint="Designate one pool seat. On a quota error the Lead retries once on that seat — a repeated quota error or an unavailable target reports BLOCKED; no retry loop."
               disabled={poolLocked}
             />
             {poolForm.quotaFallbackEnabled ? (
@@ -2784,6 +3184,10 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                     onChange={setFallbackId}
                     disabled={poolLocked}
                   />
+                  <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                    Retry exactly once on the designated seat — the source seat and a
+                    target sharing the exhausted quota are not viable fallbacks.
+                  </Text>
                 </>
               )
             ) : null}
@@ -2823,44 +3227,54 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
               is re-read.
             </Text>
           ) : null}
-          <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-            <Button
-              colors={colors}
-              kind="primary"
-              label={poolBusy ? "Saving…" : "Save pool"}
-              // §7.4.C — Save only exists once a read snapshot does; the
-              // button stays clickable on a build error so it can report it,
-              // but sends no RPC in that case.
-              disabled={!target || poolBusy || !poolDiffers || poolData === null}
-              onPress={() => void savePeerPool()}
-            />
-            <Button
-              colors={colors}
-              label="Reload"
-              onPress={requestReload}
-              disabled={poolBusy}
-            />
-          </View>
-          {poolReloadConfirm ? (
-            <View style={[styles.roleBox, { borderColor: colors.statusWarning }]}>
-              <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
-                The draft has unsaved edits — Reload discards them.
-              </Text>
+          <View style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12, gap: 8 }}>
+            <View style={[styles.cardHeadRow, { justifyContent: "space-between" }]}>
               <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
                 <Button
                   colors={colors}
-                  label="Keep current edits"
-                  onPress={() => setPoolReloadConfirm(false)}
+                  kind="primary"
+                  label={poolSaving ? "Saving…" : "Save pool"}
+                  // §7.4.C — Save only exists once a read snapshot does; the
+                  // button stays clickable on a build error so it can report it,
+                  // but sends no RPC in that case.
+                  disabled={!target || poolBusy || !poolDiffers || poolData === null}
+                  onPress={() => void savePeerPool()}
                 />
                 <Button
                   colors={colors}
-                  kind="danger"
-                  label="Discard changes and Reload"
-                  onPress={() => { setPoolReloadConfirm(false); void reloadPeerPool(); }}
+                  label={poolReloading ? "Reloading…" : "Reload"}
+                  onPress={() => requestReload("footer")}
+                  disabled={poolBusy}
                 />
               </View>
+              <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>One save for the whole pool</Text>
             </View>
-          ) : null}
+            {poolReloadConfirm === "footer" ? (
+              <View style={[styles.confirmBox, { borderColor: colors.statusWarning, backgroundColor: colors.surface0 }]} accessibilityRole="alert">
+                <Text style={[styles.checkTitle, { color: colors.foreground }]}>Discard your unsaved changes?</Text>
+                <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                  Reload replaces this draft only after the saved pool loads successfully.
+                </Text>
+                <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+                  <Pressable
+                    ref={keepEditsRef}
+                    onPress={() => setPoolReloadConfirm(null)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Keep current edits"
+                    style={({ pressed }) => [styles.button, { backgroundColor: colors.accent, borderColor: colors.accent }, pressed && { opacity: 0.75 }]}
+                  >
+                    <Text style={[styles.buttonLabel, { color: colors.accentForeground }]}>Keep current edits</Text>
+                  </Pressable>
+                  <Button
+                    colors={colors}
+                    kind="danger"
+                    label="Discard changes and Reload"
+                    onPress={() => { setPoolReloadConfirm(null); void reloadPeerPool(); }}
+                  />
+                </View>
+              </View>
+            ) : null}
+          </View>
         </Card>
       ) : null}
 
@@ -2925,130 +3339,200 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
           title="Jev"
           subtitle="Bounded routing decisions — a Lead runs `slp route-decide` so Jev picks the pool seat from the eligible set, and prepare verifies the receipt offline. All toggles default off; an outage fails closed and disabling restores Lead-judgment routing."
         >
-          <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Provider</Text>
-          <ChipSelect<"openrouter" | "typesafe">
-            colors={colors}
-            value={jevKind}
-            options={[
-              { label: "OpenRouter", value: "openrouter" },
-              { label: "TypeSafe (first-party)", value: "typesafe" },
-            ]}
-            disabled={!target || jevBusy}
-            onChange={next => {
-              setJevDirty(true);
-              setJevSaved(false);
-              setJevKind(next);
-              setJevModel(JEV_KIND_DEFAULT[next].model);
-              setJevBaseUrl(JEV_KIND_DEFAULT[next].baseUrl);
-            }}
-          />
-          <Field
-            colors={colors}
-            label="Model"
-            hint={jevKind === "typesafe"
-              ? "Pinned versioned id (jev-<semver>) — aliases like jev-latest are rejected"
-              : "Pinned <owner>/jev-<version> id — aliases like jev-latest are rejected"}
-            value={jevModel}
-            onChangeText={text => { setJevDirty(true); setJevSaved(false); setJevModel(text); }}
-            placeholder={JEV_KIND_DEFAULT[jevKind].model}
-            disabled={!target || jevBusy}
-          />
-          <Field
-            colors={colors}
-            label={jevBaseUrl.trim() !== "" && jevBaseUrl.trim() !== JEV_KIND_DEFAULT[jevKind].baseUrl
-              ? "Base URL (custom)"
-              : "Base URL"}
-            hint={`POST ${(jevBaseUrl.trim() === "" ? JEV_KIND_DEFAULT[jevKind].baseUrl : jevBaseUrl.trim()).replace(/\/+$/, "")}${jevKind === "typesafe" ? "/v1/systemone" : "/api/alpha/decisions"}${jevKind === "typesafe" ? " — an origin+path prefix mounts a custom endpoint/proxy" : " — bare origin or the documented …/api/v1 prefixed form"}`}
-            value={jevBaseUrl}
-            onChangeText={text => { setJevDirty(true); setJevSaved(false); setJevBaseUrl(text); }}
-            placeholder={JEV_KIND_DEFAULT[jevKind].baseUrl}
-            disabled={!target || jevBusy}
-          />
-          <View style={styles.kvRow}>
-            <Text style={[styles.kvLabel, { color: colors.foregroundMuted }]}>Status</Text>
-            <Text style={[styles.kvValue, { color: jevView?.error ? colors.statusDanger : colors.foreground }]}>
-              {jevView === null
-                ? "loading…"
-                : jevView.error
-                  ? `config error: ${jevView.error}`
-                  : jevView.configured
-                    ? jevView.enabled ? "configured · enabled" : "configured · disabled"
-                    : "not configured"}
+          {// Mockup recovery finding — the three load states are distinct:
+           // loading notice, an error branch with Retry, and the loaded
+           // settings. A failed load never paints as eternal "loading…".
+          jevLoadError !== null ? (
+            <View style={[styles.noticeBox, { borderColor: colors.statusDanger, backgroundColor: colors.surface2 }]} accessibilityLiveRegion="polite">
+              <Text style={[styles.checkTitle, { color: colors.statusDanger }]}>Could not load Jev settings</Text>
+              <Text style={[styles.mutedSmall, { color: colors.statusDanger }]}>{jevLoadError}</Text>
+              <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                Settings and key status are unavailable.
+              </Text>
+              <View>
+                <Button colors={colors} kind="primary" label="Retry" onPress={() => void loadJev(target)} />
+              </View>
+            </View>
+          ) : jevView === null ? (
+            <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]} accessibilityLiveRegion="polite">
+              Loading Jev settings…
             </Text>
-          </View>
-          <View style={styles.kvRow}>
-            <Text style={[styles.kvLabel, { color: colors.foregroundMuted }]}>Key</Text>
-            <Text style={[styles.kvValue, { color: jevView?.keyPermissionsOk === false ? colors.statusWarning : colors.foreground }]}>
-              {jevView === null
-                ? "…"
-                : !jevView.hasKey
-                  ? "not stored"
-                  : jevView.keyPermissionsOk === false
-                    ? "stored — file permissions too open (chmod 600)"
-                    : "stored"}
-            </Text>
-          </View>
-          <SwitchRow
-            colors={colors}
-            checked={jevEnabledOn}
-            disabled={!target || jevBusy}
-            onToggle={next => { setJevDirty(true); setJevSaved(false); setJevEnabledOn(next); }}
-            title="Enable Jev"
-            hint="Master toggle — off keeps every capability inert without deleting the stored key."
-          />
-          <SwitchRow
-            colors={colors}
-            checked={jevRoutingOn}
-            disabled={!target || jevBusy || !jevEnabledOn}
-            onToggle={next => { setJevDirty(true); setJevSaved(false); setJevRoutingOn(next); }}
-            title="Routing decisions"
-            hint="When armed, prepare requires a Jev decision receipt for catalog routing (run `slp route-decide`); Lead judgment alone no longer suffices."
-          />
-          {jevSaved && !jevDirty ? (
-            <Text style={[styles.mutedSmall, { color: colors.statusSuccess }]}>Saved.</Text>
-          ) : null}
-          <Button
-            colors={colors}
-            label={jevBusy ? "Saving…" : "Apply Jev settings"}
-            disabled={!target || jevBusy || !jevDirty}
-            onPress={() => void saveJev()}
-          />
-          <View style={[styles.divider, { borderTopColor: colors.border }]} />
-          <Field
-            colors={colors}
-            label={JEV_KIND_DEFAULT[jevKind].keyLabel}
-            hint={`Stored at slp-runtime/state/${JEV_KIND_DEFAULT[jevKind].keyFile} (0600) — never shown back; enter a new key to replace it`}
-            value={jevKeyInput}
-            onChangeText={setJevKeyInput}
-            placeholder={JEV_KIND_DEFAULT[jevKind].keyPlaceholder}
-            disabled={!target || jevKeyBusy}
-            secure
-          />
-          <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-            <Button
-              colors={colors}
-              label={jevKeyBusy ? "Working…" : "Save key"}
-              disabled={!target || jevKeyBusy || jevKeyInput.trim() === ""}
-              onPress={() => void saveJevKey(jevKeyInput.trim())}
-            />
-            <Button
-              colors={colors}
-              label="Remove key"
-              disabled={!target || jevKeyBusy || jevView?.hasKey !== true}
-              onPress={() => void saveJevKey(null)}
-            />
-            <Button
-              colors={colors}
-              label={jevTestBusy ? "Testing…" : "Test connection"}
-              disabled={!target || jevTestBusy || jevView?.hasKey !== true}
-              onPress={() => void runJevTest()}
-            />
-          </View>
-          {jevTest ? (
-            <Text style={[styles.mutedSmall, { color: jevTest.ok ? colors.statusSuccess : colors.statusDanger }]}>
-              {jevTest.ok ? "Connection OK" : "Connection failed"}{jevTest.detail ? ` — ${jevTest.detail}` : ""}
-            </Text>
-          ) : null}
+          ) : (
+            <>
+              {// Saved provider strip — the SAVED provider/model/baseUrl
+               // stays visible above the unsaved settings so a dirty draft
+               // never looks like the live config (mockup finding 1).
+              }
+              <View style={[styles.savedProvider, { borderLeftColor: colors.accent, backgroundColor: colors.surface2 }]}>
+                <Text style={[styles.eyebrow, { color: colors.foregroundMuted }]}>Saved provider</Text>
+                <View style={[styles.cardHeadRow, { justifyContent: "space-between" }]}>
+                  <Text style={[styles.checkTitle, { color: colors.foreground }]}>
+                    {jevView.provider ? JEV_KIND_LABEL[jevView.provider.kind] : "Not configured"}
+                  </Text>
+                  {jevView.configured ? (
+                    <Badge
+                      colors={colors}
+                      label={jevView.enabled === true ? "Configured · enabled" : "Configured · disabled"}
+                      tone="good"
+                    />
+                  ) : null}
+                </View>
+                <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                  {jevView.provider
+                    ? `${jevView.provider.model} · ${jevView.provider.baseUrl} · ${jevView.hasKey
+                        ? jevView.keyPermissionsOk === false
+                          ? "Key stored — file permissions too open (chmod 600)"
+                          : "Key stored"
+                        : "No key stored"}`
+                    : "No saved settings — Apply writes the first configuration."}
+                </Text>
+                {jevView.error ? (
+                  <Text style={[styles.mutedSmall, { color: colors.statusDanger }]}>config error: {jevView.error}</Text>
+                ) : null}
+              </View>
+              <View style={[styles.cardHeadRow, { justifyContent: "space-between" }]}>
+                <Text style={[styles.fieldLabel, { color: colors.foreground }]}>
+                  {jevDirty ? "Unsaved settings" : "Settings"}
+                </Text>
+                {jevDirty ? <Badge colors={colors} label="Apply before key actions" tone="draft" /> : null}
+              </View>
+              <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Provider</Text>
+              <ChipSelect<"openrouter" | "typesafe">
+                colors={colors}
+                value={jevKind}
+                options={[
+                  { label: "OpenRouter", value: "openrouter" },
+                  { label: "TypeSafe (first-party)", value: "typesafe" },
+                ]}
+                disabled={!target || jevBusy}
+                onChange={next => {
+                  markJevEdited();
+                  setJevKind(next);
+                  setJevModel(JEV_KIND_DEFAULT[next].model);
+                  setJevBaseUrl(JEV_KIND_DEFAULT[next].baseUrl);
+                }}
+              />
+              <View style={styles.field}>
+                <Field
+                  colors={colors}
+                  label="Model"
+                  hint={jevKind === "typesafe"
+                    ? "Pinned versioned id (jev-<semver>) — aliases like jev-latest are rejected"
+                    : "Pinned <owner>/jev-<version> id — aliases like jev-latest are rejected"}
+                  value={jevModel}
+                  onChangeText={text => { markJevEdited(); setJevModel(text); }}
+                  placeholder={JEV_KIND_DEFAULT[jevKind].model}
+                  disabled={!target || jevBusy}
+                />
+                {jevModelError ? (
+                  <Text style={[styles.mutedSmall, { color: colors.statusDanger }]} accessibilityLiveRegion="polite">
+                    {jevModelError}
+                  </Text>
+                ) : null}
+              </View>
+              <View style={styles.field}>
+                <Field
+                  colors={colors}
+                  label={jevBaseUrl.trim() !== "" && jevBaseUrl.trim() !== JEV_KIND_DEFAULT[jevKind].baseUrl
+                    ? "Base URL (custom)"
+                    : "Base URL"}
+                  hint={`POST ${(jevBaseUrl.trim() === "" ? JEV_KIND_DEFAULT[jevKind].baseUrl : jevBaseUrl.trim()).replace(/\/+$/, "")}${jevKind === "typesafe" ? "/v1/systemone" : "/api/alpha/decisions"}${jevKind === "typesafe" ? " — an origin+path prefix mounts a custom endpoint/proxy" : " — bare origin or the documented …/api/v1 prefixed form"}`}
+                  value={jevBaseUrl}
+                  onChangeText={text => { markJevEdited(); setJevBaseUrl(text); }}
+                  placeholder={JEV_KIND_DEFAULT[jevKind].baseUrl}
+                  disabled={!target || jevBusy}
+                />
+                {jevUrlError ? (
+                  <Text style={[styles.mutedSmall, { color: colors.statusDanger }]} accessibilityLiveRegion="polite">
+                    {jevUrlError}
+                  </Text>
+                ) : null}
+              </View>
+              <SwitchRow
+                colors={colors}
+                checked={jevEnabledOn}
+                disabled={!target || jevBusy}
+                onToggle={next => { markJevEdited(); setJevEnabledOn(next); }}
+                title="Enable Jev"
+                hint="Master toggle — off keeps every capability inert without deleting the stored key."
+              />
+              <SwitchRow
+                colors={colors}
+                checked={jevRoutingOn}
+                disabled={!target || jevBusy || !jevEnabledOn}
+                onToggle={next => { markJevEdited(); setJevRoutingOn(next); }}
+                title="Routing decisions"
+                hint="When armed, prepare requires a Jev decision receipt for catalog routing (run `slp route-decide`); Lead judgment alone no longer suffices."
+              />
+              {jevSaved && !jevDirty ? (
+                <Text style={[styles.mutedSmall, { color: colors.statusSuccess }]} accessibilityLiveRegion="polite">Saved.</Text>
+              ) : null}
+              <Button
+                colors={colors}
+                kind="primary"
+                label={jevBusy ? "Saving…" : "Apply Jev settings"}
+                disabled={!target || jevBusy || !jevDirty}
+                onPress={() => void saveJev()}
+              />
+              <View style={[styles.divider, { borderTopColor: colors.border }]} />
+              {// Key & connection actions name the SAVED provider — they
+               // operate on the stored config, so a dirty draft locks them
+               // until Apply (mockup finding 1).
+              }
+              <Text style={[styles.fieldLabel, { color: colors.foreground }]}>
+                Key & connection · {JEV_KIND_LABEL[jevView.provider?.kind ?? jevKind]}
+              </Text>
+              {jevDirty ? (
+                <View style={[styles.noticeBox, { borderColor: colors.statusWarning, backgroundColor: colors.surface2 }]}>
+                  <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
+                    Apply settings before managing a key or testing — these actions use the saved
+                    provider: {JEV_KIND_LABEL[jevView.provider?.kind ?? jevKind]}. Any previous test
+                    result is no longer current.
+                  </Text>
+                </View>
+              ) : null}
+              <Field
+                colors={colors}
+                label={`${JEV_KIND_LABEL[jevView.provider?.kind ?? jevKind]} API key`}
+                hint={`Stored at slp-runtime/state/${JEV_KIND_DEFAULT[jevView.provider?.kind ?? jevKind].keyFile} (0600) — never shown back; enter a new key to replace it`}
+                value={jevKeyInput}
+                onChangeText={text => { setJevKeyInput(text); setJevTest(null); }}
+                placeholder={JEV_KIND_DEFAULT[jevView.provider?.kind ?? jevKind].keyPlaceholder}
+                disabled={!target || jevKeyBusy || jevDirty}
+                secure
+              />
+              {jevKeyInput.trim() !== "" ? (
+                <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
+                  Unsaved key — save it before testing.
+                </Text>
+              ) : null}
+              <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+                <Button
+                  colors={colors}
+                  label={jevKeyBusy ? "Working…" : `Save ${JEV_KIND_LABEL[jevView.provider?.kind ?? jevKind]} key`}
+                  disabled={!target || jevKeyBusy || jevDirty || jevKeyInput.trim() === ""}
+                  onPress={() => void saveJevKey(jevKeyInput.trim())}
+                />
+                <Button
+                  colors={colors}
+                  label={`Remove ${JEV_KIND_LABEL[jevView.provider?.kind ?? jevKind]} key`}
+                  disabled={!target || jevKeyBusy || jevDirty || jevView?.hasKey !== true}
+                  onPress={() => void saveJevKey(null)}
+                />
+                <Button
+                  colors={colors}
+                  label={jevTestBusy ? "Testing…" : `Test ${JEV_KIND_LABEL[jevView.provider?.kind ?? jevKind]} connection`}
+                  disabled={!target || jevTestBusy || jevDirty || jevView?.hasKey !== true || jevKeyInput.trim() !== ""}
+                  onPress={() => void runJevTest()}
+                />
+              </View>
+              {jevTest ? (
+                <Text style={[styles.mutedSmall, { color: jevTest.ok ? colors.statusSuccess : colors.statusDanger }]} accessibilityLiveRegion="polite">
+                  {jevTest.ok ? "Connection OK" : "Connection failed"}{jevTest.detail ? ` — ${jevTest.detail}` : ""}
+                </Text>
+              ) : null}
+            </>
+          )}
         </Card>
       ) : null}
 
