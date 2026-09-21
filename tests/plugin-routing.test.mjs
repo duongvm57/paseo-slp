@@ -11,7 +11,9 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -378,4 +380,286 @@ test('deactivation under a settings-driven binding still removes every owned id'
   const done = await waitTerminal(manager, home, deact.operation.operationId, daemon);
   assert.equal(done.operation.outcome, 'succeeded');
   assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// Peer pool: plugin-owned user-scope catalog at state/peer-pool.json
+// ---------------------------------------------------------------------------
+
+const poolPath = home => join(home, 'slp-runtime', 'state', 'peer-pool.json');
+const legacyPoolPath = home => join(home, 'slp-routing.json');
+const writeFile = (path, text) => {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, text, { mode: 0o600 });
+};
+
+const poolFixture = {
+  version: 1,
+  policy: 'Peers pick the cheapest live seat that fits the work.',
+  quotaFallback: { enabled: true, optionIds: ['peer-eng'] },
+  options: [{
+    id: 'peer-eng',
+    provider: 'codex',
+    roles: ['peer'],
+    model: 'gpt-5-codex',
+    enabled: true,
+    availability: 'ready',
+    modeId: 'fast',
+    suitableFor: ['bounded coding tasks'],
+    avoidFor: ['open-ended research'],
+    notes: 'Local-only annotation — never sent to Jev.',
+  }],
+};
+
+const getPool = (manager, home) =>
+  manager.getPeerPool({ schemaVersion: 1, target: targetOf(home) });
+const setPool = (manager, home, pool, expectedSha256) =>
+  manager.setPeerPool({ schemaVersion: 1, target: targetOf(home), pool, expectedSha256 });
+
+test('peer pool round-trips through get/set under sha256 CAS', async t => {
+  const home = makeHome(t);
+  const manager = createManager(makeDeps());
+  const file = poolPath(home);
+
+  // Absent file → all null, no error.
+  assert.equal(existsSync(file), false);
+  assert.deepEqual(await getPool(manager, home), {
+    schemaVersion: 1, pool: null, sha256: null, error: null, legacy: null, legacyError: null,
+  });
+
+  // First write: expectedSha256 null means "expect no file".
+  const written = await setPool(manager, home, poolFixture, null);
+  assert.deepEqual(written.pool, poolFixture);
+  assert.equal(lstatSync(file).mode & 0o777, 0o600);
+  assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), poolFixture);
+
+  // Read returns the pool plus the hash token the next write must carry.
+  const read = await getPool(manager, home);
+  assert.deepEqual(read.pool, poolFixture);
+  assert.equal(read.sha256, written.sha256);
+  assert.equal(read.error, null);
+
+  // Whole-file overwrite with the correct token lands and rotates the hash.
+  const next = { ...poolFixture, policy: 'Amended policy' };
+  const rewritten = await setPool(manager, home, next, read.sha256);
+  assert.notEqual(rewritten.sha256, read.sha256);
+  assert.deepEqual((await getPool(manager, home)).pool, next);
+
+  // No tmp siblings survive the atomic write.
+  const stateDir = join(home, 'slp-runtime', 'state');
+  assert.deepEqual(readdirSync(stateDir).filter(name => name.endsWith('.tmp')), []);
+});
+
+test('set-peer-pool refuses a stale sha256 and leaves the file untouched', async t => {
+  const home = makeHome(t);
+  const manager = createManager(makeDeps());
+  const file = poolPath(home);
+
+  const first = await setPool(manager, home, poolFixture, null);
+  const before = readFileSync(file, 'utf8');
+
+  // A writer holding the pre-write view (null) or an old token both fail.
+  for (const [name, expectedSha256] of [['null token on existing file', null], ['stale token', 'f'.repeat(64)]]) {
+    const err = await setPool(manager, home, poolFixture, expectedSha256).catch(e => e);
+    assert.equal(err?.name, 'OperationConflict', name);
+    assert.equal(err?.code, 'IDEMPOTENCY_CONFLICT', name);
+    assert.match(err?.message ?? '', /peer pool changed/, name);
+    assert.equal(readFileSync(file, 'utf8'), before, `${name}: conflict never touches the file`);
+  }
+  assert.equal(first.sha256, (await getPool(manager, home)).sha256);
+});
+
+test('get-peer-pool surfaces a malformed file with its sha256 so CAS overwrite still works', async t => {
+  const home = makeHome(t);
+  const manager = createManager(makeDeps());
+  const file = poolPath(home);
+
+  writeFile(file, '{ not json');
+  const bad = await getPool(manager, home);
+  assert.equal(bad.pool, null);
+  assert.match(bad.error, /not valid JSON/);
+  assert.equal(typeof bad.sha256, 'string', 'sha256 of raw bytes still reported');
+
+  // The editor can overwrite the corrupt file under CAS with that token.
+  const fixed = await setPool(manager, home, poolFixture, bad.sha256);
+  assert.deepEqual((await getPool(manager, home)).pool, poolFixture);
+  assert.equal(fixed.sha256, (await getPool(manager, home)).sha256);
+});
+
+test('legacy slp-routing.json is offered for import and never modified', async t => {
+  const home = makeHome(t);
+  const manager = createManager(makeDeps());
+  const legacyFile = legacyPoolPath(home);
+  const legacyPool = {
+    ...poolFixture,
+    quotaFallback: { enabled: true, optionIds: ['peer-legacy'] },
+    options: [{ ...poolFixture.options[0], id: 'peer-legacy' }],
+  };
+
+  writeFile(legacyFile, `${JSON.stringify(legacyPool)}\n`);
+  const before = readFileSync(legacyFile, 'utf8');
+
+  // Absent peer-pool.json but present legacy file → legacy pool readable.
+  const read = await getPool(manager, home);
+  assert.equal(read.pool, null);
+  assert.deepEqual(read.legacy, legacyPool);
+  assert.equal(read.legacyError, null);
+
+  // Saving the pool writes only state/peer-pool.json; legacy bytes untouched.
+  await setPool(manager, home, legacyPool, null);
+  assert.equal(readFileSync(legacyFile, 'utf8'), before, 'legacy file is read-only');
+  assert.deepEqual((await getPool(manager, home)).pool, legacyPool);
+
+  // A malformed legacy file surfaces as legacyError, not as the pool error.
+  writeFile(legacyFile, '{ not json');
+  const broken = await getPool(manager, home);
+  assert.equal(broken.legacy, null);
+  assert.match(broken.legacyError, /not valid JSON/);
+  assert.equal(broken.error, null, 'pool file is fine — only legacy is broken');
+});
+
+test('set-peer-pool rejects malformed input and unknown keys', async t => {
+  const home = makeHome(t);
+  const manager = createManager(makeDeps());
+  const target = targetOf(home);
+  const cases = [
+    ['unknown top-level key', { schemaVersion: 1, target, pool: poolFixture, expectedSha256: null, extra: 1 }],
+    ['missing pool', { schemaVersion: 1, target, expectedSha256: null }],
+    ['pool wrong version', { schemaVersion: 1, target, pool: { ...poolFixture, version: 2 }, expectedSha256: null }],
+    ['empty policy', { schemaVersion: 1, target, pool: { ...poolFixture, policy: '' }, expectedSha256: null }],
+    ['quotaFallback unknown key', { schemaVersion: 1, target, pool: { ...poolFixture, quotaFallback: { enabled: true, optionIds: ['peer-eng'], bogus: 1 } }, expectedSha256: null }],
+    ['unknown option provider', { schemaVersion: 1, target, pool: { ...poolFixture, options: [{ ...poolFixture.options[0], provider: 'gpt' }] }, expectedSha256: null }],
+    ['non-string expectedSha256', { schemaVersion: 1, target, pool: poolFixture, expectedSha256: 7 }],
+    ['wrong schemaVersion', { schemaVersion: 2, target, pool: poolFixture, expectedSha256: null }],
+  ];
+  for (const [name, input] of cases) {
+    await assert.rejects(() => manager.setPeerPool(input), /invalid set-peer-pool input/, name);
+  }
+  await assert.rejects(
+    () => manager.getPeerPool({ schemaVersion: 1 }),
+    /invalid get-peer-pool input/,
+  );
+  assert.equal(existsSync(poolPath(home)), false, 'a rejected write never creates the file');
+});
+
+// ---------------------------------------------------------------------------
+// Schema parity: the wire schema and the package validator must never drift
+// ---------------------------------------------------------------------------
+// set-peer-pool writes bytes that src/routing.mjs::readCatalog later validates
+// for every repository without a repo-pinned catalog. A verdict mismatch means
+// either a saved pool that kills prepare/routes on every unpinned repo (wire
+// looser), or a healthy file the Manager reports as broken (wire stricter).
+// This table pins both sides to the same accept/reject verdict per case.
+
+import { PeerPool } from '../plugin/shared/contracts.ts';
+import { validateCatalog } from '../src/routing.mjs';
+
+test('plugin PeerPool schema and package validateCatalog agree on every verdict', () => {
+  const seat = {
+    id: 'peer-eng', provider: 'codex', roles: ['peer'], model: 'gpt-5-codex',
+    enabled: true, availability: 'ready', suitableFor: ['bounded coding'],
+    avoidFor: ['open-ended research'], notes: 'Local-only note.',
+  };
+  const parked = {
+    ...seat, id: 'peer-parked', provider: '', model: '', enabled: false,
+    notes: 'Archetype seat parked until configured.',
+  };
+  const base = { version: 1, policy: 'Peers pick the cheapest live seat that fits.', options: [seat] };
+  const opt = patch => ({ ...seat, ...patch });
+  const pool = patch => ({ ...base, ...patch });
+  const cases = [
+    // Valid shapes first — both sides must accept.
+    ['valid pool', base, true],
+    ['parked archetype seat (blank provider+model, disabled)', pool({ options: [seat, parked] }), true],
+    ['legacy extra option key (priority)', pool({ options: [opt({ priority: 3 })] }), true],
+    ['extra top-level key', pool({ extra: 1 }), true],
+    ['explicit nulls on nullish keys', pool({ quotaFallback: null, options: [opt({ modeId: null, thinkingOptionId: null, features: null })] }), true],
+    ['devin enabled + swe-2 model', pool({ options: [opt({ provider: 'devin', model: 'swe-2-max' })] }), true],
+    ['devin disabled + non-swe-2 model', pool({ options: [opt({ provider: 'devin', model: 'other', enabled: false })] }), true],
+    ['quotaFallback disabled + empty optionIds', pool({ quotaFallback: { enabled: false, optionIds: [] } }), true],
+    ['quotaFallback enabled + known ids', pool({ quotaFallback: { enabled: true, optionIds: ['peer-eng'] } }), true],
+    ['empty options list', pool({ options: [] }), true],
+    ['empty suitableFor/avoidFor arrays', pool({ options: [opt({ suitableFor: [], avoidFor: [] })] }), true],
+
+    // Write-direction mismatches the review reproduced — both sides must reject.
+    ['blank provider + enabled', pool({ options: [opt({ provider: '' })] }), false],
+    ['enabled + empty model', pool({ options: [opt({ model: '' })] }), false],
+    ['model with space', pool({ options: [opt({ model: 'gpt 5' })] }), false],
+    ['model with newline', pool({ options: [opt({ model: 'gpt-5\n' })] }), false],
+    ['model with control char', pool({ options: [opt({ model: 'gpt-5\x07' })] }), false],
+    ['devin enabled + non-swe-2 model', pool({ options: [opt({ provider: 'devin', model: 'gpt-5' })] }), false],
+    ['modeId whitespace', pool({ options: [opt({ modeId: ' ' })] }), false],
+    ['modeId bad chars', pool({ options: [opt({ modeId: 'fast!' })] }), false],
+    ['thinkingOptionId bad chars', pool({ options: [opt({ thinkingOptionId: 'a b' })] }), false],
+    ['policy whitespace-only', pool({ policy: '   ' }), false],
+    ['notes whitespace-only', pool({ options: [opt({ notes: ' ' })] }), false],
+    ['suitableFor whitespace element', pool({ options: [opt({ suitableFor: [' '] })] }), false],
+    ['avoidFor whitespace element', pool({ options: [opt({ avoidFor: [' ', 'ok'] })] }), false],
+    ['duplicate option ids', pool({ options: [seat, seat] }), false],
+    ['quotaFallback unknown id', pool({ quotaFallback: { enabled: false, optionIds: ['peer-ghost'] } }), false],
+    ['quotaFallback duplicate ids', pool({ quotaFallback: { enabled: false, optionIds: ['peer-eng', 'peer-eng'] } }), false],
+    ['quotaFallback enabled + empty ids', pool({ quotaFallback: { enabled: true, optionIds: [] } }), false],
+    ['quotaFallback extra key', pool({ quotaFallback: { enabled: false, optionIds: [], bogus: 1 } }), false],
+
+    // Read-direction mismatches — the wire must accept what the package reads.
+    ['modeId null reads fine', pool({ options: [opt({ modeId: null })] }), true],
+    ['features null reads fine', pool({ options: [opt({ features: null })] }), true],
+
+    // Shape-level rejects both sides share.
+    ['unknown provider family', pool({ options: [opt({ provider: 'gpt' })] }), false],
+    ['unknown provider + disabled', pool({ options: [opt({ provider: 'gpt', enabled: false })] }), false],
+    ['roles empty', pool({ options: [opt({ roles: [] })] }), false],
+    ['roles unknown value', pool({ options: [opt({ roles: ['peer', 'bogus'] })] }), false],
+    ['availability unknown', pool({ options: [opt({ availability: 'gone' })] }), false],
+    ['enabled non-boolean', pool({ options: [opt({ enabled: 'yes' })] }), false],
+    ['features array', pool({ options: [opt({ features: [1] })] }), false],
+    ['features string', pool({ options: [opt({ features: 'x' })] }), false],
+    ['version 2', pool({ version: 2 }), false],
+    ['options non-array', pool({ options: {} }), false],
+    ['missing notes', pool({ options: [opt({ notes: undefined })] }), false],
+    ['non-record option', pool({ options: ['x'] }), false],
+    ['missing policy', { version: 1, options: [seat] }, false],
+    ['id bad pattern', pool({ options: [opt({ id: 'Peer_X' })] }), false],
+    ['id empty', pool({ options: [opt({ id: '' })] }), false],
+    ['optionIds non-string element', pool({ quotaFallback: { enabled: false, optionIds: [7] } }), false],
+    ['quotaFallback array', pool({ quotaFallback: [] }), false],
+    ['suitableFor non-array', pool({ options: [opt({ suitableFor: 'x' })] }), false],
+    ['non-record catalog', 'x', false],
+    ['null catalog', null, false],
+  ];
+  for (const [name, candidate, expected] of cases) {
+    let pkg;
+    try { validateCatalog(candidate); pkg = true; } catch { pkg = false; }
+    const wire = PeerPool.safeParse(candidate).success;
+    assert.equal(pkg, expected, `${name}: package verdict`);
+    assert.equal(wire, expected, `${name}: wire verdict`);
+    assert.equal(pkg, wire, `${name}: schemas diverged`);
+  }
+});
+
+test('legacy fs failure degrades to legacyError; pool fs failure throws IO_FAILURE', async t => {
+  const home = makeHome(t);
+  const manager = createManager(makeDeps());
+
+  // A directory where the legacy file should be: the advisory probe reports
+  // the fs error as evidence and the healthy pool still answers.
+  mkdirSync(legacyPoolPath(home));
+  await setPool(manager, home, poolFixture, null);
+  const read = await getPool(manager, home);
+  assert.deepEqual(read.pool, poolFixture);
+  assert.equal(read.legacy, null);
+  assert.match(read.legacyError, /unreadable|EISDIR/);
+
+  // The pool path itself failing to read must fail loud with a coded
+  // conflict, not render the pool as absent.
+  rmSync(poolPath(home));
+  mkdirSync(poolPath(home));
+  const err = await getPool(manager, home).catch(e => e);
+  assert.equal(err?.name, 'OperationConflict');
+  assert.equal(err?.code, 'IO_FAILURE');
+  assert.match(err?.message ?? '', /unreadable|EISDIR/);
+  // set-peer-pool hits the same wall at the CAS gate rather than treating the
+  // unreadable file as absent.
+  const writeErr = await setPool(manager, home, poolFixture, null).catch(e => e);
+  assert.equal(writeErr?.code, 'IO_FAILURE');
 });

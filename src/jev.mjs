@@ -15,8 +15,8 @@
 //   <daemonHome>/slp-runtime/state/jev.json            mode 0600
 //   { schemaVersion: 1,
 //     enabled: boolean,
-//     capabilities: { routing: boolean, ...future bools },
-//     provider: { kind: "openrouter", baseUrl?, model } }
+//     capabilities: { routing: boolean, ...future bools },   // only when enabled
+//     provider: { kind: "openrouter", baseUrl?, model } }    // only when enabled
 // Key: <daemonHome>/slp-runtime/state/jev-<kind>.key   mode must be *00
 //
 // OpenRouter mapping (verified 2026-09-20 against the OpenRouter OpenAPI at
@@ -92,6 +92,15 @@ export function readJevConfig(home) {
   }
   if (!record(parsed) || parsed.schemaVersion !== 1) throw jevError('jev-config-invalid', `Jev config at ${path} requires schemaVersion=1`);
   if (typeof parsed.enabled !== 'boolean') throw jevError('jev-config-invalid', `Jev config at ${path}: enabled must be a boolean`);
+  // The OFF path must stay readable: capabilities/provider only gate Jev while
+  // it is in use, and catalogBinding reads this file on every Peer prepare —
+  // a coherent "disabled, not configured yet" config must not block unrelated
+  // routing work. enabled !== true returns a bare view with no provider and
+  // no armed capabilities; the full validation below runs only when Jev is
+  // actually on, where a broken config still fails loud.
+  if (parsed.enabled !== true) {
+    return { path, enabled: false, capabilities: {}, provider: null };
+  }
   if (!record(parsed.capabilities) || Object.values(parsed.capabilities).some(value => typeof value !== 'boolean')) {
     throw jevError('jev-config-invalid', `Jev config at ${path}: capabilities must be a record of booleans`);
   }

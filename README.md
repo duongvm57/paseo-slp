@@ -158,7 +158,8 @@ availability and conflicts before changing anything.
 - No agent is created during install or activation. The three roles stay
   intact.
 - **Peers need no saved profile** — the Lead picks each Peer's runtime from
-  the project pool in `.paseo-slp/slp-routing.json`.
+  the Peer pool (the user-scope `slp-runtime/state/peer-pool.json`, or a
+  repo-pinned `.paseo-slp/slp-routing.json`).
 - Repos keep their tactics in `.paseo-slp/workspace-protocol.md`; onboarding
   guides you through both files.
 - If a pre-existing entry owns an SLP provider/profile ID, activation fails
@@ -336,21 +337,29 @@ Init only creates missing files and never overwrites existing ones:
 
 - `.paseo-slp/workspace-protocol.md`: operating procedure, risk levels,
   proof gates, budget and fallback authority.
-- `.paseo-slp/slp-routing.json`: the Peer runtime pool. Init seeds the
-  [task-type skeleton](src/templates/slp-routing.json) — disabled seats
-  named for kinds of work; onboarding fills real models from discovery
-  before delegation. While a repo has no such file, the runtime reads the
-  user-scope catalog `$PASEO_HOME/slp-routing.json` (default `~/.paseo`).
 - `.paseo-slp/notebook.md`: the default Supervisor notebook; the protocol
   records its owner and the actual retrieval method (this file or
   `timeline:<agentId>`).
 
-The user-scope catalog `$PASEO_HOME/slp-routing.json` is **not** created by
-the plugin — activation only manages `config.json` and `slp-runtime/`. It
-comes from `slp.mjs init` or onboarding writing it for you; while absent,
-repos without their own catalog simply have no fallback pool (not an
-error). Deactivation and `plugin remove` never touch it — once it exists it
-is yours.
+Init writes no routing catalog. While a repo has no
+`.paseo-slp/slp-routing.json`, the runtime reads the plugin-owned user-scope
+pool `$PASEO_HOME/slp-runtime/state/peer-pool.json` (default `~/.paseo`) —
+the SLP Manager's Peer pool card is its sole writer, seeding seats from an
+archetype list and taking model/mode values from the live provider catalog.
+A repository catalog is a deliberate pin, created only by
+`init --routing-from` (below).
+
+A legacy `$PASEO_HOME/slp-routing.json` from an earlier version is never
+deleted automatically: the Peer pool card offers a one-time import of it
+into `peer-pool.json`.
+
+Compatibility note: the new pool is one-way. `peer-pool.json` sits at a path
+older runtimes never read, and its content fails their `validateCatalog` —
+parked seats carry a blank `provider`, and `priority` is no longer written.
+Downgrading the runtime or pointing an older retained installation at the
+same `$PASEO_HOME` makes every unpinned repository fail closed with
+`Missing Peer pool`/validation errors until the pool is removed or re-authored
+in the old format.
 
 ### Onboarding
 
@@ -382,17 +391,21 @@ ask to onboard/set up SLP for the repo; the skill description triggers the
 workflow. See the [source skill](skills/paseo-slp-onboarding/SKILL.md).
 
 Protocol and catalog are two separate files: the protocol is operating
-guidance, the JSON is machine-checkable data that changes often. Both belong
-to the repo and can be versioned with the code; do not embed JSON inside
-Markdown. The Lead reads the protocol and pool before every Peer delegation,
-picks an option by task/budget, then passes the relevant constraints into the
-assignment. A new worktree needs these files present in the base candidate or
-an authorized copy; each worktree reads its own configuration.
+guidance, the JSON is machine-checkable data that changes often. The protocol
+lives in the repo's `.paseo-slp/`; the Peer pool lives in the user-scope
+`peer-pool.json` by default and lands in the repo only as a deliberate pin —
+a repo catalog means the repo ignores the shared pool permanently, even after
+the file is emptied. Do not embed JSON inside Markdown. The Lead reads the
+protocol and pool before every Peer delegation, picks an option by
+task/budget, then passes the relevant constraints into the assignment. A new
+worktree needs the protocol present in the base candidate or an authorized
+copy (`materialize` carries the catalog only when the source pinned one);
+each worktree reads its own configuration.
 
 ### Importing an existing catalog
 
-If you already have a global table from an earlier version, import it once
-into the repo:
+If you already have a global table from an earlier version — or want a repo
+pinned off the shared pool — import a catalog file once into the repo:
 
 ```bash
 node "$SLP_RT/bin/slp.mjs" init /absolute/job-repo \
@@ -401,9 +414,11 @@ node "$SLP_RT/bin/slp.mjs" init /absolute/job-repo \
 
 Import only creates a catalog when none exists; it does not overwrite, merge
 silently or keep a link to the source file. Afterwards the Human edits the
-repo copy. A repo with no catalog reads the user-scope catalog
-`$PASEO_HOME/slp-routing.json`; an empty catalog in the repo is still
-authoritative (it blocks delegation) until removed. A repo never reads
+repo copy — the plugin never writes repository catalogs. A repo with no
+catalog reads the user-scope pool
+`$PASEO_HOME/slp-runtime/state/peer-pool.json`; an empty catalog in the repo
+is still authoritative (it blocks delegation, and keeps blocking even if the
+shared pool is later emptied) until removed. A repo never reads
 another repo's catalog.
 
 ## How the roles work
@@ -441,27 +456,28 @@ seat — is documented in
 
 **Runtime sources:** Supervisor/Lead use the two saved profiles the Human
 configures in Paseo. Peers use the repo pool `.paseo-slp/slp-routing.json`,
-or the user-scope catalog `$PASEO_HOME/slp-routing.json` when the repo has
-none. Each option carries a `pi`/`codex`/`devin`/`claude` provider, model, settings,
-`suitableFor`, `avoidFor`, `notes`, `priority` and an
+or the plugin-owned user-scope pool
+`$PASEO_HOME/slp-runtime/state/peer-pool.json` when the repo has none — the
+Manager's Peer pool card is its sole writer. Each option carries a
+`pi`/`codex`/`devin`/`claude` provider, model, settings,
+`suitableFor`, `avoidFor`, `notes` and an
 `enabled`/`availability` state. The Lead chooses per task — Engineer,
 Architect and Reviewer are not hard-mapped to models. Two Peers can differ in
-provider/model/effort without any extra saved profile. The seeded
-[task-type skeleton](src/templates/slp-routing.json) shows the shape: each
-seat names a kind of work, and `model` stays blank until filled from live
-discovery on the host.
+provider/model/effort without any extra saved profile. The card's archetype
+list shows the shape: each seat names a kind of work, and provider/`model`
+stay blank until picked from live discovery on the host.
 
 The Lead reads the current pool, records its choice rationale and validates
 option/hash via `prepare` before launching (when Jev routing is armed, the
 rationale trail is the receipt's recorded distribution instead — see
 [Jev-assisted routing](#jev-assisted-routing-optional)). With no valid pool/option at
 either scope, finish onboarding first; there is no fallback to `slp-peer`, to
-the Lead's own settings, or to another repo's catalog. `priority` is a
-selection hint, not a replacement for suitability and budget judgment.
+the Lead's own settings, or to another repo's catalog.
 
 ### Peer quota fallback
 
-Configure it right in `.paseo-slp/slp-routing.json`:
+Configure it in the pool (the Manager's Peer pool card, or
+`.paseo-slp/slp-routing.json` for a repo-pinned pool):
 
 ```json
 "quotaFallback": { "enabled": true, "optionIds": ["luna-code", "glm-design"] }
@@ -707,25 +723,27 @@ packet and tells the new seat not to claim full-candidate coverage for it.
 ### `materialize`
 
 `.paseo-slp/` is gitignored local state with absolute paths, so a fresh
-worktree lacks the protocol and catalog entirely. `materialize` clones them
-from an existing checkout:
+worktree lacks the protocol entirely. `materialize` clones it from an
+existing checkout:
 
 ```bash
 node "$SLP_RT/bin/slp.mjs" materialize /absolute/target-repo --from /absolute/source-repo
 # dry-run by default; add --apply to write
 ```
 
-It copies only `.paseo-slp/workspace-protocol.md` and
-`.paseo-slp/slp-routing.json` (validated) — `notebook.md` is Supervisor-owned
-state and is never copied. Absolute source-root paths inside the protocol's
-YAML frontmatter are rebased to the target root (a longer sibling path like
-`<source>-old` is not a boundary match and stays put). Like `init`, existing
-target files are preserved rather than overwritten; each file reports
-`preserved`/`applied`, plus `sha256` for files it would write. The protocol
-entry also reports `rebased`, and a written copy that found no source-root
-path carries a `warning` instead of silently keeping stale paths. There is
-no fallback to the user-scope catalog or the package template — the source
-checkout is explicit.
+It copies `.paseo-slp/workspace-protocol.md`, and `.paseo-slp/slp-routing.json`
+(validated) only when the source actually pins one — a source that never
+created a catalog materializes the protocol alone, and the target resolves
+the user-scope pool exactly like the source does. `notebook.md` is
+Supervisor-owned state and is never copied. Absolute source-root paths inside
+the protocol's YAML frontmatter are rebased to the target root (a longer
+sibling path like `<source>-old` is not a boundary match and stays put). Like
+`init`, existing target files are preserved rather than overwritten; each
+file reports `preserved`/`applied`, plus `sha256` for files it would write.
+The protocol entry also reports `rebased`, and a written copy that found no
+source-root path carries a `warning` instead of silently keeping stale paths.
+There is no fallback to the user-scope catalog or a package template — the
+source checkout is explicit.
 
 ### `monitor`
 

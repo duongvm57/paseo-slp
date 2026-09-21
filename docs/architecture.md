@@ -204,6 +204,11 @@ Six rules fall out of the role model and shape everything below:
 │     state/jev.json       optional Jev decision-primitive toggles  │
 │     state/jev-*.key      per-daemon provider key (0600,           │
 │                          write-only; status reports hasKey only)  │
+│     state/peer-pool.json the user-scope Peer pool — catalog-      │
+│                          shaped, written whole-file under a       │
+│                          sha256 CAS; sole writer is the Peer      │
+│                          pool card (a repo's own                  │
+│                          .paseo-slp/slp-routing.json wins)        │
 │                                                                  │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -221,8 +226,9 @@ explicitly activates.
 
 Two saved profiles are the only doors in: **SLP Supervisor** and **SLP
 Lead**. Peers never get saved profiles — the Lead chooses a peer provider
-per task from a routing catalog (`.paseo-slp/slp-routing.json`), which is
-what lets one project mix e.g. a Codex Lead with Devin peers.
+per task from the routing pool: a repository's `.paseo-slp/slp-routing.json`
+when pinned, else the user-scope `state/peer-pool.json` above. Either scope
+is what lets one project mix e.g. a Codex Lead with Devin peers.
 
 ## Two lifecycles
 

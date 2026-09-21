@@ -18,16 +18,15 @@ export function validateCatalog(catalog) {
   for (const option of catalog.options) {
     if (!record(option) || !nonempty(option.id) || !/^[a-z][a-z0-9-]*$/.test(option.id) || ids.has(option.id)) throw new Error('Invalid or duplicate routing option id');
     ids.add(option.id);
-    if (!families.includes(option.provider)) throw new Error(`Routing option ${option.id}: provider must be one of ${families.join(', ')}`);
+    if (!families.includes(option.provider) && !(option.provider === '' && option.enabled !== true)) throw new Error(`Routing option ${option.id}: provider must be one of ${families.join(', ')}`);
     if (!Array.isArray(option.roles) || !option.roles.length || option.roles.some(role => !roles.includes(role))) throw new Error(`Routing option ${option.id}: invalid roles`);
     if (typeof option.enabled !== 'boolean' || !statuses.includes(option.availability)) throw new Error(`Routing option ${option.id}: explicit enabled and availability required`);
     if (typeof option.model !== 'string' || (option.enabled && !option.model) || unsafeModelPattern.test(option.model)) throw new Error(`Routing option ${option.id}: invalid model`);
-    if (option.provider === 'devin' && !swe2ModelPattern.test(option.model)) throw new Error(`Routing option ${option.id}: devin options require a swe-2 model`);
+    if (option.provider === 'devin' && option.enabled && !swe2ModelPattern.test(option.model)) throw new Error(`Routing option ${option.id}: devin options require a swe-2 model`);
     for (const key of ['thinkingOptionId', 'modeId']) {
       if (option[key] != null && (typeof option[key] !== 'string' || !settingIdPattern.test(option[key]))) throw new Error(`Routing option ${option.id}: invalid ${key}`);
     }
     if (option.features != null && !record(option.features)) throw new Error(`Routing option ${option.id}: invalid features`);
-    if (!Number.isFinite(option.priority)) throw new Error(`Routing option ${option.id}: priority required`);
     for (const key of ['suitableFor', 'avoidFor']) {
       if (!Array.isArray(option[key]) || option[key].some(value => !nonempty(value))) throw new Error(`Routing option ${option.id}: ${key} must be a string list`);
     }
@@ -55,22 +54,27 @@ export function routingPath(repository) {
 export const paseoHome = () => process.env.PASEO_HOME || join(homedir(), '.paseo');
 
 // Resolution is skill-style: the repository catalog wins when present, otherwise
-// the user-scope catalog <paseoHome>/slp-routing.json is the declared fallback.
-// A malformed or structurally invalid repository file is an authoring error, not
-// a fallback trigger; never substitute another repository's catalog.
+// the plugin-owned user-scope pool <paseoHome>/slp-runtime/state/peer-pool.json
+// is the declared fallback. A malformed or structurally invalid repository file
+// is an authoring error, not a fallback trigger; never substitute another
+// repository's catalog.
 export function readCatalog(repository, home = paseoHome()) {
   if (typeof home !== 'string' || !isAbsolute(home)) throw new Error('Absolute Paseo home required');
-  const stat = path => { try { return lstatSync(path); } catch (error) { if (error.code === 'ENOENT') return null; throw error; } };
+  // ENOENT and ENOTDIR both mean "no catalog at this path" — the user-scope
+  // path nests two levels (slp-runtime/state), so a regular file squatting on
+  // either level surfaces as ENOTDIR; the missing-pool message explains the
+  // resolution order better than a bare errno.
+  const stat = path => { try { return lstatSync(path); } catch (error) { if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return null; throw error; } };
   const repoPath = routingPath(repository);
   const dirStat = stat(join(repoPath, '..'));
   if (dirStat && !dirStat.isDirectory()) throw new Error('Repository .paseo-slp must be a regular directory');
   let path = repoPath, scope = 'repository', fileStat = stat(repoPath);
   if (dirStat == null || fileStat == null) {
-    path = join(home, 'slp-routing.json'); scope = 'user';
+    path = join(home, 'slp-runtime', 'state', 'peer-pool.json'); scope = 'user';
     fileStat = stat(path);
-    if (fileStat == null) throw new Error(`Missing routing catalog: no repository catalog at ${repoPath} and no user-scope catalog at ${path}; run init for this repository or use paseo-slp-onboarding`);
+    if (fileStat == null) throw new Error(`Missing Peer pool: no repository catalog at ${repoPath} and no user-scope pool at ${path}; author the pool in the SLP Manager surface, or run slp.mjs init <repo> --routing-from <file> --apply for a repository-scoped pool`);
   }
-  if (!fileStat.isFile()) throw new Error(`${scope === 'repository' ? 'Repository' : 'User-scope'} routing catalog must be a regular file`);
+  if (!fileStat.isFile()) throw new Error(`${scope === 'repository' ? 'Repository' : 'User-scope'} Peer pool must be a regular file`);
   const bytes = readFileSync(path, 'utf8');
   return { ...validateCatalog(JSON.parse(bytes)), path, scope, sha256: hash(bytes) };
 }
@@ -126,7 +130,9 @@ export function catalogBinding(repository, role, providers, route, home) {
       throw new Error(`Jev routing decision receipt must carry exactly the ${ROUTE_DECISION_QUESTION} question`);
     }
     if (decision.context.role !== role) throw new Error(`Jev decision receipt was issued for a different role — run route-decide for ${role}`);
-    if (jevConfig !== null && decision.model !== jevConfig.provider.model) {
+    // A disabled config carries no provider — there is no configured model to
+    // compare the receipt against, so that check applies only while Jev is on.
+    if (jevConfig?.provider != null && decision.model !== jevConfig.provider.model) {
       throw new Error('Jev decision receipt was issued by a different model than the configured provider — run route-decide again');
     }
     jevChoice = decision.answers[ROUTE_DECISION_QUESTION]?.choice;

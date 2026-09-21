@@ -86,21 +86,20 @@ test('extra files or changed binding block removal before detaching Paseo', t =>
   assert.equal(readFileSync(join(home, 'config.json'), 'utf8'), current);
 });
 
-test('workspace init creates only protocol, routing and notebook once and preserves Human edits independently', t => {
+test('workspace init creates only protocol and notebook once and preserves Human edits independently', t => {
   const { dir, destination } = fixture(t);
   install(root, destination);
   writeFileSync(join(dir, 'AGENTS.md'), 'Human instructions');
   assert.equal(initWorkspace(destination, dir).applied, false);
   assert.equal(existsSync(join(dir, '.paseo-slp')), false);
   const initialized = initWorkspace(destination, dir, true);
-  assert.equal(initialized.files.length, 3);
+  assert.equal(initialized.files.length, 2);
   const protocol = join(dir, '.paseo-slp/workspace-protocol.md');
-  const routing = join(dir, '.paseo-slp/slp-routing.json');
   const notebook = join(dir, '.paseo-slp/notebook.md');
   assert.match(readFileSync(protocol, 'utf8'), /Supervisor and Lead read this file when the assignment lands/);
-  const seeded = readJson(routing).options;
-  assert.deepEqual(seeded, readJson(join(root, 'src/templates/slp-routing.json')).options);
-  assert.ok(seeded.length > 0 && seeded.every(o => o.enabled === false && o.availability === 'unknown'));
+  // A repository routing catalog is a deliberate opt-in — default init never
+  // writes one, so the repo resolves the user-scope pool.
+  assert.equal(existsSync(join(dir, '.paseo-slp/slp-routing.json')), false);
   assert.match(readFileSync(notebook, 'utf8'), /Supervisor notebook/);
   assert.equal(existsSync(join(dir, '.paseo-slp/skills')), false);
   writeFileSync(protocol, 'Human protocol');
@@ -109,7 +108,7 @@ test('workspace init creates only protocol, routing and notebook once and preser
   assert.equal(readFileSync(protocol, 'utf8'), 'Human protocol');
   assert.equal(readFileSync(notebook, 'utf8'), 'Human notebook');
   assert.equal(readFileSync(join(dir, 'AGENTS.md'), 'utf8'), 'Human instructions');
-  rmSync(routing);
+  rmSync(notebook);
   const repaired = initWorkspace(destination, dir, true);
   assert.equal(repaired.files.filter(file => file.applied).length, 1);
   assert.equal(readFileSync(protocol, 'utf8'), 'Human protocol');
@@ -122,7 +121,7 @@ test('repo init imports only an explicit catalog, preserves existing files and r
   writeFileSync(input, 'invalid');
   assert.throws(() => initWorkspace(destination, repository, true, input));
   assert.equal(existsSync(join(repository, '.paseo-slp')), false);
-  const catalog = readJson(join(root, 'src/templates/slp-routing.json'));
+  const catalog = { ...emptyCatalog(), options: [{ id: 'mine', provider: 'pi', roles: ['peer'], model: 'opencode/glm-5.3-flash', enabled: true, availability: 'ready', suitableFor: ['coding'], avoidFor: [], notes: 'imported seat' }] };
   writeFileSync(input, json(catalog));
   const cli = join(destination, 'bin/slp.mjs');
   const run = flags => JSON.parse(execFileSync(process.execPath, [cli, 'init', repository, '--routing-from', input, ...flags], { encoding: 'utf8' }));
@@ -244,24 +243,21 @@ test('reload failure reports applied files and leaves a usable installation for 
   assert.equal(readJson(join(home, 'config.json')).daemon.agentProfiles.length, 2);
 });
 
-test('install scaffolds the user-scope catalog; uninstall removes only an unmodified scaffold', t => {
+test('install scaffolds no user-scope catalog; uninstall preserves legacy and pool files', t => {
   const { home, destination } = fixture(t);
   installPaseo(root, destination, home, true);
-  const catalog = join(home, 'slp-routing.json');
-  assert.deepEqual(readJson(catalog), readJson(join(root, 'src/templates/slp-routing.json')));
-  const removed = uninstallPaseo(destination, true);
-  assert.equal(removed.userCatalog.preserved, false);
-  assert.equal(existsSync(catalog), false);
-});
-
-test('a Human-edited user catalog survives uninstall; an existing catalog is never claimed', t => {
-  const { home, destination } = fixture(t);
-  installPaseo(root, destination, home, true);
-  const catalog = join(home, 'slp-routing.json');
-  writeFileSync(catalog, json({ ...emptyCatalog(), options: [{ id: 'mine' }] }));
-  const kept = uninstallPaseo(destination, true);
-  assert.equal(kept.userCatalog.preserved, true);
-  assert.equal(readJson(catalog).options[0].id, 'mine');
+  // Neither the retired legacy path nor the plugin-owned pool is created by
+  // install — the pool is authored through the plugin Manager surface.
+  assert.equal(existsSync(join(home, 'slp-routing.json')), false);
+  assert.equal(existsSync(join(home, 'slp-runtime', 'state', 'peer-pool.json')), false);
+  // Pre-existing files in the home survive uninstall untouched: the legacy
+  // catalog stays for the one-time import, and plugin state is never removed.
+  writeFileSync(join(home, 'slp-routing.json'), 'Human catalog');
+  mkdirSync(join(home, 'slp-runtime', 'state'), { recursive: true });
+  writeFileSync(join(home, 'slp-runtime', 'state', 'peer-pool.json'), json(emptyCatalog()));
+  uninstallPaseo(destination, true);
+  assert.equal(readFileSync(join(home, 'slp-routing.json'), 'utf8'), 'Human catalog');
+  assert.deepEqual(readJson(join(home, 'slp-runtime', 'state', 'peer-pool.json')), emptyCatalog());
   const { home: home2, destination: dest2 } = fixture(t);
   writeFileSync(join(home2, 'slp-routing.json'), 'Human catalog');
   installPaseo(root, dest2, home2, true);

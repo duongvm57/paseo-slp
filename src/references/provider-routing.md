@@ -20,10 +20,13 @@ launches, not existing sessions.
 Read the assigned repository's .paseo-slp/slp-routing.json with
 `node <installed>/bin/slp.mjs routes <absolute-repository>` before each delegation.
 Resolution is skill-style: the repository catalog wins when present; when the
-repository has no catalog, routes resolves the user-scope catalog
-($PASEO_HOME/slp-routing.json, default ~/.paseo) and reports scope/path.
+repository has no catalog, routes resolves the plugin-owned user-scope pool
+($PASEO_HOME/slp-runtime/state/peer-pool.json, default ~/.paseo) and reports
+scope/path. The Manager's Peer pool card is that file's sole writer — its
+model/mode/thinking values come from the live provider catalog, so a seat
+cannot name a mode the provider never offered.
 Each option contains an id, provider family (pi/codex/devin/claude), model, optional modeId,
-thinkingOptionId/features, roles, enabled, availability, priority, suitableFor,
+thinkingOptionId/features, roles, enabled, availability, suitableFor,
 avoidFor and notes. Human/onboarding establishes the pool and suitability under
 project setup authority; Lead chooses within it for each task and budget.
 
@@ -92,7 +95,7 @@ this is guidance, not a hard schema, because what a good brief needs is
 itself measured during shadow evaluation. The helper computes the eligible
 candidate set deterministically — the same `optionExclusions` tokens prepare
 enforces — plus one explicit `no-suitable-option` sentinel, sends
-`{brief, role, options}` as state (catalog `notes` and `priority` are
+`{brief, role, options}` as state (catalog `notes` are
 withheld), and emits `{optionId, catalogSha256, decision}` where `decision`
 is the receipt. prepare then takes `route.optionId` +
 `route.catalogSha256` + `route.decision` and verifies the receipt offline:

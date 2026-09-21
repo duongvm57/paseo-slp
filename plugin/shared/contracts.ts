@@ -215,6 +215,121 @@ export const SetRoleRoutingOutput = z.object({
   schemaVersion: z.literal(1),
   routing: RoleRouting,
 }).strict();
+/** One seat in the user-scope Peer pool — the wire mirror of the package's
+ *  routing-catalog option (src/routing.mjs validateCatalog). `provider` and
+ *  `model` may be empty while `enabled` is false: an archetype-seeded seat
+ *  stays parked until the Human fills both from live catalog discovery. The
+ *  editor writes availability:"ready" and roles:["peer"] always; the schema
+ *  keeps the full file vocabulary so a stored pool round-trips verbatim.
+ *  Passthrough, not strict — the package validator tolerates extra option
+ *  keys (a legacy file may still carry `priority`), so the wire does too. */
+// These three patterns mirror settingIdPattern / unsafeModelPattern /
+// swe2ModelPattern in src/binding.mjs — the shared boundary cannot import the
+// package, so the parity test in tests/plugin-routing.test.mjs pins this
+// schema to the same accept/reject verdicts as validateCatalog.
+const POOL_SETTING_ID = /^[a-zA-Z0-9._-]+$/;
+const POOL_UNSAFE_MODEL = /[\s\x00-\x1f\x7f]/;
+const POOL_SWE2_MODEL = /^swe-2($|-)/;
+const poolNonempty = (s: string) => s.trim().length > 0;
+
+export const PeerPoolOption = z.object({
+  id: z.string().regex(/^[a-z][a-z0-9-]*$/),
+  provider: z.union([Family, z.literal("")]),
+  roles: z.array(z.enum(["supervisor", "lead", "peer"])).min(1),
+  model: z.string().refine(v => !POOL_UNSAFE_MODEL.test(v)),
+  enabled: z.boolean(),
+  availability: z.enum(["ready", "quota-exhausted", "paused", "unknown"]),
+  // validateCatalog treats explicit null like absence on these four keys.
+  thinkingOptionId: z.string().regex(POOL_SETTING_ID).nullish(),
+  modeId: z.string().regex(POOL_SETTING_ID).nullish(),
+  features: z.record(z.string(), z.unknown()).nullish(),
+  suitableFor: z.array(z.string().refine(poolNonempty)),
+  avoidFor: z.array(z.string().refine(poolNonempty)),
+  notes: z.string().refine(poolNonempty),
+}).passthrough().superRefine((option, ctx) => {
+  // Cross-field rules validateCatalog enforces that field shapes alone cannot:
+  // a blank provider parks the seat (enabled must stay false), an enabled seat
+  // needs a model, and an enabled devin seat needs a swe-2 model.
+  if (option.provider === "" && option.enabled === true) {
+    ctx.addIssue({ code: "custom", path: ["provider"], message: "enabled options require a provider family" });
+  }
+  if (option.enabled === true && !option.model) {
+    ctx.addIssue({ code: "custom", path: ["model"], message: "enabled options require a model" });
+  }
+  if (option.provider === "devin" && option.enabled === true && !POOL_SWE2_MODEL.test(option.model)) {
+    ctx.addIssue({ code: "custom", path: ["model"], message: "devin options require a swe-2 model" });
+  }
+});
+/** Plugin-owned mutable state at slp-runtime/state/peer-pool.json — the
+ *  user-scope Peer pool, whole-file-overwrite under sha256 CAS. quotaFallback
+ *  is strict because the package validator is strict there (unknown keys
+ *  fail); the top-level object stays passthrough like the option schema. */
+export const PeerPool = z.object({
+  version: z.literal(1),
+  policy: z.string().refine(poolNonempty),
+  quotaFallback: z.object({
+    enabled: z.boolean(),
+    optionIds: z.array(z.string()),
+  }).strict().nullish(),
+  options: z.array(PeerPoolOption),
+}).passthrough().superRefine((pool, ctx) => {
+  const ids = new Set<string>();
+  pool.options.forEach((option, index) => {
+    if (ids.has(option.id)) {
+      ctx.addIssue({ code: "custom", path: ["options", index, "id"], message: `duplicate option id ${option.id}` });
+    }
+    ids.add(option.id);
+  });
+  const fallback = pool.quotaFallback;
+  if (fallback != null) {
+    if (new Set(fallback.optionIds).size !== fallback.optionIds.length) {
+      ctx.addIssue({ code: "custom", path: ["quotaFallback", "optionIds"], message: "quotaFallback optionIds must be unique" });
+    }
+    fallback.optionIds.forEach((id, index) => {
+      if (!ids.has(id)) {
+        ctx.addIssue({ code: "custom", path: ["quotaFallback", "optionIds", index], message: `quotaFallback option ${id} is not in this pool` });
+      }
+    });
+    if (fallback.enabled && fallback.optionIds.length === 0) {
+      ctx.addIssue({ code: "custom", path: ["quotaFallback", "optionIds"], message: "enabled quotaFallback needs pool optionIds" });
+    }
+  }
+});
+export const GetPeerPoolInput = z.object({
+  schemaVersion: z.literal(1),
+  target: Target,
+}).strict();
+export const GetPeerPoolOutput = z.object({
+  schemaVersion: z.literal(1),
+  /** The stored user-scope pool, or null when no peer-pool.json exists or its
+   *  content fails schema parsing (then `error` carries the evidence). */
+  pool: PeerPool.nullable(),
+  /** sha256 of the raw file bytes — the optimistic-concurrency token
+   *  set-peer-pool requires. Present whenever the file exists, even when
+   *  `pool` is null. null means the file is absent. */
+  sha256: Sha.nullable(),
+  error: z.string().nullable(),
+  /** One-time import source: the retired <daemonHome>/slp-routing.json,
+   *  parsed when present and valid. Read-only — the plugin never writes or
+   *  deletes the legacy file. */
+  legacy: PeerPool.nullable(),
+  legacyError: z.string().nullable(),
+}).strict();
+/** Whole-file overwrite of the user-scope pool. `expectedSha256` is the
+ *  sha256 get-peer-pool returned (null = expect the file to be absent); a
+ *  mismatch is an IDEMPOTENCY_CONFLICT and the client must reload first. */
+export const SetPeerPoolInput = z.object({
+  schemaVersion: z.literal(1),
+  target: Target,
+  pool: PeerPool,
+  expectedSha256: Sha.nullable(),
+}).strict();
+export const SetPeerPoolOutput = z.object({
+  schemaVersion: z.literal(1),
+  pool: PeerPool,
+  /** sha256 of the written file — the next expectedSha256 token. */
+  sha256: Sha,
+}).strict();
 /** Jev provider block stored at slp-runtime/state/jev.json — v1 OpenRouter
  *  only. The model must be a pinned `<owner>/jev-<version>` id; aliases
  *  (~typesafe/jev-latest, jev-latest, jev-preview) drift and are rejected.
@@ -387,6 +502,8 @@ export const catalog = defineRpc({ name: "catalog", input: CatalogInput, output:
 export const setLanguage = defineRpc({ name: "set-language", input: SetLanguageInput, output: SetLanguageOutput });
 export const getRoleRouting = defineRpc({ name: "get-role-routing", input: GetRoleRoutingInput, output: GetRoleRoutingOutput });
 export const setRoleRouting = defineRpc({ name: "set-role-routing", input: SetRoleRoutingInput, output: SetRoleRoutingOutput });
+export const getPeerPool = defineRpc({ name: "get-peer-pool", input: GetPeerPoolInput, output: GetPeerPoolOutput });
+export const setPeerPool = defineRpc({ name: "set-peer-pool", input: SetPeerPoolInput, output: SetPeerPoolOutput });
 export const getJev = defineRpc({ name: "get-jev", input: GetJevInput, output: GetJevOutput });
 export const setJev = defineRpc({ name: "set-jev", input: SetJevInput, output: SetJevOutput });
 export const setJevKey = defineRpc({ name: "set-jev-key", input: SetJevKeyInput, output: SetJevKeyOutput });
@@ -557,6 +674,12 @@ export type GetRoleRoutingRequest = z.infer<typeof GetRoleRoutingInput>;
 export type GetRoleRoutingResult = z.infer<typeof GetRoleRoutingOutput>;
 export type SetRoleRoutingRequest = z.infer<typeof SetRoleRoutingInput>;
 export type SetRoleRoutingResult = z.infer<typeof SetRoleRoutingOutput>;
+export type PeerPoolOptionValue = z.infer<typeof PeerPoolOption>;
+export type PeerPoolValue = z.infer<typeof PeerPool>;
+export type GetPeerPoolRequest = z.infer<typeof GetPeerPoolInput>;
+export type GetPeerPoolResult = z.infer<typeof GetPeerPoolOutput>;
+export type SetPeerPoolRequest = z.infer<typeof SetPeerPoolInput>;
+export type SetPeerPoolResult = z.infer<typeof SetPeerPoolOutput>;
 export type JevProviderValue = z.infer<typeof JevProvider>;
 export type JevConfigValue = z.infer<typeof JevConfig>;
 export type JevViewValue = z.infer<typeof JevView>;
@@ -782,6 +905,17 @@ export interface Manager {
    *  slp-runtime/state that only the next activation consumes. No journal,
    *  no mutex, no authority gate (same class of write as set-language). */
   setRoleRouting(input: SetRoleRoutingRequest): Promise<SetRoleRoutingResult>;
+  /** Read the plugin-owned user-scope Peer pool (slp-runtime/state/
+   *  peer-pool.json) plus the retired <daemonHome>/slp-routing.json as a
+   *  read-only one-time import source. pool/sha256 are null when the file
+   *  is absent; a present-but-invalid file reports its hash with pool null
+   *  and the parse evidence in `error`. */
+  getPeerPool(input: GetPeerPoolRequest): Promise<GetPeerPoolResult>;
+  /** Whole-file overwrite of the user-scope pool under sha256 CAS —
+   *  expectedSha256 must equal the on-disk bytes (null = expect absent).
+   *  Atomic temp+rename write at 0600, same class of state as
+   *  set-role-routing: no journal, no mutex, no authority gate. */
+  setPeerPool(input: SetPeerPoolRequest): Promise<SetPeerPoolResult>;
   /** Stop accepting work and close owned resources. Does not deactivate SLP
    * or remove files; recovery stays journal-driven. */
   close(): void;

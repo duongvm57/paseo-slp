@@ -29,13 +29,16 @@ parentage.
    changes in the target checkout. Establish baseline resources to preserve. Read
    the repository's .paseo-slp/workspace-protocol.md for tactics and budget.
    A worktree target missing .paseo-slp/ — gitignored local state holding absolute
-   paths — needs catalog and protocol materialized before route resolution:
+   paths — needs the protocol materialized before route resolution:
    `slp.mjs materialize <target> --from <source>` when the installed copy supports
    it, else copy .paseo-slp/ and rebase absolute paths that point under the
-   source root onto the target root.
+   source root onto the target root. Materialize carries the repo catalog only
+   when the source pinned one; a target without it resolves the user-scope pool
+   like the source does.
    Supervisor/Lead runtime settings come from slp-supervisor/slp-lead saved profiles.
    Peer runtime settings come from this repository's .paseo-slp/slp-routing.json,
-   or the user-scope catalog ($PASEO_HOME/slp-routing.json, default ~/.paseo) when
+   or the plugin-owned user-scope pool
+   ($PASEO_HOME/slp-runtime/state/peer-pool.json, default ~/.paseo) when
    the repository has none.
    Disposition belongs to the assignment, not a fixed profile or option mapping.
    Discover provider availability and exact model/settings for the selected bundle.
@@ -47,8 +50,8 @@ parentage.
 2. Before creating Supervisor/Lead, refresh list_profiles and copy the selected
    role profile's complete bundle. Before creating a Peer, read routes for the
    assigned repository, choose an enabled ready option eligible for peer using
-   suitableFor, avoidFor, notes, priority and the task budget. Record why it fits;
-   priority alone does not select a model. Refresh the catalog hash before launch.
+   suitableFor, avoidFor, notes and the task budget. Record why it fits.
+   Refresh the catalog hash before launch.
    Use prepare with role=peer, route.optionId, route.catalogSha256, repository,
    workspaceId, assignment and fresh providers to validate the selection and obtain
    create arguments. Profile inventory never overrides a Peer pool selection.

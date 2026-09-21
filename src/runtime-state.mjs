@@ -63,12 +63,14 @@ const jevStatus = home => {
   };
   try {
     const config = readJevConfig(home);
-    const kind = config?.provider.kind ?? 'openrouter';
+    const kind = config?.provider?.kind ?? 'openrouter';
     const { hasKey, keyPermissionsOk } = keyFileProbe(kind);
     if (config === null) return { configured: false, hasKey, keyPermissionsOk };
     return {
       configured: true, enabled: config.enabled, capabilities: config.capabilities,
-      provider: { kind: config.provider.kind, baseUrl: config.provider.baseUrl, model: config.provider.model },
+      // A disabled config exposes no provider — the enabled-only fields are
+      // not validated on the OFF path, so they are reported as absent.
+      provider: config.provider === null ? null : { kind: config.provider.kind, baseUrl: config.provider.baseUrl, model: config.provider.model },
       hasKey, keyPermissionsOk,
     };
   } catch (error) {

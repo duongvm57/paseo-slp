@@ -182,8 +182,9 @@ protocol/routing choices on resume remain authoritative.
 
 For task scenarios, record the saved Supervisor/Lead profiles and the project Peer
 pool separately. Populate complete eligible pool options with suitability notes;
-empty init output is not ready for Peer delegation. Routing scenarios change this
-same pool at their declared trigger. Do not preselect each Peer option for Lead.
+init writes no catalog — a fixture without one is not ready for Peer delegation.
+Routing scenarios change this same pool at their declared trigger. Do not
+preselect each Peer option for Lead.
 
 Capture protocol/pool bytes and raw profile/provider/model/capability discovery
 before root launch. Refresh the two saved profiles and compare with preflight;

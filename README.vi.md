@@ -151,8 +151,9 @@ Nút **Inspect** trên surface là read-only — dùng nó để xem trạng th�
 của từng family và conflicts trước khi đổi gì.
 
 - Không tạo agent trong lúc cài hay kích hoạt. Ba role vẫn giữ nguyên.
-- **Peer không cần saved profile** — Lead chọn runtime Peer từ pool theo
-  project trong `.paseo-slp/slp-routing.json`.
+- **Peer không cần saved profile** — Lead chọn runtime Peer từ pool —
+  `.paseo-slp/slp-routing.json` khi repo pin riêng, ngược lại pool user-scope
+  `slp-runtime/state/peer-pool.json` do plugin quản lý.
 - Repo giữ tactics trong `.paseo-slp/workspace-protocol.md`; onboarding
   hướng dẫn cấu hình cả hai file.
 - Nếu entry có sẵn đã chiếm một provider/profile ID của SLP, kích hoạt fail
@@ -323,20 +324,25 @@ Lệnh chỉ tạo các file còn thiếu và giữ nguyên từng file đã có
 
 - `.paseo-slp/workspace-protocol.md`: quy trình, mức rủi ro, proof gate,
   budget và quyền fallback.
-- `.paseo-slp/slp-routing.json`: pool runtime của Peer. Init seed sẵn
-  [skeleton theo loại việc](src/templates/slp-routing.json) — các ghế đều
-  disabled, đặt tên theo kiểu tác vụ; onboarding điền model thật từ
-  discovery trước delegation. Khi repo chưa có file này, runtime đọc
-  catalog user-scope `$PASEO_HOME/slp-routing.json` (mặc định `~/.paseo`).
 - `.paseo-slp/notebook.md`: notebook mặc định của Supervisor; protocol ghi
   nhận owner và cách truy xuất thực tế (file này hoặc `timeline:<agentId>`).
 
-Catalog user-scope `$PASEO_HOME/slp-routing.json` **không** do plugin tạo —
-kích hoạt chỉ quản lý `config.json` và `slp-runtime/`. File này do
-`slp.mjs init` hoặc onboarding ghi giúp bạn; khi chưa có, repo không có
-catalog riêng đơn giản là chưa có pool fallback (không phải lỗi).
-Deactivation và `plugin remove` không bao giờ đụng nó — đã tồn tại là của
-bạn.
+Init không ghi catalog routing. Khi repo chưa có
+`.paseo-slp/slp-routing.json`, runtime đọc pool user-scope do plugin sở hữu
+`$PASEO_HOME/slp-runtime/state/peer-pool.json` (mặc định `~/.paseo`) — thẻ
+Peer pool trong SLP Manager là writer duy nhất của nó, seed ghế từ danh sách
+archetype và lấy model/mode từ catalog provider đang chạy. Catalog trong
+repo là pin có chủ đích, chỉ được tạo bởi `init --routing-from` (bên dưới).
+
+File cũ `$PASEO_HOME/slp-routing.json` từ bản trước không bao giờ bị xóa tự
+động: thẻ Peer pool cho phép import một lần sang `peer-pool.json`.
+
+Lưu ý tương thích: pool mới là một chiều. `peer-pool.json` nằm ở path mà
+runtime cũ không bao giờ đọc, và nội dung của nó bị `validateCatalog` bản cũ
+từ chối — ghế parked mang `provider` rỗng và `priority` không còn được ghi.
+Hạ cấp runtime hay trỏ một installation cũ được retain vào cùng `$PASEO_HOME`
+sẽ làm mọi repo không pin catalog fail closed với `Missing Peer pool`/lỗi
+validate cho tới khi pool bị xoá hoặc viết lại theo format cũ.
 
 ### Onboarding
 
@@ -369,16 +375,20 @@ onboard/setup SLP cho repo; description của skill sẽ trigger workflow. Xem
 [skill nguồn](skills/paseo-slp-onboarding/SKILL.md).
 
 Protocol và catalog là hai file tách riêng: protocol là hướng dẫn vận hành,
-JSON là dữ liệu có thể kiểm tra tự động và đổi thường xuyên. Cả hai thuộc
-repo và có thể version cùng code; không nhúng JSON vào Markdown. Lead đọc
-protocol và pool trước mỗi Peer delegation, chọn option theo task/budget, rồi
-truyền constraint liên quan vào assignment. Worktree mới cần các file trong
-base candidate hoặc bản copy được cho phép; mỗi worktree đọc cấu hình của
-chính nó.
+JSON là dữ liệu có thể kiểm tra tự động và đổi thường xuyên. Protocol nằm
+trong `.paseo-slp/` của repo; Peer pool mặc định nằm ở `peer-pool.json`
+user-scope và chỉ vào repo khi pin có chủ đích — catalog trong repo nghĩa là
+repo đó bỏ qua pool chung vĩnh viễn, kể cả khi file bị làm rỗng. Không nhúng
+JSON vào Markdown. Lead đọc protocol và pool trước mỗi Peer delegation, chọn
+option theo task/budget, rồi truyền constraint liên quan vào assignment.
+Worktree mới cần protocol trong base candidate hoặc bản copy được cho phép
+(`materialize` chỉ mang catalog khi source có pin); mỗi worktree đọc cấu hình
+của chính nó.
 
 ### Import catalog có sẵn
 
-Nếu đã có bảng global từ bản trước, import một lần vào repo muốn dùng:
+Nếu đã có bảng global từ bản trước — hoặc muốn pin repo khỏi pool chung —
+import một file catalog một lần vào repo muốn dùng:
 
 ```bash
 node "$SLP_RT/bin/slp.mjs" init /absolute/job-repo \
@@ -386,9 +396,12 @@ node "$SLP_RT/bin/slp.mjs" init /absolute/job-repo \
 ```
 
 Import chỉ tạo catalog khi chưa có; không ghi đè, trộn ngầm hay tiếp tục liên
-kết với file nguồn. Sau đó Human chỉnh bản trong repo. Repo chưa có catalog
-thì đọc catalog user-scope `$PASEO_HOME/slp-routing.json`; catalog rỗng trong
-repo vẫn authoritative (chặn delegation) cho tới khi bị xóa. Không bao giờ
+kết với file nguồn. Sau đó Human chỉnh bản trong repo — plugin không bao giờ
+ghi catalog repository. Repo chưa có catalog
+thì đọc pool user-scope `$PASEO_HOME/slp-runtime/state/peer-pool.json`;
+catalog rỗng trong
+repo vẫn authoritative (chặn delegation, và vẫn chặn kể cả khi pool chung
+sau đó bị làm rỗng) cho tới khi bị xóa. Không bao giờ
 đọc catalog của repo khác.
 
 ## Cách các role hoạt động
@@ -420,26 +433,27 @@ tín hiệu delta-only do caller chủ động gọi.
 
 **Nguồn runtime:** Supervisor/Lead dùng hai saved profile Human cấu hình
 trong Paseo. Peer dùng pool `.paseo-slp/slp-routing.json` của repo, hoặc
-catalog user-scope `$PASEO_HOME/slp-routing.json` khi repo chưa có. Mỗi
+pool user-scope do plugin sở hữu `$PASEO_HOME/slp-runtime/state/peer-pool.json`
+khi repo chưa có — thẻ Peer pool trong Manager là writer duy nhất của nó. Mỗi
 option có provider `pi`/`codex`/`devin`/`claude`, model, settings, `suitableFor`,
-`avoidFor`, `notes`, `priority` và trạng thái `enabled`/`availability`. Lead
+`avoidFor`, `notes` và trạng thái `enabled`/`availability`. Lead
 chọn theo công việc, không gán cứng Engineer/Architect/Reviewer vào model.
 Hai Peer có thể khác provider/model/effort mà không thêm saved profile.
-[Skeleton theo loại việc](src/templates/slp-routing.json) được seed sẵn cho
-thấy hình dạng: mỗi ghế đặt tên theo kiểu tác vụ, `model` để trống cho tới
-khi điền từ discovery thực tế trên host.
+Danh sách archetype trong thẻ cho thấy hình dạng: mỗi ghế đặt tên theo kiểu
+tác vụ, provider/`model` để trống cho tới khi chọn từ discovery thực tế trên
+host.
 
 Lead đọc pool mới, ghi lý do chọn và kiểm tra option/hash bằng `prepare`
 trước khi launch (khi Jev routing được arm, dấu vết lý do là phân phối ghi
 trên receipt thay vì văn xuôi — xem
 [Routing có Jev hỗ trợ](#routing-có-jev-hỗ-trợ-tùy-chọn)). Không có pool/option hợp lệ ở cả hai scope thì hoàn thiện
 onboarding; không fallback sang `slp-peer`, settings của Lead hay catalog
-repo khác. `priority` là gợi ý lựa chọn, không thay thế đánh giá suitability
-và budget.
+repo khác.
 
 ### Fallback quota của Peer
 
-Cấu hình ngay trong `.paseo-slp/slp-routing.json`:
+Cấu hình trong pool (thẻ Peer pool của Manager, hoặc
+`.paseo-slp/slp-routing.json` cho pool pin theo repo):
 
 ```json
 "quotaFallback": { "enabled": true, "optionIds": ["luna-code", "glm-design"] }
@@ -672,24 +686,25 @@ và báo seat mới không được claim full-candidate coverage cho phạm vi 
 ### `materialize`
 
 `.paseo-slp/` là local state bị gitignore chứa absolute path, nên worktree
-mới thiếu hẳn protocol và catalog. `materialize` clone chúng từ một checkout
-có sẵn:
+mới thiếu hẳn protocol. `materialize` clone nó từ một checkout có sẵn:
 
 ```bash
 node "$SLP_RT/bin/slp.mjs" materialize /absolute/target-repo --from /absolute/source-repo
 # mặc định dry-run; thêm --apply để ghi
 ```
 
-Lệnh chỉ copy `.paseo-slp/workspace-protocol.md` và
-`.paseo-slp/slp-routing.json` (đã validate) — `notebook.md` là state do
-Supervisor sở hữu và không bao giờ được copy. Absolute path nằm dưới source
-root trong YAML frontmatter của protocol được rebase sang target root (path
-anh em dài hơn kiểu `<source>-old` không khớp boundary nên giữ nguyên). Như
-`init`, file đã tồn tại ở target được preserve chứ không ghi đè; mỗi file
-báo `preserved`/`applied`, kèm `sha256` cho file sẽ ghi. Entry protocol còn
-báo `rebased`, và bản copy ghi ra mà không tìm thấy source-root path nào sẽ
-mang field `warning` thay vì lặng lẽ giữ path cũ. Không có fallback về
-catalog user-scope hay template — source checkout là tường minh.
+Lệnh copy `.paseo-slp/workspace-protocol.md`, và `.paseo-slp/slp-routing.json`
+(đã validate) chỉ khi source thật sự pin catalog — source chưa từng tạo
+catalog thì materialize chỉ mang protocol, và target đọc pool user-scope y
+hệt source. `notebook.md` là state do Supervisor sở hữu và không bao giờ
+được copy. Absolute path nằm dưới source root trong YAML frontmatter của
+protocol được rebase sang target root (path anh em dài hơn kiểu
+`<source>-old` không khớp boundary nên giữ nguyên). Như `init`, file đã tồn
+tại ở target được preserve chứ không ghi đè; mỗi file báo
+`preserved`/`applied`, kèm `sha256` cho file sẽ ghi. Entry protocol còn báo
+`rebased`, và bản copy ghi ra mà không tìm thấy source-root path nào sẽ mang
+field `warning` thay vì lặng lẽ giữ path cũ. Không có fallback về catalog
+user-scope hay template nào — source checkout là tường minh.
 
 ### `monitor`
 

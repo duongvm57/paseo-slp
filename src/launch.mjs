@@ -326,7 +326,7 @@ export function requestSchema(handoff = false) {
       taskLabel: 'optional — at most 100 chars, single line; defaults to the repository directory name',
       assignmentFile: 'optional — absolute path to the per-seat full assignment; referenced read-first, never inlined',
       inventoryFile: 'optional — absolute path to a {providers, profiles} object; inline arrays (even []) take precedence',
-      paseoHome: 'optional — absolute daemon home for the user-scope routing catalog fallback',
+      paseoHome: 'optional — absolute daemon home for the user-scope peer pool (slp-runtime/state/peer-pool.json)',
     },
     bindingSources: {
       'saved profiles — supervisor/lead': {

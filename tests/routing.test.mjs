@@ -31,13 +31,13 @@ const request = { role: 'peer', repository: root, workspaceId: 'workspace', assi
 // Test pool fixture — independent of examples/, which is a documentation
 // skeleton and must never contain launchable model names.
 const testCatalog = () => ({ version: 1, policy: 'Test pool.', quotaFallback: { enabled: false, optionIds: [] }, options: [
-  { id: 'luna-code', provider: 'codex', roles: ['peer'], model: 'gpt-5.6-luna', thinkingOptionId: 'medium', enabled: true, availability: 'unknown', priority: 20, suitableFor: ['coding'], avoidFor: [], notes: 'coding seat' },
-  { id: 'luna-reason', provider: 'codex', roles: ['peer'], model: 'gpt-5.6-luna', thinkingOptionId: 'high', enabled: true, availability: 'unknown', priority: 10, suitableFor: ['reasoning'], avoidFor: [], notes: 'reasoning seat' },
-  { id: 'glm-design', provider: 'pi', roles: ['peer'], model: 'opencode/glm-5.3-flash', thinkingOptionId: 'medium', enabled: true, availability: 'unknown', priority: 20, suitableFor: ['architect'], avoidFor: [], notes: 'pi seat' },
-  { id: 'swe2-medium', provider: 'devin', roles: ['peer'], model: 'swe-2-medium', modeId: 'bypass', features: { auto_accept: true }, enabled: true, availability: 'unknown', priority: 20, suitableFor: ['coding'], avoidFor: [], notes: 'devin seat' },
-  { id: 'swe2-high', provider: 'devin', roles: ['peer'], model: 'swe-2-high', modeId: 'bypass', features: { auto_accept: true }, enabled: true, availability: 'unknown', priority: 15, suitableFor: ['exploration'], avoidFor: [], notes: 'devin seat' },
-  { id: 'swe2-max', provider: 'devin', roles: ['peer'], model: 'swe-2-max', modeId: 'bypass', features: { auto_accept: true }, enabled: true, availability: 'unknown', priority: 10, suitableFor: ['ambiguous'], avoidFor: [], notes: 'devin seat' },
-  { id: 'claude-seat', provider: 'claude', roles: ['peer'], model: 'claude-synthetic-1', thinkingOptionId: 'medium', enabled: true, availability: 'unknown', priority: 20, suitableFor: ['coding'], avoidFor: [], notes: 'claude seat' },
+  { id: 'luna-code', provider: 'codex', roles: ['peer'], model: 'gpt-5.6-luna', thinkingOptionId: 'medium', enabled: true, availability: 'unknown', suitableFor: ['coding'], avoidFor: [], notes: 'coding seat' },
+  { id: 'luna-reason', provider: 'codex', roles: ['peer'], model: 'gpt-5.6-luna', thinkingOptionId: 'high', enabled: true, availability: 'unknown', suitableFor: ['reasoning'], avoidFor: [], notes: 'reasoning seat' },
+  { id: 'glm-design', provider: 'pi', roles: ['peer'], model: 'opencode/glm-5.3-flash', thinkingOptionId: 'medium', enabled: true, availability: 'unknown', suitableFor: ['architect'], avoidFor: [], notes: 'pi seat' },
+  { id: 'swe2-medium', provider: 'devin', roles: ['peer'], model: 'swe-2-medium', modeId: 'bypass', features: { auto_accept: true }, enabled: true, availability: 'unknown', suitableFor: ['coding'], avoidFor: [], notes: 'devin seat' },
+  { id: 'swe2-high', provider: 'devin', roles: ['peer'], model: 'swe-2-high', modeId: 'bypass', features: { auto_accept: true }, enabled: true, availability: 'unknown', suitableFor: ['exploration'], avoidFor: [], notes: 'devin seat' },
+  { id: 'swe2-max', provider: 'devin', roles: ['peer'], model: 'swe-2-max', modeId: 'bypass', features: { auto_accept: true }, enabled: true, availability: 'unknown', suitableFor: ['ambiguous'], avoidFor: [], notes: 'devin seat' },
+  { id: 'claude-seat', provider: 'claude', roles: ['peer'], model: 'claude-synthetic-1', thinkingOptionId: 'medium', enabled: true, availability: 'unknown', suitableFor: ['coding'], avoidFor: [], notes: 'claude seat' },
 ] });
 function catalogFixture(dir) {
   mkdirSync(join(dir, '.paseo-slp'), { recursive: true });
@@ -79,7 +79,7 @@ test('Supervisor and Lead use saved profiles; Peer uses the project pool without
   writeFileSync(path, json(catalog));
   assert.throws(() => launch({ profiles: staleProfiles, route: route('glm-design') }), /Unknown routing option/);
   rmSync(path);
-  assert.throws(() => launch({ route: { optionId: 'glm-design', catalogSha256: 'old' }, paseoHome: join(dir, 'no-home') }), /Missing routing catalog/);
+  assert.throws(() => launch({ route: { optionId: 'glm-design', catalogSha256: 'old' }, paseoHome: join(dir, 'no-home') }), /Missing Peer pool/);
 });
 
 test('Lead selects independent runtime bundles for one Peer role without a disposition mapping', t => {
@@ -456,13 +456,16 @@ test('quota edits invalidate prepared selections and fresh selection can use ano
 test('routes reads only the selected repo on every call, independent of host and installation location', t => {
   const { dir, installed } = fixture(t), home = join(dir, 'home'); mkdirSync(home);
   installPaseo(root, installed, home, true);
-  const skeleton = readJson(join(root, 'src/templates/slp-routing.json'));
-  assert.deepEqual(readJson(join(home, 'slp-routing.json')), skeleton);
+  // Install scaffolds no catalog anywhere: neither the legacy user file nor the
+  // plugin-owned pool exists until the Human authors one.
+  assert.equal(existsSync(join(home, 'slp-routing.json')), false);
+  assert.equal(existsSync(join(home, 'slp-runtime', 'state', 'peer-pool.json')), false);
   initWorkspace(installed, dir, true);
   const path = join(dir, '.paseo-slp/slp-routing.json');
-  assert.deepEqual(readJson(path), skeleton);
+  // Init no longer writes a repository catalog by default — the fixture opts in.
+  assert.equal(existsSync(path), false);
   const { catalog } = catalogFixture(dir);
-  writeFileSync(path, json(catalog));
+  // A leftover legacy catalog is inert — routes reads only the selected repo.
   writeFileSync(join(home, 'slp-routing.json'), 'invalid legacy host catalog');
   const read = () => JSON.parse(execFileSync(process.execPath, [join(installed, 'bin/slp.mjs'), 'routes', dir], { cwd: home, env: { PATH: '', PASEO_HOME: home }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
   const first = read();
@@ -529,19 +532,20 @@ test('same option ID can resolve differently per repo; another repo catalog cann
   assert.throws(() => launch(repoB, a.route('luna-code')), /catalog changed/);
   assert.throws(() => launch(repoB, { ...b.route('luna-code'), catalogFile: a.path }), /repository-scoped/);
   rmSync(b.path);
-  assert.throws(() => launch(repoB, { optionId: 'luna-code', catalogSha256: a.route('luna-code').catalogSha256 }), /Missing routing catalog/);
+  assert.throws(() => launch(repoB, { optionId: 'luna-code', catalogSha256: a.route('luna-code').catalogSha256 }), /Missing Peer pool/);
   assert.throws(() => readCatalog(), /Absolute repository/);
 });
 
-test('repository catalog wins over the user-scope fallback; fallback engages only when absent', t => {
+test('repository catalog wins over the plugin-owned user-scope pool; fallback engages only when absent', t => {
   const { dir, installed } = fixture(t); install(root, installed);
   const home = join(dir, 'home'); mkdirSync(home);
-  const hostPath = join(home, 'slp-routing.json');
+  const stateDir = join(home, 'slp-runtime', 'state'); mkdirSync(stateDir, { recursive: true });
+  const hostPath = join(stateDir, 'peer-pool.json');
   const hostCatalog = emptyCatalog();
-  hostCatalog.options = [{ id: 'host-peer', provider: 'pi', roles: ['peer'], model: 'opencode/host-model', enabled: true, availability: 'ready', priority: 1, suitableFor: ['tests'], avoidFor: [], notes: 'User-scope pool' }];
+  hostCatalog.options = [{ id: 'host-peer', provider: 'pi', roles: ['peer'], model: 'opencode/host-model', enabled: true, availability: 'ready', suitableFor: ['tests'], avoidFor: [], notes: 'User-scope pool' }];
   writeFileSync(hostPath, json(hostCatalog));
   const repo = join(dir, 'repo'); mkdirSync(repo);
-  // No repository catalog: routes resolves the user-scope catalog.
+  // No repository catalog: routes resolves the user-scope pool.
   let resolved = readCatalog(repo, home);
   assert.equal(resolved.path, hostPath);
   assert.equal(resolved.scope, 'user');
@@ -559,14 +563,41 @@ test('repository catalog wins over the user-scope fallback; fallback engages onl
   // A malformed repository file is an authoring error, not a fallback trigger.
   writeFileSync(path, '{broken');
   assert.throws(() => readCatalog(repo, home), SyntaxError);
-  // Both scopes absent: the error names both paths.
+  // Both scopes absent: the error names both paths. The legacy
+  // <home>/slp-routing.json is never read — even when it is the only file.
   rmSync(path); rmSync(hostPath);
-  assert.throws(() => readCatalog(repo, home), /Missing routing catalog.*no repository catalog.*no user-scope catalog/s);
+  writeFileSync(join(home, 'slp-routing.json'), json(hostCatalog));
+  assert.throws(() => readCatalog(repo, home), /Missing Peer pool.*no repository catalog.*no user-scope pool/s);
+  // A regular file squatting on a path prefix (slp-runtime here) surfaces as
+  // ENOTDIR — it resolves to the same missing-pool message, not a bare errno.
+  rmSync(join(home, 'slp-routing.json'));
+  rmSync(join(home, 'slp-runtime'), { recursive: true });
+  writeFileSync(join(home, 'slp-runtime'), 'not a directory');
+  assert.throws(() => readCatalog(repo, home), /Missing Peer pool.*no repository catalog.*no user-scope pool/s);
+  rmSync(join(home, 'slp-runtime'));
   // routes CLI resolves the fallback home via --paseo-home.
+  mkdirSync(join(home, 'slp-runtime', 'state'), { recursive: true });
   writeFileSync(hostPath, json(hostCatalog));
   const routes = () => JSON.parse(execFileSync(process.execPath, [join(installed, 'bin/slp.mjs'), 'routes', repo, '--paseo-home', home], { env: { PATH: '' }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
   assert.equal(routes().path, hostPath);
   assert.equal(routes().scope, 'user');
+});
+
+test('pool validation: provider may be blank only while disabled; priority is not required', () => {
+  const parked = { id: 'parked', provider: '', roles: ['peer'], model: '', enabled: false, availability: 'ready', suitableFor: [], avoidFor: [], notes: 'Parked seat — Human fills provider and model later' };
+  assert.doesNotThrow(() => validateCatalog({ ...emptyCatalog(), options: [parked] }));
+  // A file still carrying the removed `priority` key keeps validating —
+  // unknown extra keys are tolerated, not rejected.
+  assert.doesNotThrow(() => validateCatalog({ ...emptyCatalog(), options: [{ ...parked, priority: 10 }] }));
+  // Enabled requires a real family and a real model.
+  assert.throws(() => validateCatalog({ ...emptyCatalog(), options: [{ ...parked, enabled: true }] }), /provider must be/);
+  assert.throws(() => validateCatalog({ ...emptyCatalog(), options: [{ ...parked, provider: 'pi', enabled: true }] }), /invalid model/);
+  // A parked devin seat with a blank model is inert config; enabling it still
+  // requires a swe-2 model.
+  const devin = { ...parked, id: 'devin-parked', provider: 'devin' };
+  assert.doesNotThrow(() => validateCatalog({ ...emptyCatalog(), options: [devin] }));
+  assert.throws(() => validateCatalog({ ...emptyCatalog(), options: [{ ...devin, enabled: true }] }), /invalid model/);
+  assert.throws(() => validateCatalog({ ...emptyCatalog(), options: [{ ...devin, enabled: true, model: 'gpt-5' }] }), /swe-2/);
 });
 
 test('quota fallback stays within the authorized project pool and preserves complete bundles', t => {

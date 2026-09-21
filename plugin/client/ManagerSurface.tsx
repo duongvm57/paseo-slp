@@ -11,6 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useRpc } from "@getpaseo/plugin/client";
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
+import { copyText } from "@getpaseo/plugin/client/react-native";
 import type { PluginTheme } from "@getpaseo/plugin";
 import {
   Pressable,
@@ -20,9 +21,10 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { activate, catalog, deactivate, reconcile, status, localTarget, setLanguage, getRoleRouting, setRoleRouting, getJev, setJev, setJevKey, testJev } from "../shared/contracts.ts";
+import { activate, catalog, deactivate, reconcile, status, localTarget, setLanguage, getRoleRouting, setRoleRouting, getJev, setJev, setJevKey, testJev, getPeerPool, setPeerPool } from "../shared/contracts.ts";
 import { FAMILY_IDS, FAMILY_LABEL, FAMILY_PICKER_ORDER } from "../shared/families.ts";
-import type { CatalogOptionValue, CatalogResult, FamilyName, JevViewValue, RoleRoutingValue, StartResult, StatusResult, TargetValue } from "../shared/contracts.ts";
+import { PEER_SEAT_ARCHETYPES } from "../shared/archetypes.ts";
+import type { CatalogOptionValue, CatalogResult, FamilyName, GetPeerPoolResult, JevViewValue, PeerPoolValue, RoleRoutingValue, StartResult, StatusResult, TargetValue } from "../shared/contracts.ts";
 import {
   DISABLE_REMOVE_NOTICE,
   EXCLUSIVE_WINDOW_NOTICE,
@@ -31,10 +33,13 @@ import {
   STATUS_POLL_MS,
   activationLabel,
   applyFamilyChange,
+  applySettingChange,
   applyPatch,
+  buildPeerPool,
   buildRoleChoice,
   conflictLines,
   createTargetViews,
+  emptyPeerPoolForm,
   emptyTargetView,
   errorMessage,
   familyFromProviderId,
@@ -43,19 +48,24 @@ import {
   newOperationId,
   operationPending,
   operationRows,
+  peerPoolDiffers,
+  peerPoolForm,
+  peerSeatFromArchetype,
   pollDelayAfterStatus,
   reconcileProblem,
   routingChoiceDiffers,
   routingDiverges,
+  samePeerPoolForm,
   startPatch,
   stateHint,
   statusRows,
   targetKey,
   recoverPendingStart,
   thinkingOptionsFor,
+  uniqueSeatId,
   visibleConflicts,
 } from "./manager-state.ts";
-import type { ReconcileAction, RoutingRoleForm, TargetView } from "./manager-state.ts";
+import type { PeerPoolForm, PeerSeatForm, ReconcileAction, RoutingRoleForm, TargetView } from "./manager-state.ts";
 
 // Family knowledge derives from the shared registry (shared/families.ts):
 // FAMILY_IDS is the canonical order, FAMILY_PICKER_ORDER the picker order
@@ -214,7 +224,7 @@ function ChipSelect<T extends string>({ colors, value, options, onChange, disabl
   );
 }
 
-function Field({ colors, label, hint, value, onChangeText, placeholder, disabled, secure }: {
+function Field({ colors, label, hint, value, onChangeText, placeholder, disabled, secure, multiline }: {
   colors: Colors;
   label: string;
   hint?: string;
@@ -223,6 +233,7 @@ function Field({ colors, label, hint, value, onChangeText, placeholder, disabled
   placeholder?: string;
   disabled?: boolean;
   secure?: boolean;
+  multiline?: boolean;
 }) {
   return (
     <View style={styles.field}>
@@ -236,9 +247,11 @@ function Field({ colors, label, hint, value, onChangeText, placeholder, disabled
         autoCapitalize="none"
         autoCorrect={false}
         secureTextEntry={secure === true}
+        multiline={multiline === true}
         style={[
           styles.input,
           { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.surface0 },
+          multiline === true && styles.inputMultiline,
           disabled && { opacity: 0.5 },
         ]}
       />
@@ -399,6 +412,7 @@ const styles = StyleSheet.create({
   roleBox: { borderWidth: 1, borderRadius: 10, padding: 12, gap: 10 },
   roleTitle: { fontSize: 14, fontWeight: "600" },
   input: { borderWidth: 1, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 10, fontSize: 14 },
+  inputMultiline: { minHeight: 72, textAlignVertical: "top" },
   collapseHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
   collapseChevron: { fontSize: 14, width: 14 },
   collapseHeaderText: { flex: 1, gap: 2 },
@@ -468,6 +482,8 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   const callSetJev = useRpc(setJev);
   const callSetJevKey = useRpc(setJevKey);
   const callTestJev = useRpc(testJev);
+  const callGetPeerPool = useRpc(getPeerPool);
+  const callSetPeerPool = useRpc(setPeerPool);
 
   const [detectedHome, setDetectedHome] = useState<string | null>(null);
   const [homeOverride, setHomeOverride] = useState("");
@@ -520,6 +536,20 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   // `routingSaved` shows a one-line confirmation after a bound save until
   // the next edit — the bound case otherwise gives no visible feedback.
   const [routingSaved, setRoutingSaved] = useState(false);
+  // Peer pool (user-scope catalog): `poolData` is the last get-peer-pool
+  // response (pool + sha256 for the CAS save + the legacy import view);
+  // `poolForm` is the editable copy. Saves are whole-file with optimistic
+  // concurrency — a sha mismatch refuses the write and the operator reloads.
+  const [poolData, setPoolData] = useState<GetPeerPoolResult | null>(null);
+  const [poolForm, setPoolForm] = useState<PeerPoolForm>(emptyPeerPoolForm);
+  const [poolDirty, setPoolDirty] = useState(false);
+  const [poolBusy, setPoolBusy] = useState(false);
+  const [poolSaved, setPoolSaved] = useState(false);
+  const [poolCopied, setPoolCopied] = useState(false);
+  // The expanded seat editor and the archetype picker, tracked by seat index
+  // (a renamed seat keeps its editor open); removing any seat closes both.
+  const [openSeat, setOpenSeat] = useState<number | null>(null);
+  const [addSeatOpen, setAddSeatOpen] = useState(false);
   // Jev (OpenRouter): per-daemon config + key — the key value lives only in
   // jevKeyInput until Save, is cleared right after, and status reports hasKey
   // only. Provider fields are pinned v1 values, shown read-only.
@@ -642,6 +672,52 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- key captures target
   }, [key]);
 
+  // Pool state is keyed to the displayed target: switching daemon homes drops
+  // the previous pool, its draft and every transient flag. Without this a
+  // draft authored against home A could save into home B — B's fresh sha256
+  // would satisfy the CAS token and hide the swap.
+  useEffect(() => {
+    setPoolData(null);
+    setPoolForm(emptyPeerPoolForm());
+    setPoolDirty(false);
+    setPoolBusy(false);
+    setPoolSaved(false);
+    setPoolCopied(false);
+    setOpenSeat(null);
+    setAddSeatOpen(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- key captures target
+  }, [key]);
+
+  // Fetch the peer pool once per target — plugin-owned state, independent of
+  // any binding, so it loads with the first status like role routing does.
+  // The response carries the sha256 every save sends back as its CAS guard.
+  const poolLoadedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!target || !key || poolLoadedFor.current === key) return;
+    poolLoadedFor.current = key;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const result = await callGetPeerPool({ schemaVersion: 1, target });
+        if (!cancelled) setPoolData(result);
+      } catch {
+        if (!cancelled) setPoolData(null);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- key captures target
+  }, [key]);
+
+  // Prefill the pool form from the stored pool until the Human edits — same
+  // tracking discipline as the routing form. An absent pool starts from the
+  // template-policy empty form; a malformed one prefills empty as well (the
+  // error line names what the file held).
+  useEffect(() => {
+    if (poolDirty) return;
+    const next = poolData?.pool ? peerPoolForm(poolData.pool) : emptyPeerPoolForm();
+    setPoolForm(current => (samePeerPoolForm(current, next) ? current : next));
+  }, [poolData, poolDirty]);
+
   // Prefill the toggles from the stored config until the Human edits —
   // same tracking discipline as the language form.
   useEffect(() => {
@@ -738,6 +814,9 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     );
   }, [routing, statusView, routingDirty]);
 
+  // A model or mode pick is not a plain field write: feature defs are keyed
+  // family|model|modeId, so values authored under the previous key must
+  // clear (applySettingChange) instead of persisting undeclared keys.
   const setRoutingField = (
     role: "supervisor" | "lead",
     field: "model" | "modeId" | "thinkingOptionId" | "features",
@@ -746,7 +825,9 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     setRoutingSaved(false);
     setRoutingForm(current => ({
       ...current,
-      [role]: { ...current[role], [field]: value },
+      [role]: field === "model" || field === "modeId"
+        ? applySettingChange(current[role], field, value)
+        : { ...current[role], [field]: value },
     }));
   };
 
@@ -810,6 +891,197 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     }
   };
 
+  // The pool's diff-gate mirrors the routing card's: ONE build path produces
+  // the document the gate compares and savePeerPool dispatches. The stored
+  // options map lets buildPeerSeat preserve passthrough fields the form does
+  // not model (and deliberately drop the retired `priority`).
+  const storedSeatOptions = new Map(
+    (poolData?.pool?.options ?? []).map(option => [option.id, option]),
+  );
+  const poolBuild = buildPeerPool(
+    poolForm,
+    seat => featureDefsForSeat(seat).defs,
+    storedSeatOptions,
+  );
+  const poolDiffers = peerPoolDiffers(poolBuild, poolData?.pool ?? null);
+
+  // Every pool edit goes through updatePool — it marks the form dirty and
+  // clears the one-shot save/copy confirmations.
+  const updatePool = (mutate: (form: PeerPoolForm) => PeerPoolForm) => {
+    setPoolDirty(true);
+    setPoolSaved(false);
+    setPoolCopied(false);
+    setPoolForm(current => mutate(current));
+  };
+
+  const setSeatField = (
+    index: number,
+    field: "model" | "modeId" | "thinkingOptionId" | "features" | "suitableFor" | "avoidFor" | "notes",
+  ) => (value: string) =>
+    updatePool(form => ({
+      ...form,
+      seats: form.seats.map((seat, i) =>
+        i === index
+          ? (field === "model" || field === "modeId" ? applySettingChange(seat, field, value) : { ...seat, [field]: value })
+          : seat,
+      ),
+    }));
+
+  // Renaming a seat also remaps its quota-fallback reference — a dangling id
+  // would only surface as a build error later.
+  const setSeatId = (index: number) => (value: string) =>
+    updatePool(form => {
+      const oldId = form.seats[index]?.id;
+      const seats = form.seats.map((seat, i) => (i === index ? { ...seat, id: value } : seat));
+      const quotaFallbackIds = form.quotaFallbackIds.map(id => (id === oldId ? value.trim() : id));
+      return { ...form, seats, quotaFallbackIds };
+    });
+
+  // Family switch on a seat re-validates dependents against the NEW family's
+  // catalog — the same applyFamilyChange rule the role pickers use. "" parks
+  // the seat (clears dependents); a stored family missing from the available
+  // set stays as an escape-hatch chip.
+  const setSeatFamily = (index: number) => (family: FamilyName | "") =>
+    updatePool(form => ({
+      ...form,
+      seats: form.seats.map((seat, i) =>
+        i !== index
+          ? seat
+          : {
+              ...seat,
+              ...(family === ""
+                ? { family: "" as const, model: "", modeId: "", thinkingOptionId: "", features: "", feature: {} }
+                : applyFamilyChange(seat, family, catalogs[family])),
+            },
+      ),
+    }));
+
+  const setSeatEnabled = (index: number) => (next: boolean) =>
+    updatePool(form => ({
+      ...form,
+      seats: form.seats.map((seat, i) => (i === index ? { ...seat, enabled: next } : seat)),
+    }));
+
+  const setSeatFeature = (index: number, featureId: string) => (value: string) =>
+    updatePool(form => ({
+      ...form,
+      seats: form.seats.map((seat, i) =>
+        i === index ? { ...seat, feature: { ...seat.feature, [featureId]: value } } : seat,
+      ),
+    }));
+
+  const addSeat = (archetype: (typeof PEER_SEAT_ARCHETYPES)[number]) => () => {
+    updatePool(form => ({
+      ...form,
+      seats: [
+        ...form.seats,
+        { ...peerSeatFromArchetype(archetype), id: uniqueSeatId(archetype.id, form.seats.map(seat => seat.id)) },
+      ],
+    }));
+    setOpenSeat(poolForm.seats.length);
+  };
+
+  // Removing a seat drops its fallback references too — a stale id would
+  // fail the build. The open-editor index is cleared because removal shifts
+  // the seats after it.
+  const removeSeat = (index: number) => () => {
+    const removedId = poolForm.seats[index]?.id;
+    updatePool(form => ({
+      ...form,
+      seats: form.seats.filter((_, i) => i !== index),
+      quotaFallbackIds: form.quotaFallbackIds.filter(id => id !== removedId),
+    }));
+    setOpenSeat(null);
+  };
+
+  const toggleFallbackId = (seatId: string, next: boolean) =>
+    updatePool(form => ({
+      ...form,
+      quotaFallbackIds: next
+        ? [...form.quotaFallbackIds, seatId]
+        : form.quotaFallbackIds.filter(id => id !== seatId),
+    }));
+
+  // Save dispatches the same poolBuild the gate compared — whole-file write
+  // guarded by the sha256 get-peer-pool returned. A CAS refusal surfaces in
+  // lastError; the operator reloads instead of overwriting newer state.
+  const savePeerPool = async () => {
+    if (!target || !key) return;
+    if ("error" in poolBuild) { update({ lastError: poolBuild.error }, target); return; }
+    const issueKey = key;
+    setPoolBusy(true);
+    try {
+      const result = await callSetPeerPool({
+        schemaVersion: 1,
+        target,
+        pool: poolBuild.pool,
+        expectedSha256: poolData?.sha256 ?? null,
+      });
+      // A save issued for home A must never land on home B's view.
+      if (keyRef.current !== issueKey) return;
+      setPoolData(current => ({
+        schemaVersion: 1,
+        pool: result.pool,
+        sha256: result.sha256,
+        error: null,
+        legacy: current?.legacy ?? null,
+        legacyError: current?.legacyError ?? null,
+      }));
+      setPoolDirty(false);
+      setPoolSaved(true);
+    } catch (error) {
+      update({ lastError: errorMessage(error) }, target);
+    } finally {
+      setPoolBusy(false);
+    }
+  };
+
+  // Reload discards in-flight edits and refetches — the recovery path after
+  // a CAS conflict, and the escape after a malformed-file fix elsewhere.
+  const reloadPeerPool = async () => {
+    if (!target || !key) return;
+    const issueKey = key;
+    setPoolBusy(true);
+    try {
+      const result = await callGetPeerPool({ schemaVersion: 1, target });
+      if (keyRef.current !== issueKey) return;
+      setPoolData(result);
+      setPoolDirty(false);
+      setPoolSaved(false);
+      setPoolCopied(false);
+    } catch (error) {
+      update({ lastError: errorMessage(error) }, target);
+    } finally {
+      setPoolBusy(false);
+    }
+  };
+
+  // One-time import of the legacy ~/.paseo/slp-routing.json the server
+  // reports — fills the form only; nothing is written until Save, and the
+  // legacy file is never removed. The affordance exists only for an empty
+  // pool with an untouched empty form: importing over authored seats would
+  // discard them with no undo.
+  const canImportLegacy = poolData?.legacy != null && poolData.pool === null && poolForm.seats.length === 0;
+  const importLegacyPool = () => {
+    if (!canImportLegacy || !poolData?.legacy) return;
+    setPoolForm(peerPoolForm(poolData.legacy));
+    setPoolDirty(true);
+    setPoolSaved(false);
+    setPoolCopied(false);
+  };
+
+  // Copy renders the SAME pool the Save gate saw — a malformed form refuses
+  // here too rather than copying JSON that would fail validateCatalog.
+  const copyPoolJson = async () => {
+    if ("error" in poolBuild) { if (target) update({ lastError: poolBuild.error }, target); return; }
+    try {
+      await copyText(JSON.stringify(poolBuild.pool, null, 2));
+      setPoolCopied(true);
+    } catch (error) {
+      if (target) update({ lastError: errorMessage(error) }, target);
+    }
+  };
+
   // Toggle off applies immediately (nothing to type); toggle on waits for
   // the Apply press so an empty value is never written.
   const applyLanguage = async (value: string | null) => {
@@ -826,14 +1098,15 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     }
   };
 
-  // Fetch the model/mode catalog for the families the routing card picks —
-  // the card is the sole role→provider configurator, so its two picks are
-  // the only families the form needs. Cached per family; a failure caches
-  // an error result so the picker degrades to free text instead of
+  // Fetch the model/mode catalog for the families the routing card and the
+  // peer-pool seats pick — the routing card's two picks plus every seated
+  // family are the only ones the form needs. Cached per family; a failure
+  // caches an error result so the picker degrades to free text instead of
   // retrying forever.
   const neededFamilies: FamilyName[] = [...new Set([
     routingForm.supervisor.family,
     routingForm.lead.family,
+    ...poolForm.seats.map(seat => seat.family).filter((f): f is FamilyName => f !== ""),
   ])];
   const neededKey = neededFamilies.join(",");
   useEffect(() => {
@@ -875,7 +1148,13 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   };
   const neededFeatureKeys = (["supervisor", "lead"] as const)
     .map(role => featureKeyFor(role))
-    .filter((key): key is string => key !== null);
+    .concat(
+      poolForm.seats.map(seat =>
+        seat.family !== "" && seat.model.trim() !== ""
+          ? `${seat.family}|${seat.model.trim()}|${seat.modeId.trim()}`
+          : null,
+      ).filter((key): key is string => key !== null),
+    );
   const neededFeaturesKey = neededFeatureKeys.join(",");
   // A failed feature-defs fetch keeps the raw-JSON fallback but records the
   // error — silently caching [] made a dropped mobile RPC look exactly like
@@ -924,6 +1203,18 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   };
   const featureDefsFor = (role: "supervisor" | "lead") => {
     const key = featureKeyFor(role);
+    const set = key ? featureSets[key] : undefined;
+    return {
+      key,
+      defs: set?.defs ?? [],
+      error: set?.error ?? null,
+      loading: key !== null && featuresLoadingFor === key,
+    };
+  };
+  const featureDefsForSeat = (seat: PeerSeatForm) => {
+    const key = seat.family !== "" && seat.model.trim() !== ""
+      ? `${seat.family}|${seat.model.trim()}|${seat.modeId.trim()}`
+      : null;
     const set = key ? featureSets[key] : undefined;
     return {
       key,
@@ -1022,6 +1313,13 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   // One divergence signal for the whole routing card — the stored routing
   // vs the live profile bindings, not per role.
   const routingDiverged = routingDiverges(routing, statusView?.managedProfiles ?? []);
+
+  // The peer-pool family picker offers only families the host reports as
+  // available (registry picker order) — a seat's stored family that is no
+  // longer available keeps an "(unavailable)" escape-hatch chip.
+  const availableFamilies: FamilyName[] = FAMILY_PICKER_ORDER.filter(family =>
+    statusView?.families.find(view => view.family === family)?.availability === "available",
+  );
 
   // `initialProfileFamily` and `profiles` stay activate RPC inputs for
   // scripted use — the UI never sends either; the routing card is the
@@ -1471,6 +1769,469 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
             disabled={!target || routingBusy || !statusView?.binding || !routingDiffers}
             onPress={() => void saveRouting()}
           />
+        </Card>
+      ) : null}
+
+      {target ? (
+        // The user-scope Peer pool — slp-runtime/state/peer-pool.json, the
+        // catalog readCatalog resolves for every repository without its own
+        // .paseo-slp/slp-routing.json. This card is its sole writer; it loads
+        // with the target (independent of binding, like the Jev card) and a
+        // save takes effect the next time a Lead reads `routes`.
+        <Card
+          colors={colors}
+          title="Peer pool"
+          subtitle="User-scope seats a Lead picks per task. Supervisor and Lead keep their saved profiles — only Peer routes here."
+        >
+          {jevView?.enabled === true && jevView.capabilities?.routing === true ? (
+            <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
+              Jev routing is armed — the enabled seats below are the candidate set Jev picks from.
+            </Text>
+          ) : null}
+          {poolData === null ? (
+            <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
+              Pool state unavailable — check the daemon home and reload.
+            </Text>
+          ) : poolData.error ? (
+            <Text style={[styles.mutedSmall, { color: colors.statusDanger }]}>
+              The stored pool failed validation: {poolData.error} — saving replaces it.
+            </Text>
+          ) : poolData.pool === null ? (
+            <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+              No pool yet — add seats below, or import a legacy slp-routing.json.
+            </Text>
+          ) : null}
+          {poolData?.legacy && !canImportLegacy ? (
+            <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+              A legacy catalog exists at ~/.paseo/slp-routing.json — import is
+              available while this pool is empty and unedited.
+            </Text>
+          ) : null}
+          {canImportLegacy ? (
+            <View style={[styles.roleBox, { borderColor: colors.border }]}>
+              <Text style={[styles.mutedSmall, { color: colors.foreground }]}>
+                A legacy catalog exists at ~/.paseo/slp-routing.json — import it once
+                to populate this pool. The file is only read, never removed.
+              </Text>
+              <Button
+                colors={colors}
+                label="Import legacy catalog"
+                onPress={importLegacyPool}
+                disabled={poolBusy}
+              />
+            </View>
+          ) : null}
+          {poolData?.legacyError ? (
+            <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
+              ~/.paseo/slp-routing.json exists but is not a valid pool: {poolData.legacyError}
+            </Text>
+          ) : null}
+          <Field
+            colors={colors}
+            label="Pool policy"
+            hint="Who maintains this pool and the budget boundary — shown to the Lead"
+            value={poolForm.policy}
+            onChangeText={text => updatePool(form => ({ ...form, policy: text }))}
+            placeholder="Human maintains model suitability and quota…"
+            disabled={poolBusy}
+            multiline
+          />
+          {poolForm.seats.map((seat, index) => {
+            const seatCatalog = seat.family !== "" ? catalogs[seat.family] : undefined;
+            const thinking = seat.family !== "" ? thinkingOptionsFor(seatCatalog, seat.model) : null;
+            const featureDefs = featureDefsForSeat(seat);
+            const open = openSeat === index;
+            const disabled = poolBusy;
+            return (
+              <View key={`${index}:${seat.id}`} style={[styles.roleBox, { borderColor: colors.border }]}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                  <Pressable onPress={() => setOpenSeat(open ? null : index)} style={{ flex: 1, gap: 2 }}>
+                    <Text style={[styles.roleTitle, { color: colors.foreground }]} numberOfLines={1}>
+                      {seat.id || "(unnamed seat)"}
+                    </Text>
+                    <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]} numberOfLines={1}>
+                      {(seat.family === "" ? "no provider" : FAMILY_LABEL[seat.family]) +
+                        (seat.model ? ` · ${seat.model}` : "") +
+                        (seat.modeId ? ` · ${seat.modeId}` : "")}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setSeatEnabled(index)(!seat.enabled)}
+                    disabled={disabled}
+                    accessibilityRole="switch"
+                    accessibilityState={{ checked: seat.enabled, disabled }}
+                    style={[styles.switchTrack, { backgroundColor: seat.enabled ? colors.accent : colors.border }]}
+                  >
+                    <View style={[
+                      styles.switchThumb,
+                      { backgroundColor: seat.enabled ? colors.accentForeground : colors.foregroundMuted },
+                      seat.enabled ? styles.switchThumbOn : styles.switchThumbOff,
+                    ]} />
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setOpenSeat(open ? null : index)}
+                    style={({ pressed }) => [pressed && { opacity: 0.6 }]}
+                  >
+                    <Text style={[styles.collapseChevron, { color: colors.foregroundMuted }]}>{open ? "▾" : "▸"}</Text>
+                  </Pressable>
+                </View>
+                {open ? (
+                  <>
+                    <Field
+                      colors={colors}
+                      label="Seat ID"
+                      hint="Lowercase letters, digits, dashes — the Lead quotes this id in a launch request"
+                      value={seat.id}
+                      onChangeText={setSeatId(index)}
+                      placeholder="peer-coding"
+                      disabled={disabled}
+                    />
+                    <View style={styles.field}>
+                      <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Provider family</Text>
+                      <ChipSelect
+                        colors={colors}
+                        value={seat.family}
+                        options={[
+                          { label: "Unset", value: "" as const },
+                          ...FAMILY_PICKER_ORDER
+                            .filter(entry => availableFamilies.includes(entry))
+                            .map(entry => ({ label: FAMILY_LABEL[entry], value: entry })),
+                          // A stored family the host no longer reports as
+                          // available stays visible — the same escape hatch
+                          // the mode/thinking pickers give stored values.
+                          ...(seat.family !== "" && !availableFamilies.includes(seat.family)
+                            ? [{ label: `${FAMILY_LABEL[seat.family]} (unavailable)`, value: seat.family }]
+                            : []),
+                        ]}
+                        onChange={setSeatFamily(index)}
+                        disabled={disabled}
+                      />
+                      {availableFamilies.length === 0 ? (
+                        <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                          Inspect the daemon first — only families reported available are offered.
+                        </Text>
+                      ) : null}
+                    </View>
+                    {seat.family !== "" && catalogLoadingFor === seat.family ? (
+                      <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                        Loading {FAMILY_LABEL[seat.family]} catalog…
+                      </Text>
+                    ) : null}
+                    {seatCatalog?.error ? (
+                      <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
+                        Catalog unavailable: {seatCatalog.error} — enter values manually.
+                      </Text>
+                    ) : null}
+                    {seatCatalog && seatCatalog.models.length > 0 ? (
+                      <OptionPicker
+                        colors={colors}
+                        label="Model"
+                        hint="Required on an enabled seat"
+                        options={seatCatalog.models}
+                        value={seat.model}
+                        onChange={setSeatField(index, "model")}
+                        disabled={disabled}
+                        placeholder="Filter models…"
+                      />
+                    ) : (
+                      <Field
+                        colors={colors}
+                        label="Model"
+                        hint="Required on an enabled seat"
+                        value={seat.model}
+                        onChangeText={setSeatField(index, "model")}
+                        placeholder="Model ID — e.g. swe-2-max"
+                        disabled={disabled}
+                      />
+                    )}
+                    {seatCatalog && seatCatalog.modes.length > 0 ? (
+                      <View style={styles.field}>
+                        <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Mode</Text>
+                        <ChipSelect
+                          colors={colors}
+                          value={seat.modeId}
+                          options={[
+                            { label: "Provider default", value: "" },
+                            ...seatCatalog.modes.map(mode => ({ label: mode.label, value: mode.id })),
+                            // A stored mode the catalog doesn't list stays visible.
+                            ...(seat.modeId !== "" && !seatCatalog.modes.some(mode => mode.id === seat.modeId)
+                              ? [{ label: seat.modeId, value: seat.modeId }]
+                              : []),
+                          ]}
+                          onChange={setSeatField(index, "modeId")}
+                          disabled={disabled}
+                        />
+                      </View>
+                    ) : (
+                      <Field
+                        colors={colors}
+                        label="Mode"
+                        value={seat.modeId}
+                        onChangeText={setSeatField(index, "modeId")}
+                        placeholder="Mode ID — e.g. bypass"
+                        disabled={disabled}
+                      />
+                    )}
+                    {featureDefs.loading ? (
+                      <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Loading features…</Text>
+                    ) : null}
+                    {featureDefs.defs.length > 0 ? (
+                      featureDefs.defs.map(def => (
+                        def.type === "toggle" ? (
+                          <SwitchRow
+                            key={def.id}
+                            colors={colors}
+                            checked={(seat.feature[def.id] ?? "") === "" ? def.value : seat.feature[def.id] === "true"}
+                            onToggle={next => setSeatFeature(index, def.id)(String(next))}
+                            title={def.label}
+                            hint={def.description}
+                            disabled={disabled}
+                          />
+                        ) : (
+                          <View key={def.id} style={styles.field}>
+                            <Text style={[styles.fieldLabel, { color: colors.foreground }]}>{def.label}</Text>
+                            <ChipSelect
+                              colors={colors}
+                              value={seat.feature[def.id] ?? ""}
+                              options={[
+                                { label: "Provider default", value: "" },
+                                ...def.options.map(option => ({ label: option.label, value: option.id })),
+                              ]}
+                              onChange={setSeatFeature(index, def.id)}
+                              disabled={disabled}
+                            />
+                            {def.description ? (
+                              <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>{def.description}</Text>
+                            ) : null}
+                          </View>
+                        )
+                      ))
+                    ) : (
+                      <>
+                        <Field
+                          colors={colors}
+                          label="Feature values (JSON)"
+                          hint='Provider feature flags — e.g. {"auto_accept": true}'
+                          value={seat.features}
+                          onChangeText={setSeatField(index, "features")}
+                          placeholder="{}"
+                          disabled={disabled}
+                        />
+                        {featureDefs.error ? (
+                          <>
+                            <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
+                              Feature controls unavailable: {featureDefs.error} — edit JSON or retry.
+                            </Text>
+                            <Button
+                              colors={colors}
+                              label="Retry feature controls"
+                              onPress={() => {
+                                if (featureDefs.key) void retryFeatureSet(featureDefs.key);
+                              }}
+                              disabled={disabled || featureDefs.loading}
+                            />
+                          </>
+                        ) : null}
+                      </>
+                    )}
+                    {thinking === null ? (
+                      // No catalog / no picked model / model not listed — the
+                      // established free-text degradation path.
+                      <Field
+                        colors={colors}
+                        label="Thinking option"
+                        hint="Enter an option ID or leave empty for the provider default"
+                        value={seat.thinkingOptionId}
+                        onChangeText={setSeatField(index, "thinkingOptionId")}
+                        placeholder="Thinking option ID"
+                        disabled={disabled}
+                      />
+                    ) : thinking.options.length > 0 || seat.thinkingOptionId !== "" ? (
+                      <View style={styles.field}>
+                        <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Thinking option</Text>
+                        <ChipSelect
+                          colors={colors}
+                          value={seat.thinkingOptionId}
+                          options={[
+                            {
+                              label: thinking.defaultId
+                                ? `Provider default (${thinking.defaultId})`
+                                : "Provider default",
+                              value: "",
+                            },
+                            ...thinking.options.map(option => ({
+                              label: option.id === thinking.defaultId || option.isDefault
+                                ? `${option.label} (default)`
+                                : option.label,
+                              value: option.id,
+                            })),
+                            // Same escape hatch as the mode picker: a stored
+                            // option the model doesn't declare stays visible and
+                            // clearable, marked "(stored)" so it reads as
+                            // leftover rather than a real option.
+                            ...(seat.thinkingOptionId !== "" &&
+                              !thinking.options.some(option => option.id === seat.thinkingOptionId)
+                              ? [{ label: `${seat.thinkingOptionId} (stored)`, value: seat.thinkingOptionId }]
+                              : []),
+                          ]}
+                          onChange={setSeatField(index, "thinkingOptionId")}
+                          disabled={disabled}
+                        />
+                      </View>
+                    ) : (
+                      // Options resolved but the model declares none (devin
+                      // bakes thinking into model ids) — no free text to type
+                      // garbage into.
+                      <View style={styles.field}>
+                        <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Thinking option</Text>
+                        <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                          This model declares no thinking options
+                        </Text>
+                      </View>
+                    )}
+                    <Text style={[styles.fieldLabel, { color: colors.foreground }]}>
+                      Routing prose — sent to Jev (write in English)
+                    </Text>
+                    <Field
+                      colors={colors}
+                      label="Suitable for"
+                      hint="One per line — the task shapes this seat handles"
+                      value={seat.suitableFor}
+                      onChangeText={setSeatField(index, "suitableFor")}
+                      placeholder={"bounded coding tasks\nreads and small edits"}
+                      disabled={disabled}
+                      multiline
+                    />
+                    <Field
+                      colors={colors}
+                      label="Avoid for"
+                      hint="One per line — the task shapes it should not take"
+                      value={seat.avoidFor}
+                      onChangeText={setSeatField(index, "avoidFor")}
+                      placeholder={"architecture decisions\nlong-running autonomous work"}
+                      disabled={disabled}
+                      multiline
+                    />
+                    <Text style={[styles.fieldLabel, { color: colors.foreground }]}>
+                      Local only — Jev never sees this
+                    </Text>
+                    <Field
+                      colors={colors}
+                      label="Notes"
+                      hint="Why this seat exists, in the working language — required"
+                      value={seat.notes}
+                      onChangeText={setSeatField(index, "notes")}
+                      placeholder="Cost, quota, and judgment notes for the Lead"
+                      disabled={disabled}
+                      multiline
+                    />
+                    <Button
+                      colors={colors}
+                      kind="danger"
+                      label="Remove seat"
+                      onPress={removeSeat(index)}
+                      disabled={disabled}
+                    />
+                  </>
+                ) : null}
+              </View>
+            );
+          })}
+          {addSeatOpen ? (
+            <View style={[styles.roleBox, { borderColor: colors.border }]}>
+              <Text style={[styles.fieldLabel, { color: colors.foreground }]}>
+                Start from an archetype — parked until you pick a provider and model
+              </Text>
+              {PEER_SEAT_ARCHETYPES.map(archetype => (
+                <Pressable
+                  key={archetype.id}
+                  onPress={addSeat(archetype)}
+                  disabled={poolBusy}
+                  style={({ pressed }) => [styles.pickerRow, pressed && { backgroundColor: colors.surface2 }]}
+                >
+                  <Text style={[styles.checkTitle, { color: colors.foreground }]}>{archetype.id}</Text>
+                  <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>{archetype.notes}</Text>
+                </Pressable>
+              ))}
+              <Button colors={colors} label="Close" onPress={() => setAddSeatOpen(false)} />
+            </View>
+          ) : (
+            <Button
+              colors={colors}
+              label="Add seat"
+              onPress={() => setAddSeatOpen(true)}
+              disabled={poolBusy}
+            />
+          )}
+          <View style={styles.field}>
+            <SwitchRow
+              colors={colors}
+              checked={poolForm.quotaFallbackEnabled}
+              onToggle={next => updatePool(form => ({ ...form, quotaFallbackEnabled: next }))}
+              title="Quota fallback"
+              hint="When a picked seat's provider reports quota exhaustion, the Lead may retry one of these seats in order"
+              disabled={poolBusy}
+            />
+            {poolForm.quotaFallbackEnabled ? (
+              poolForm.seats.length === 0 ? (
+                <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
+                  Add seats before enabling a fallback order.
+                </Text>
+              ) : (
+                poolForm.seats.map((seat, index) => (
+                  <CheckRow
+                    key={`${index}:${seat.id}`}
+                    colors={colors}
+                    checked={poolForm.quotaFallbackIds.includes(seat.id)}
+                    onToggle={next => toggleFallbackId(seat.id, next)}
+                    title={seat.id || "(unnamed seat)"}
+                    disabled={poolBusy}
+                  />
+                ))
+              )
+            ) : null}
+          </View>
+          {"error" in poolBuild ? (
+            <Text style={[styles.mutedSmall, { color: colors.statusDanger }]}>{poolBuild.error}</Text>
+          ) : null}
+          <View style={{ gap: 6 }}>
+            <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+              <Button
+                colors={colors}
+                label={poolCopied ? "Copied" : "Copy pool JSON"}
+                onPress={() => void copyPoolJson()}
+                disabled={poolBusy || "error" in poolBuild}
+              />
+            </View>
+            <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+              Copies this pool as a catalog document. Pasting it into a repository's
+              .paseo-slp/slp-routing.json makes that repository ignore this pool
+              permanently — even if the pool is emptied later. The supported way to
+              pin a repository pool is `slp init &lt;repo&gt; --routing-from &lt;file&gt; --apply`.
+            </Text>
+          </View>
+          {poolSaved && !poolDirty ? (
+            <Text style={[styles.mutedSmall, { color: colors.statusSuccess }]}>
+              Saved — any route a Lead already read is now stale: the recorded catalog
+              hash no longer matches, so the next prepare fails closed until `routes`
+              is re-read.
+            </Text>
+          ) : null}
+          <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+            <Button
+              colors={colors}
+              kind="primary"
+              label={poolBusy ? "Saving…" : "Save pool"}
+              disabled={!target || poolBusy || !poolDiffers}
+              onPress={() => void savePeerPool()}
+            />
+            <Button
+              colors={colors}
+              label="Reload"
+              onPress={() => void reloadPeerPool()}
+              disabled={poolBusy}
+            />
+          </View>
         </Card>
       ) : null}
 

@@ -382,6 +382,46 @@ test('Jev OFF keeps the bare-optionId path; Jev ON requires a decision receipt',
   assert.deepEqual(on.routing.jev, { required: true, decision: 'verified', jevChoice: 'luna-code', declined: false });
 });
 
+test('a disabled jev.json without capabilities/provider never blocks Peer prepare', t => {
+  const { dir, installed, repo, home } = fixture(t);
+  install(root, installed);
+  const { sha256 } = catalogFixture(repo);
+  // "Disabled, not configured yet" is a coherent intent — the enabled-only
+  // fields must not gate reading the config or resolving a route.
+  jevHome(home, { config: { schemaVersion: 1, enabled: false } });
+  const config = readJevConfig(home);
+  assert.equal(config.enabled, false);
+  assert.deepEqual(config.capabilities, {});
+  assert.equal(config.provider, null);
+  const plan = launchPlan(installed, peerRequest(repo, home, { optionId: 'luna-code', catalogSha256: sha256 }));
+  assert.equal(plan.routing.optionId, 'luna-code');
+  assert.deepEqual(plan.routing.jev, { required: false, decision: 'none' });
+  // A capability call still fails closed at the enabled gate — the error is
+  // jev-disabled, not a config parse failure.
+  assert.throws(() => resolveJev(home, 'routing'), error => error instanceof JevError && error.code === 'jev-disabled');
+  // Status reports the disabled view with no provider instead of erroring.
+  const status = runtimeStatus(home);
+  assert.equal(status.jev.configured, true);
+  assert.equal(status.jev.enabled, false);
+  assert.equal(status.jev.provider, null);
+});
+
+test('an enabled jev.json still fails loud on broken enabled-only fields', t => {
+  const { home } = fixture(t);
+  for (const [name, config] of [
+    ['missing capabilities', { schemaVersion: 1, enabled: true, provider: { kind: 'openrouter', model: 'typesafe/jev-1.13' } }],
+    ['missing provider', { schemaVersion: 1, enabled: true, capabilities: { routing: true } }],
+    ['capabilities non-boolean', { schemaVersion: 1, enabled: true, capabilities: { routing: 'yes' }, provider: { kind: 'openrouter', model: 'typesafe/jev-1.13' } }],
+  ]) {
+    jevHome(home, { config });
+    assert.throws(
+      () => readJevConfig(home),
+      error => error instanceof JevError && error.code === 'jev-config-invalid',
+      name,
+    );
+  }
+});
+
 test('a supplied receipt is verified even when Jev mode is off', async t => {
   const { dir, installed, repo, home } = fixture(t);
   install(root, installed);

@@ -22,9 +22,9 @@ Local installation/transport checks do not constitute workflow acceptance.
 | src/references/anti-patterns.md | All 20 guide §9 hypotheses with evidence, questions and bounded responses; reached on audit/drift triggers. |
 | src/references/provider-routing.md | Supervisor/Lead profile selection, Peer pool selection, validation and handoff procedure. |
 | src/references/review-gates.md | Review gate structure: parallel axis-split seats (Spec vs Standards, optional cross-family), smell baseline, neutral briefs, non-merged aggregation. |
-| src/routing.mjs | Resolve the repository catalog, falling back to the user-scope catalog when absent; bind a Lead-selected option with fresh hash and availability checks. `optionExclusions` is the single eligibility predicate — closed-vocabulary tokens (`disabled`, `availability:<state>`, `role-not-listed`) shared by enforcement and Jev candidate generation. `catalogBinding` verifies a supplied Jev receipt offline and requires one when the daemon arms `jev.capabilities.routing`. |
+| src/routing.mjs | Resolve the repository catalog, falling back to the plugin-owned user-scope pool at `<paseoHome>/slp-runtime/state/peer-pool.json` when absent; bind a Lead-selected option with fresh hash and availability checks. `optionExclusions` is the single eligibility predicate — closed-vocabulary tokens (`disabled`, `availability:<state>`, `role-not-listed`) shared by enforcement and Jev candidate generation. `catalogBinding` verifies a supplied Jev receipt offline and requires one when the daemon arms `jev.capabilities.routing`. |
 | src/jev.mjs | Jev (TypeSafe System One) bounded-decision transport — never an ACP provider. Per-daemon config/key resolution (fail closed, all toggles default off), OpenRouter Decisions API calls to the pinned `typesafe/jev-1.13` with ~5s timeout and at most one bounded retry, typed-answer validation, credential-shaped-string redaction before send, and decision-receipt build/verify. Receipts prove consistency, not authenticity; confidence is recorded, never a threshold. |
-| src/jev-routing.mjs | First Jev consumer: `route-decide` computes the deterministic eligible set from `optionExclusions` plus the `no-suitable-option` sentinel, sends the Lead-authored brief as state (never raw assignmentFile bytes; catalog `notes`/`priority` withheld) and emits the option id plus receipt. Decline exits nonzero. Runs only on explicit invocation — no loops, schedules or prepare-time calls. |
+| src/jev-routing.mjs | First Jev consumer: `route-decide` computes the deterministic eligible set from `optionExclusions` plus the `no-suitable-option` sentinel, sends the Lead-authored brief as state (never raw assignmentFile bytes; catalog `notes` withheld) and emits the option id plus receipt. Decline exits nonzero. Runs only on explicit invocation — no loops, schedules or prepare-time calls. |
 | skills/paseo-slp-onboarding/SKILL.md | Installable repo tactics and Peer pool setup, with Supervisor/Lead profile verification; project/global installation is independent from repo config initialization. |
 | src/templates/workspace-protocol.md | Repository tactics template with risk classes, routing, monitoring and proof gates; the `agent_mode` frontmatter field records the intended spawn mode for direct launches (empty falls back to the bundle's `modeId`, then asks); explicit init preserves existing files. |
 | src/binding.mjs | Every rule a Binding must satisfy: setting patterns, the route override deny-lists and the single provider-health check. Imports nothing from the package. |
@@ -77,12 +77,16 @@ current profile preferences and unrelated config, adds new bundles and rebinds o
 providers to the new directory while retaining the old installation for active sessions.
 Owned slp-peer and legacy disposition profiles are removed from host profiles and archived exactly
 in paseo-binding.json retiredProfiles for review. Other profiles remain untouched.
-Standalone host install/upgrade creates an empty user routing-catalog scaffold
-at <paseo-home>/slp-routing.json only when absent. Uninstall removes that
-scaffold only while its bytes remain unchanged; existing or Human-edited
-catalogs are preserved. Plugin v1 activation/deactivation does not create,
-edit, or delete routing catalogs. Populating routing choices and migrating
-repository catalogs require explicit onboarding or migration authority.
+The user-scope Peer pool is plugin-owned mutable state at
+<paseo-home>/slp-runtime/state/peer-pool.json (mode 0600, atomic
+whole-file writes under a sha256 compare-and-swap; the manager surface is
+its sole writer). Standalone host install/upgrade/uninstall and plugin
+activation/deactivation create, edit, and delete no routing catalogs —
+a repository catalog exists only where `init --routing-from` imported an
+explicitly chosen file. A legacy <paseo-home>/slp-routing.json is read for
+a one-time import into the pool and is never deleted automatically.
+Populating routing choices and migrating repository catalogs require
+explicit onboarding or migration authority.
 The old retained binding
 no longer owns current host entries and cannot uninstall those entries. Runtime cutover
 still requires task authority; neither install nor upgrade creates replacement sessions.
@@ -172,10 +176,12 @@ spawns, then the bundle's own — rather than verbatim copy. Missing or
 incompatible settings require Human configuration before the dependent launch.
 
 Peer delegation resolves the assigned repository's .paseo-slp/slp-routing.json
-first; when the repository has no catalog, the user-scope catalog
-($PASEO_HOME/slp-routing.json, default ~/.paseo) is the declared fallback.
-Onboarding prepares a pool of complete provider/model/settings options with
-suitableFor, avoidFor, notes, priority and explicit eligibility. Lead reads the pool,
+first; when the repository has no catalog, the plugin-owned user-scope pool
+($PASEO_HOME/slp-runtime/state/peer-pool.json, default ~/.paseo) is the
+declared fallback. Onboarding prepares a pool of complete provider/model/settings
+options with suitableFor, avoidFor, notes and explicit eligibility — authored in
+the manager surface, where model/mode values come from the live provider
+catalog. Lead reads the pool,
 selects an option per task/budget, explains why it fits and validates its fresh hash
 with prepare. Provider pi/codex/devin/claude maps to the matching installed Peer wrapper; policy
 and disposition stay separate from runtime choice. Neither the Lead's family nor
@@ -239,11 +245,11 @@ workspace unless a declared worktree, repository or lane-isolation reason is
 recorded with its paths — a second workspace on the same checkout is not
 isolation. Source selection is shared by prepare-handoff.
 
-init creates missing protocol, empty pool scaffold and Supervisor notebook file
-without overwriting existing files. Onboarding completes the project pool; empty init output is not ready for
-Peer delegation and shadows the user-scope catalog until removed.
---routing-from imports only an explicitly chosen catalog into a
-missing repo file. Host upgrade archives retired Peer profiles but neither creates
+init creates missing protocol and Supervisor notebook files
+without overwriting existing files, and writes .paseo-slp/slp-routing.json only
+when --routing-from names an explicitly chosen catalog — a repository without
+its own catalog resolves the user-scope pool. Host upgrade archives retired Peer
+profiles but neither creates
 nor edits project catalogs, so setup never silently imports host choices.
 
 New basic manifests use runtimeSource=profiles-and-peer-pool. Supervisor/Lead

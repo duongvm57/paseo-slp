@@ -3,6 +3,7 @@
 // the client bundle check proves it pulls in no server-only or node code.
 import { AbsolutePath, Id } from "../shared/contracts.ts";
 import { OWNED_PROVIDER_ID_RE, ownedProviderId } from "../shared/families.ts";
+import type { SeatArchetype } from "../shared/archetypes.ts";
 import type {
   CatalogResult,
   CatalogSelectOptionValue,
@@ -10,6 +11,8 @@ import type {
   FamilyName,
   FamilyViewValue,
   OperationViewValue,
+  PeerPoolOptionValue,
+  PeerPoolValue,
   RoleChoiceValue,
   RoleRoutingValue,
   StartResult,
@@ -480,7 +483,7 @@ export const routingChoiceDiffers = (
  *  pick; the pickers' "(stored)" escape hatches still cover stored values the
  *  catalog doesn't list. */
 export function applyFamilyChange(
-  form: RoutingRoleForm,
+  form: Pick<RoutingRoleForm, "model" | "modeId" | "thinkingOptionId">,
   family: FamilyName,
   catalog: CatalogResult | undefined,
 ): RoutingRoleForm {
@@ -493,6 +496,274 @@ export function applyFamilyChange(
       : "";
   return { family, model, modeId, thinkingOptionId, features: "", feature: {} };
 }
+
+/** A model or mode switch invalidates the feature form: feature defs are
+ *  keyed `family|model|modeId`, so values authored under the previous key
+ *  would persist silently and write to the pool for a setting that may not
+ *  declare them — the same rule applyFamilyChange applies on a family
+ *  switch. The role card and the seat editor share this path. A no-change
+ *  set returns the form untouched so a redundant pick never clears authored
+ *  values. */
+export function applySettingChange<
+  F extends { model: string; modeId: string; features: string; feature: Record<string, string> },
+>(form: F, field: "model" | "modeId", value: string): F {
+  if (value === form[field]) return form;
+  return { ...form, [field]: value, features: "", feature: {} };
+}
+
+// ---------------------------------------------------------------------------
+// Peer pool — the user-scope catalog the plugin owns at slp-runtime/state/
+// peer-pool.json (readCatalog resolves it for every repository without its
+// own .paseo-slp/slp-routing.json; this card is its sole writer). The form
+// mirrors the role-routing form: one build path feeds the Save diff-gate and
+// savePeerPool so an enabled button can never write something the gate did
+// not compare.
+// ---------------------------------------------------------------------------
+
+export const PEER_SEAT_ID = /^[a-z][a-z0-9-]*$/;
+
+/** The pool card's editable copy of one pool option — same conventions as
+ *  RoutingRoleForm (`features` is the raw JSON base shown when the provider
+ *  declares no feature defs, `feature` the per-definition control values).
+ *  `family` mirrors `provider` ("" while the seat is parked); `suitableFor`
+ *  and `avoidFor` are one-entry-per-line text. */
+export interface PeerSeatForm {
+  id: string;
+  family: FamilyName | "";
+  model: string;
+  modeId: string;
+  thinkingOptionId: string;
+  enabled: boolean;
+  features: string;
+  feature: Record<string, string>;
+  suitableFor: string;
+  avoidFor: string;
+  notes: string;
+}
+
+export interface PeerPoolForm {
+  policy: string;
+  seats: PeerSeatForm[];
+  quotaFallbackEnabled: boolean;
+  quotaFallbackIds: string[];
+}
+
+/** One-entry-per-line text → the option's string list: trimmed, blanks
+ *  dropped. Entries themselves may contain commas ("reads, triages"). */
+const lineList = (text: string): string[] =>
+  text.split("\n").map(line => line.trim()).filter(line => line !== "");
+
+/** Stored option → form seat (the Load path). Stored `features` seed both
+ *  the raw-JSON base and the per-definition controls — same prefill the role
+ *  form gives stored featureValues. */
+export function peerSeatForm(option: PeerPoolOptionValue): PeerSeatForm {
+  const feature: Record<string, string> = {};
+  for (const [featureId, value] of Object.entries(option.features ?? {})) {
+    feature[featureId] = String(value ?? "");
+  }
+  return {
+    id: option.id,
+    family: option.provider === "" ? "" : option.provider,
+    model: option.model,
+    modeId: option.modeId ?? "",
+    thinkingOptionId: option.thinkingOptionId ?? "",
+    enabled: option.enabled,
+    features: option.features ? JSON.stringify(option.features) : "",
+    feature,
+    suitableFor: option.suitableFor.join("\n"),
+    avoidFor: option.avoidFor.join("\n"),
+    notes: option.notes,
+  };
+}
+
+/** Fresh-form defaults for an absent pool: the policy line carries the
+ *  retired template's wording, the seat list starts empty. */
+export function emptyPeerPoolForm(): PeerPoolForm {
+  return {
+    policy: "Human maintains model suitability and quota. Lead chooses within the current assignment budget.",
+    seats: [],
+    quotaFallbackEnabled: false,
+    quotaFallbackIds: [],
+  };
+}
+
+/** Stored pool → form (the Load path); null seeds the empty defaults. */
+export function peerPoolForm(pool: PeerPoolValue | null): PeerPoolForm {
+  if (pool === null) return emptyPeerPoolForm();
+  return {
+    policy: pool.policy,
+    seats: pool.options.map(peerSeatForm),
+    quotaFallbackEnabled: pool.quotaFallback?.enabled === true,
+    quotaFallbackIds: [...(pool.quotaFallback?.optionIds ?? [])],
+  };
+}
+
+/** Archetype → form seat: parked (blank family/model, disabled) so the Human
+ *  picks real catalog values; prose carries the archetype's intent. */
+export function peerSeatFromArchetype(archetype: SeatArchetype): PeerSeatForm {
+  return {
+    id: archetype.id,
+    family: "",
+    model: "",
+    modeId: "",
+    thinkingOptionId: "",
+    enabled: false,
+    features: "",
+    feature: {},
+    suitableFor: archetype.suitableFor.join("\n"),
+    avoidFor: archetype.avoidFor.join("\n"),
+    notes: archetype.notes,
+  };
+}
+
+/** First unused seat id for an archetype — `-2`, `-3`… suffixes keep the id
+ *  unique and valid under PEER_SEAT_ID. */
+export function uniqueSeatId(base: string, existing: readonly string[]): string {
+  const taken = new Set(existing);
+  if (!taken.has(base)) return base;
+  for (let n = 2; ; n++) {
+    const candidate = `${base}-${n}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+}
+
+export type PeerSeatBuild = { option: PeerPoolOptionValue } | { error: string };
+
+/** Form seat → storable pool option. `stored` spreads first so a field the
+ *  schema later adds passes through untouched (buildRoleChoice's convention);
+ *  `priority` is deliberately dropped — the field is retired, not merely
+ *  hidden. `roles` is always ["peer"] and `availability` always "ready" —
+ *  the one per-seat toggle writes both facts. An enabled seat with a blank
+ *  family or model is the combination validateCatalog would reject, so the
+ *  build errors it early rather than letting it reach the file. */
+export function buildPeerSeat(
+  form: PeerSeatForm,
+  stored: PeerPoolOptionValue | undefined,
+  defs: CatalogResult["features"],
+): PeerSeatBuild {
+  const id = form.id.trim();
+  if (!PEER_SEAT_ID.test(id)) {
+    return { error: `seat "${form.id.trim() || "?"}": id must match ${PEER_SEAT_ID} (lowercase letters, digits, dashes)` };
+  }
+  const label = `seat ${id}`;
+  if (form.enabled && form.family === "") return { error: `${label}: an enabled seat needs a provider family` };
+  if (form.enabled && form.model.trim() === "") return { error: `${label}: an enabled seat needs a model` };
+  const option: Record<string, unknown> = { ...(stored ?? {}) };
+  delete option.priority;
+  option.id = id;
+  option.provider = form.family;
+  option.roles = ["peer"];
+  option.model = form.model.trim();
+  option.enabled = form.enabled;
+  option.availability = "ready";
+  const modeId = form.modeId.trim();
+  if (modeId) option.modeId = modeId;
+  else delete option.modeId;
+  const thinkingOptionId = form.thinkingOptionId.trim();
+  if (thinkingOptionId) option.thinkingOptionId = thinkingOptionId;
+  else delete option.thinkingOptionId;
+  const featuresRaw = form.features.trim();
+  let featuresJson: Record<string, unknown> = {};
+  if (featuresRaw) {
+    try {
+      const parsed: unknown = JSON.parse(featuresRaw);
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return { error: `${label}: feature values must be a JSON object` };
+      }
+      featuresJson = parsed as Record<string, unknown>;
+    } catch {
+      return { error: `${label}: feature values are not valid JSON` };
+    }
+  }
+  if (defs.length > 0) {
+    const merged = mergeFeatureValues(defs, featuresJson, form.feature);
+    if (Object.keys(merged).length > 0) option.features = merged;
+    else delete option.features;
+  } else if (featuresRaw) {
+    option.features = featuresJson;
+  } else {
+    delete option.features;
+  }
+  option.suitableFor = lineList(form.suitableFor);
+  option.avoidFor = lineList(form.avoidFor);
+  const notes = form.notes.trim();
+  if (!notes) return { error: `${label}: notes are required (local only — Jev never sees them)` };
+  option.notes = notes;
+  return { option: option as PeerPoolOptionValue };
+}
+
+export type PeerPoolBuild = { pool: PeerPoolValue } | { error: string };
+
+/** Form → storable PeerPool: seat ids unique, fallback ids unique and drawn
+ *  from this pool's seats, and an enabled fallback never empty — the same
+ *  constraints validateCatalog enforces on read, surfaced here so the Save
+ *  gate can name them before dispatch. */
+export function buildPeerPool(
+  form: PeerPoolForm,
+  defsFor: (seat: PeerSeatForm) => CatalogResult["features"],
+  storedOptions?: ReadonlyMap<string, PeerPoolOptionValue>,
+): PeerPoolBuild {
+  const policy = form.policy.trim();
+  if (!policy) return { error: "pool policy is required" };
+  const ids = new Set<string>();
+  const options: PeerPoolOptionValue[] = [];
+  for (const seat of form.seats) {
+    const built = buildPeerSeat(seat, storedOptions?.get(seat.id.trim()), defsFor(seat));
+    if ("error" in built) return built;
+    if (ids.has(built.option.id)) return { error: `duplicate seat id "${built.option.id}"` };
+    ids.add(built.option.id);
+    options.push(built.option);
+  }
+  const seen = new Set<string>();
+  for (const id of form.quotaFallbackIds) {
+    if (seen.has(id)) return { error: `quotaFallback optionIds must be unique (${id} listed twice)` };
+    seen.add(id);
+    if (!ids.has(id)) return { error: `quotaFallback option "${id}" is not a pool seat` };
+  }
+  if (form.quotaFallbackEnabled && form.quotaFallbackIds.length === 0) {
+    return { error: "an enabled quota fallback needs at least one seat selected" };
+  }
+  return {
+    pool: {
+      version: 1,
+      policy,
+      quotaFallback: { enabled: form.quotaFallbackEnabled, optionIds: [...form.quotaFallbackIds] },
+      options,
+    } as PeerPoolValue,
+  };
+}
+
+/** Order-stable key for whole-pool equality — file key order must never make
+ *  a byte-identical pool look dirty. Arrays stay ordered: option order and
+ *  fallback order are meaningful. */
+const canonicalPoolKey = (value: unknown): string =>
+  JSON.stringify(value, (_key, v) =>
+    v !== null && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(Object.keys(v).sort().map(k => [k, (v as Record<string, unknown>)[k]]))
+      : v,
+  );
+
+export function peerPoolEquals(
+  a: PeerPoolValue | null | undefined,
+  b: PeerPoolValue | null | undefined,
+): boolean {
+  if (a == null || b == null) return a == b;
+  return canonicalPoolKey(a) === canonicalPoolKey(b);
+}
+
+/** One gate predicate for a built pool against the stored one — an error
+ *  build counts as differing so Save stays pressable and surfaces the build
+ *  error; an absent stored pool differs from any bound form (a save persists
+ *  a pool where none existed). */
+export const peerPoolDiffers = (
+  build: PeerPoolBuild,
+  stored: PeerPoolValue | null | undefined,
+): boolean => "error" in build || !peerPoolEquals(build.pool, stored);
+
+/** Structural form equality for the prefill effect — the same re-render
+ *  guard sameRoleForm gives the role form. */
+export const samePeerPoolForm = (a: PeerPoolForm, b: PeerPoolForm): boolean =>
+  JSON.stringify(a) === JSON.stringify(b);
 
 // The view patch a start response produces. Conflicts are surfaced whenever
 // they are present — accepted or not (an accepted reconcile inspect can still

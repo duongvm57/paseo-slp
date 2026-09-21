@@ -10,13 +10,17 @@ import { buildSync } from 'esbuild';
 import {
   DISABLE_REMOVE_NOTICE,
   EXCLUSIVE_WINDOW_NOTICE,
+  PEER_SEAT_ID,
   RESTORATION_NOTICE,
   RETAINED_RUNTIME_NOTICE,
   STATUS_POLL_MS,
   activationKind,
   activationLabel,
   applyFamilyChange,
+  applySettingChange,
   applyPatch,
+  buildPeerPool,
+  buildPeerSeat,
   buildRoleChoice,
   conflictLine,
   conflictLines,
@@ -30,6 +34,10 @@ import {
   newOperationId,
   operationPending,
   operationRows,
+  peerPoolDiffers,
+  peerPoolEquals,
+  peerPoolForm,
+  peerSeatFromArchetype,
   pollDelayAfterStart,
   pollDelayAfterStatus,
   reconcileProblem,
@@ -41,11 +49,15 @@ import {
   routingDiverges,
   startPatch,
   shortenSha,
+  uniqueSeatId,
   visibleConflicts,
   stateHint,
   statusRows,
   targetKey,
 } from '../plugin/client/manager-state.ts';
+import { PEER_SEAT_ARCHETYPES } from '../plugin/shared/archetypes.ts';
+import { PeerPoolOption } from '../plugin/shared/contracts.ts';
+import { validateCatalog } from '../src/routing.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 
@@ -572,6 +584,37 @@ test('applyFamilyChange resets dependents against the new family catalog', () =>
   assert.deepEqual(same.feature, {});
 });
 
+test('applySettingChange clears feature values on a model OR mode change', () => {
+  // Feature defs are keyed family|model|modeId — either input changing
+  // invalidates values authored under the previous key.
+  const form = () => ({
+    family: 'devin',
+    model: 'swe-2-max',
+    modeId: 'bypass',
+    thinkingOptionId: '',
+    features: '{"auto_accept":true}',
+    feature: { auto_accept: 'true' },
+  });
+
+  const byModel = applySettingChange(form(), 'model', 'swe-2-medium');
+  assert.equal(byModel.model, 'swe-2-medium');
+  assert.equal(byModel.modeId, 'bypass');
+  assert.equal(byModel.features, '');
+  assert.deepEqual(byModel.feature, {});
+
+  const byMode = applySettingChange(form(), 'modeId', 'plan');
+  assert.equal(byMode.model, 'swe-2-max');
+  assert.equal(byMode.modeId, 'plan');
+  assert.equal(byMode.features, '');
+  assert.deepEqual(byMode.feature, {});
+
+  // A no-change pick returns the SAME form object — a redundant pick never
+  // clears authored values.
+  const unchanged = form();
+  assert.equal(applySettingChange(unchanged, 'model', 'swe-2-max'), unchanged);
+  assert.equal(applySettingChange(unchanged, 'modeId', 'bypass'), unchanged);
+});
+
 test('familyFromProviderId parses managed provider ids for form prefill', () => {
   assert.equal(familyFromProviderId('slp-pi-supervisor'), 'pi');
   assert.equal(familyFromProviderId('slp-claude-peer'), 'claude');
@@ -703,7 +746,13 @@ test('the routing UI is one card with one save and one divergence warning', () =
   );
 
   // The routing card carries the full RoleChoice surface: feature controls
-  // keyed on the routing form's picks plus a thinking-option field.
+  // keyed on the routing form's picks plus a thinking-option field. The Peer
+  // pool seat editor deliberately mirrors the same picker patterns, so the
+  // per-card counts scope to the Role profiles card region.
+  const roleCard = source.slice(
+    source.indexOf('title="Role profiles"'),
+    source.indexOf('title="Peer pool"'),
+  );
   assert.ok(
     source.includes('const family = routingForm[role].family'),
     'feature defs fetch keys on the routing form',
@@ -714,9 +763,9 @@ test('the routing UI is one card with one save and one divergence warning', () =
     2,
     'the shared build merges the same defs for both roles',
   );
-  assert.equal(occurrences(source, '"Feature values (JSON)"'), 1, 'JSON fallback field present');
-  assert.ok(source.includes('featureDefs.error'), 'feature fetch error surfaced in the fallback');
-  assert.ok(source.includes('Retry feature controls'), 'retry affordance for failed feature fetch');
+  assert.equal(occurrences(roleCard, '"Feature values (JSON)"'), 1, 'JSON fallback field present');
+  assert.ok(roleCard.includes('featureDefs.error'), 'feature fetch error surfaced in the fallback');
+  assert.ok(roleCard.includes('Retry feature controls'), 'retry affordance for failed feature fetch');
   assert.ok(source.includes('errorMessage(error)'), 'fetch rejection recorded, not swallowed');
 
   // Thinking options resolve per picked model from the catalog (§9
@@ -725,21 +774,21 @@ test('the routing UI is one card with one save and one divergence warning', () =
   // static hint when it declares none, and the free-text Field kept only
   // as the unresolvable fallback. The stale "catalog does not list" copy
   // is gone.
-  assert.equal(occurrences(source, 'thinkingOptionsFor('), 1, 'thinking resolves via the catalog helper');
-  assert.equal(occurrences(source, 'thinking === null'), 1, 'free text remains only the fallback path');
+  assert.equal(occurrences(roleCard, 'thinkingOptionsFor('), 1, 'thinking resolves via the catalog helper');
+  assert.equal(occurrences(roleCard, 'thinking === null'), 1, 'free text remains only the fallback path');
   assert.ok(
-    source.includes('Provider default (${thinking.defaultId})'),
+    roleCard.includes('Provider default (${thinking.defaultId})'),
     'auto entry names the declared default',
   );
-  assert.ok(source.includes('(stored)'), 'unknown stored option stays visible');
-  assert.ok(source.includes('This model declares no thinking options'), 'empty-options hint present');
+  assert.ok(roleCard.includes('(stored)'), 'unknown stored option stays visible');
+  assert.ok(roleCard.includes('This model declares no thinking options'), 'empty-options hint present');
   assert.equal(
     occurrences(source, 'The catalog does not list thinking options'),
     0,
     'stale free-text hint removed',
   );
   assert.ok(bundle.includes('This model declares no thinking options'), 'empty-options hint bundled');
-  assert.equal(occurrences(source, '"Thinking option"'), 1, 'thinking option field present');
+  assert.equal(occurrences(roleCard, '"Thinking option"'), 1, 'thinking option field present');
 
   // The family picker goes through a dedicated handler — not the generic
   // single-field write — so dependent picks re-validate against the new
@@ -747,7 +796,12 @@ test('the routing UI is one card with one save and one divergence warning', () =
   // values. "family" is out of setRoutingField's union entirely.
   assert.equal(occurrences(source, 'setRoutingField(role, "family")'), 0, 'family write must reset dependents');
   assert.equal(occurrences(source, 'onChange={setRoutingFamily(role)}'), 1, 'family picker uses the dedicated handler');
-  assert.equal(occurrences(source, 'applyFamilyChange('), 1, 'one family-change application site');
+  // The role card and the seat editor both route family switches through
+  // applyFamilyChange — two application sites, same re-validation rule.
+  assert.equal(occurrences(source, 'applyFamilyChange('), 2, 'family-change sites: role + seat');
+  // Same for the feature-key fields: a model OR mode pick clears the feature
+  // form via the shared helper — two application sites, one rule.
+  assert.equal(occurrences(source, 'applySettingChange('), 2, 'feature-key sites: role + seat');
 
   // The Activation card no longer exposes the pre-binding configurators;
   // the routing card is the sole role→provider configurator in the UI
@@ -770,6 +824,7 @@ test('activation is a prerequisite: it renders above Role profiles and gates Sav
     'title="Status"',
     'title="Activation"',
     'title="Role profiles"',
+    'title="Peer pool"',
     'title="Communication language"',
     'title="Advanced"',
     'title="Maintenance"',
@@ -815,4 +870,177 @@ test('activation is a prerequisite: it renders above Role profiles and gates Sav
   // when the cards reordered.
   assert.equal(occurrences(source, 'role profiles above'), 0, 'stale spatial copy');
   assert.ok(source.includes('the Role profiles card'), 'activation note must name the card');
+});
+
+// --- peer pool --------------------------------------------------------------
+
+test('archetype seats parse as pool options and stay parked', () => {
+  assert.ok(PEER_SEAT_ARCHETYPES.length >= 12, 'the seat set covers the agreed dispositions');
+  const seen = new Set();
+  for (const archetype of PEER_SEAT_ARCHETYPES) {
+    assert.ok(PeerPoolOption.safeParse(archetype).success, `archetype ${archetype.id} fails the wire schema`);
+    assert.equal(archetype.provider, '', `archetype ${archetype.id} ships a provider`);
+    assert.equal(archetype.model, '', `archetype ${archetype.id} ships a model`);
+    assert.equal(archetype.enabled, false, `archetype ${archetype.id} ships enabled`);
+    assert.ok(!('priority' in archetype), `archetype ${archetype.id} still carries priority`);
+    assert.ok(!seen.has(archetype.id), `duplicate archetype id ${archetype.id}`);
+    seen.add(archetype.id);
+    const seat = peerSeatFromArchetype(archetype);
+    assert.equal(seat.family, '');
+    assert.equal(seat.enabled, false);
+    const built = buildPeerSeat(seat, undefined, []);
+    assert.ok('option' in built, `archetype ${archetype.id} does not build: ${built.error}`);
+    assert.deepEqual(built.option.roles, ['peer']);
+    assert.equal(built.option.availability, 'ready');
+  }
+  // A pool assembled purely from archetypes is valid for the package
+  // validator — blank provider/model is legal while disabled.
+  const pool = buildPeerPool(
+    {
+      policy: 'test',
+      seats: PEER_SEAT_ARCHETYPES.map(peerSeatFromArchetype),
+      quotaFallbackEnabled: false,
+      quotaFallbackIds: [],
+    },
+    () => [],
+  );
+  assert.ok('pool' in pool, `archetype pool does not build: ${pool.error}`);
+  validateCatalog(pool.pool);
+});
+
+test('peerPoolForm round-trips a stored pool and seeds defaults when absent', () => {
+  const stored = {
+    version: 1,
+    policy: 'p',
+    quotaFallback: { enabled: true, optionIds: ['a'] },
+    options: [{
+      id: 'a', provider: 'codex', roles: ['peer'], model: 'm', enabled: true,
+      availability: 'ready', modeId: 'full', thinkingOptionId: 'high',
+      features: { x: true }, suitableFor: ['one', 'two'], avoidFor: ['no'], notes: 'n',
+    }],
+  };
+  const form = peerPoolForm(stored);
+  assert.equal(form.policy, 'p');
+  assert.equal(form.quotaFallbackEnabled, true);
+  assert.deepEqual(form.quotaFallbackIds, ['a']);
+  assert.equal(form.seats.length, 1);
+  const seat = form.seats[0];
+  assert.equal(seat.family, 'codex');
+  assert.equal(seat.suitableFor, 'one\ntwo');
+  assert.equal(seat.feature.x, 'true');
+  const rebuilt = buildPeerPool(form, () => [], new Map(stored.options.map(o => [o.id, o])));
+  assert.ok('pool' in rebuilt, `stored pool does not rebuild: ${rebuilt.error}`);
+  assert.ok(peerPoolEquals(rebuilt.pool, stored), 'form round-trip must equal the stored pool');
+  assert.equal(peerPoolDiffers(rebuilt, stored), false, 'a rebuilt form must not look dirty');
+
+  const empty = peerPoolForm(null);
+  assert.equal(empty.seats.length, 0);
+  const emptyBuild = buildPeerPool(empty, () => []);
+  assert.ok('pool' in emptyBuild);
+  validateCatalog(emptyBuild.pool);
+});
+
+test('buildPeerPool rejects the constraints validateCatalog enforces', () => {
+  const seat = (id, over = {}) => ({
+    id, family: 'codex', model: 'm', modeId: '', thinkingOptionId: '',
+    enabled: true, features: '', feature: {},
+    suitableFor: 'work', avoidFor: 'none', notes: 'n', ...over,
+  });
+  const base = { policy: 'p', seats: [seat('a')], quotaFallbackEnabled: false, quotaFallbackIds: [] };
+  assert.ok('error' in buildPeerPool({ ...base, seats: [seat('a'), seat('a')] }, () => []));
+  assert.match(buildPeerPool({ ...base, quotaFallbackIds: ['ghost'] }, () => []).error, /not a pool seat/);
+  assert.match(
+    buildPeerPool({ ...base, quotaFallbackEnabled: true }, () => []).error,
+    /at least one seat/,
+  );
+  assert.match(buildPeerPool({ ...base, seats: [seat('Bad Id')] }, () => []).error, /must match/);
+  assert.match(buildPeerPool({ ...base, seats: [seat('a', { enabled: true, family: '' })] }, () => []).error, /provider family/);
+  assert.match(buildPeerPool({ ...base, seats: [seat('a', { enabled: true, model: '' })] }, () => []).error, /needs a model/);
+  assert.match(buildPeerPool({ ...base, seats: [seat('a', { notes: ' ' })] }, () => []).error, /notes are required/);
+  assert.match(
+    buildPeerPool({ ...base, seats: [seat('a', { features: '{nope' })] }, () => []).error,
+    /not valid JSON/,
+  );
+  assert.match(buildPeerPool({ ...base, policy: ' ' }, () => []).error, /policy is required/);
+  // A parked seat (blank family/model, disabled) is legal.
+  const parked = buildPeerPool({ ...base, seats: [seat('a', { family: '', model: '', enabled: false })] }, () => []);
+  assert.ok('pool' in parked, `parked seat must build: ${parked.error}`);
+  validateCatalog(parked.pool);
+  // A stored `priority` is dropped on write — retired, not preserved.
+  const withPriority = buildPeerSeat(seat('a'), { ...seat('a'), provider: 'codex', roles: ['peer'], availability: 'ready', suitableFor: ['w'], avoidFor: [], notes: 'n', priority: 9 }, []);
+  assert.ok('option' in withPriority);
+  assert.ok(!('priority' in withPriority.option), 'priority must not survive a save');
+});
+
+test('uniqueSeatId suffixes collisions and stays a valid id', () => {
+  assert.equal(uniqueSeatId('peer-coding', []), 'peer-coding');
+  assert.equal(uniqueSeatId('peer-coding', ['peer-coding']), 'peer-coding-2');
+  assert.equal(uniqueSeatId('peer-coding', ['peer-coding', 'peer-coding-2']), 'peer-coding-3');
+  for (const id of [uniqueSeatId('a', ['a']), uniqueSeatId('a', ['a', 'a-2'])]) {
+    assert.match(id, PEER_SEAT_ID);
+  }
+});
+
+test('the Peer pool card authors the pool through catalog-backed pickers', () => {
+  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  const bundle = clientBundle();
+  const peerCard = source.slice(
+    source.indexOf('title="Peer pool"'),
+    source.indexOf('title="Communication language"'),
+  );
+  assert.notEqual(source.indexOf('title="Peer pool"'), -1, 'Peer pool card missing');
+
+  // One save path, CAS-guarded — the sha256 get-peer-pool returned is sent
+  // back as expectedSha256; a conflict reloads instead of overwriting.
+  assert.equal(occurrences(source, 'callSetPeerPool('), 1, 'one set-peer-pool call site');
+  assert.equal(occurrences(source, 'callGetPeerPool('), 2, 'load + reload reads');
+  assert.ok(source.includes('expectedSha256'), 'CAS token is sent on save');
+  assert.ok(source.includes('peerPoolDiffers('), 'Save is diff-gated on the built pool');
+  assert.equal(occurrences(peerCard, '"Save pool"'), 1, 'one pool save button');
+  assert.ok(peerCard.includes('reloadPeerPool'), 'reload affordance for a CAS conflict');
+
+  // Seats come from the shared archetype list; the family picker offers only
+  // families the host reports available, and model/mode/thinking reuse the
+  // catalog-backed pickers — hand-typed ids only when the provider lists none.
+  assert.ok(peerCard.includes('PEER_SEAT_ARCHETYPES'), 'archetype list feeds Add seat');
+  assert.ok(peerCard.includes('availableFamilies'), 'family picker filters on availability');
+  assert.ok(peerCard.includes('A stored mode the catalog doesn\'t list stays visible.'),
+    'mode picker keeps the stored-value escape hatch');
+  assert.ok(peerCard.includes('thinkingOptionsFor('), 'thinking resolves via the catalog helper');
+  assert.ok(peerCard.includes('"Feature values (JSON)"'), 'raw-JSON features fallback present');
+
+  // One toggle per seat; the editor writes availability:"ready" always —
+  // no availability picker exists.
+  assert.equal(occurrences(peerCard, 'setSeatEnabled('), 1, 'one inline seat toggle');
+  assert.ok(!peerCard.includes('availability'), 'no availability picker in the seat editor');
+
+  // Prose is grouped by audience — Jev-facing fields vs local-only notes.
+  assert.ok(peerCard.includes('sent to Jev'), 'Jev-facing prose is labelled');
+  assert.ok(peerCard.includes('Jev never sees this'), 'local-only prose is labelled');
+
+  // Quota fallback: a toggle plus per-seat membership checkboxes.
+  assert.ok(peerCard.includes('quotaFallbackEnabled'), 'fallback toggle present');
+  assert.ok(peerCard.includes('toggleFallbackId'), 'fallback membership is per-seat');
+
+  // Jev banner when the routing capability is armed.
+  assert.ok(
+    peerCard.includes('jevView?.enabled === true && jevView.capabilities?.routing === true'),
+    'armed-Jev banner missing',
+  );
+  assert.ok(peerCard.includes('candidate set Jev picks from'), 'banner names the consequence');
+
+  // Copy JSON carries the repository-scope warning verbatim in spirit:
+  // pasting into a repo makes it ignore this pool permanently, and the
+  // sanctioned path is slp init --routing-from.
+  assert.ok(peerCard.includes('Copy pool JSON'), 'copy button present');
+  assert.ok(peerCard.includes('ignore this pool'), 'copy warning names the consequence');
+  assert.ok(peerCard.includes('permanently'), 'copy warning names permanence');
+  assert.ok(peerCard.includes('--routing-from'), 'copy warning names the supported route');
+
+  // Legacy import is offered read-only; the stale-route note lands after Save.
+  assert.ok(peerCard.includes('Import legacy catalog'), 'legacy import button present');
+  assert.ok(peerCard.includes('never removed'), 'legacy file is documented read-only');
+  assert.ok(peerCard.includes('now stale'), 'post-save stale-route note present');
+  assert.ok(peerCard.includes('fails closed'), 'stale note names the fail-closed binding');
+  assert.ok(bundle.includes('Peer pool'), 'card title bundled');
 });

@@ -88,13 +88,12 @@ is incomplete onboarding.
 
 Read slp-supervisor/slp-lead saved profiles for those roles. Peer delegation uses
 this repository's .paseo-slp/slp-routing.json pool; when the repository has no
-catalog, the user-scope pool ($PASEO_HOME/slp-routing.json, default ~/.paseo) is
-the declared fallback. Onboarding populates
-Human-approved provider/model/settings options and suitability descriptions; an
-empty init catalog is a setup scaffold, not ready for Peer delegation, and remains
-authoritative over the user-scope pool until removed.
-Lead selects a ready Peer option for each task using suitableFor, avoidFor, notes,
-priority and budget. Record the rationale, option ID/hash and actual launch bundle
+catalog, the plugin-owned user-scope pool
+($PASEO_HOME/slp-runtime/state/peer-pool.json, default ~/.paseo) is
+the declared fallback. The Manager's Peer pool card authors it —
+Human-approved provider/model/settings options and suitability descriptions.
+Lead selects a ready Peer option for each task using suitableFor, avoidFor, notes
+and budget. Record the rationale, option ID/hash and actual launch bundle
 (under armed Jev routing the reason trail is the receipt's distribution, not prose).
 Validate against fresh provider discovery; do not inherit a saved slp-peer profile
 or Lead settings. Apply the installed orchestration session continuity policy:
@@ -113,7 +112,7 @@ the Human pre-registers exit criteria (agreement rate + asymmetric error class)
 and arms only once the recorded pairs satisfy them.
 
 Lead uses macro skills, Supervisor observation/governance skills, Peer task micro
-skills. Configure Peer quotaFallback.enabled/optionIds in slp-routing.json; default
+skills. Configure Peer quotaFallback.enabled/optionIds in the pool; default
 disabled, targets restricted to existing eligible pool options. Record allowed pool
 maintenance, cost limits and
 settlement boundaries. Provider changes for existing work require a new-session

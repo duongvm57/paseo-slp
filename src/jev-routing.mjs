@@ -10,9 +10,8 @@
 // the Lead-authored routing brief plus a bounded option surface — never raw
 // assignmentFile bytes (the package passes assignments by pointer; shipping
 // their bytes to a SaaS self-contradicts), and never catalog `notes` (they
-// are Vietnamese; Jev is English-primary). `priority` is also withheld: its
-// direction is undocumented (spec §3 residue) and Human-owned. The brief is
-// the entire evidence surface — starve it and answers drift toward chance.
+// are Vietnamese; Jev is English-primary). The brief is the entire evidence
+// surface — starve it and answers drift toward chance.
 //
 // Brief guidance (procedural, not a hard schema): a useful brief carries the
 // task description, risk/effort signals, constraints and dependencies — the

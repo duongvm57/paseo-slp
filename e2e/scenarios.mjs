@@ -25,7 +25,7 @@ export const scenarios = [
     'Assign a repair requiring an Architect and Engineer or independent Reviewer; configure eligible options with different providers, models and efforts.',
     ['Lead independently selects different runtime bundles from the project Peer pool and discovers target capabilities.', 'Both dispositions use the single Peer role with actual settings matching the selected options; no saved Peer profile is required.'], ['provider-codex', 'provider-pi']),
   row('routing-refresh', 'routing', ['G10'],
-    'At a declared between-spawn boundary, change the fixture catalog quota/priority option; let Lead perform the next delegation.',
+    'At a declared between-spawn boundary, change the fixture catalog quota/availability option; let Lead perform the next delegation.',
     ['Evidence records both catalog byte hashes and the time of each spawn.', 'The second delegation reads the updated repo catalog and chooses an eligible option.']),
   row('routing-reject', 'routing', ['G10', 'G12'],
     'Present a stale hash, then a disabled option, then a quota-exhausted option as controlled invalid preparation requests.',
