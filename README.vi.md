@@ -98,7 +98,7 @@ Package phân phối dưới dạng Paseo plugin. Cài lên daemon chạy công 
 # Từ repo — plugin nằm trong thư mục plugin/ của repo:
 paseo plugin install duongvm57/paseo-slp-plugin:plugin
 
-# Pin vào một release cụ thể — ví dụ khi cần cài bản cũ:
+# Pin vào một release cụ thể:
 paseo plugin install duongvm57/paseo-slp-plugin:plugin --ref v0.2.0
 
 # Từ checkout local (development):
@@ -118,9 +118,8 @@ ref vào thư mục quản lý `$PASEO_HOME/plugins/paseo-slp/<id>/` rồi chạ
 tra bằng `paseo plugin ls` — plugin phải đạt trạng thái `running`.
 
 Cài đặt chỉ đăng ký plugin; chưa thay đổi cấu hình agent. Kích hoạt là bước
-riêng và tường minh (bên dưới). Installer standalone trước plugin được ghi
-tại [docs/reports/legacy-install.md](docs/reports/legacy-install.md) — không chạy song song
-với plugin.
+riêng và tường minh (bên dưới). Plugin quản lý runtime installation và cấu
+hình host.
 
 ## Kích hoạt
 
@@ -171,12 +170,10 @@ Bản cài qua Git được cập nhật qua Paseo:
 paseo plugin update paseo-slp
 ```
 
-Daemon fetch source, build checkout mới và reload plugin. Kích hoạt lại sau
-đó sẽ rebind sang candidate mới: runtime mới materialize cạnh runtime cũ
-trong `slp-runtime/`, launchers được build lại, còn session đang chạy giữ
-provider process cũ cho tới khi xong — đường dẫn launch shim ổn định qua các
-candidate. Rebind là idempotent: kích hoạt hai lần cùng một candidate là
-`no-op`.
+Daemon fetch source, build checkout và reload plugin. Kích hoạt lại sẽ rebind
+candidate hiện hành và build lại launchers. Session đang chạy giữ provider
+process cho tới khi xong; đường dẫn launch shim ổn định qua các candidate.
+Rebind là idempotent: kích hoạt hai lần cùng một candidate là `no-op`.
 
 Bản cài directory thì reload:
 
@@ -339,16 +336,6 @@ provider/`model` để trống tới khi chọn từ catalog đang chạy trên 
 Catalog trong repo là pin có chủ đích, chỉ được tạo bởi `init --routing-from`
 (bên dưới).
 
-File cũ `$PASEO_HOME/slp-routing.json` từ bản trước không bao giờ bị xóa tự
-động: thẻ Peer pool cho phép import một lần sang `peer-pool.json`.
-
-Lưu ý tương thích: pool mới là một chiều. `peer-pool.json` nằm ở path mà
-runtime cũ không bao giờ đọc, và nội dung của nó bị `validateCatalog` bản cũ
-từ chối — ghế parked mang `provider` rỗng và `priority` không còn được ghi.
-Hạ cấp runtime hay trỏ một installation cũ được retain vào cùng `$PASEO_HOME`
-sẽ làm mọi repo không pin catalog fail closed với `Missing Peer pool`/lỗi
-validate cho tới khi pool bị xoá hoặc viết lại theo format cũ.
-
 ### Onboarding
 
 Skill onboarding được cài riêng để agent có thể auto-trigger. Từ repo muốn
@@ -380,24 +367,19 @@ onboard/setup SLP cho repo; description của skill sẽ trigger workflow. Xem
 [skill nguồn](skills/paseo-slp-onboarding/SKILL.md).
 
 Protocol và catalog là hai file tách riêng: protocol là hướng dẫn vận hành,
-JSON là dữ liệu có thể kiểm tra tự động và đổi thường xuyên. Protocol nằm
-trong `.paseo-slp/` của repo; Peer pool mặc định nằm ở `peer-pool.json`
-user-scope và chỉ vào repo khi pin có chủ đích — catalog trong repo nghĩa là
-repo đó bỏ qua pool chung vĩnh viễn, kể cả khi file bị làm rỗng. Không nhúng
-JSON vào Markdown. Lead đọc protocol và pool trước mỗi Peer delegation, chọn
-option theo task/budget, rồi truyền constraint liên quan vào assignment.
-Worktree mới cần protocol trong base candidate hoặc bản copy được cho phép
-(`materialize` chỉ mang catalog khi source có pin); mỗi worktree đọc cấu hình
-của chính nó.
+JSON là dữ liệu routing có thể kiểm tra tự động. Không nhúng JSON vào
+Markdown. Lead đọc cả hai trước mỗi Peer delegation, chọn option theo task và
+budget, rồi truyền constraint liên quan vào assignment. Mỗi worktree đọc cấu
+hình của chính nó.
 
-### Import catalog có sẵn
+### Tạo catalog pin theo repository
 
-Nếu đã có bảng global từ bản trước — hoặc muốn pin repo khỏi pool chung —
-import một file catalog một lần vào repo muốn dùng:
+Để một repository dùng catalog riêng thay cho pool chung, import một file
+catalog một lần:
 
 ```bash
 node "$SLP_RT/bin/slp.mjs" init /absolute/job-repo \
-  --routing-from /absolute/previous/slp-routing.json --apply
+  --routing-from /absolute/path/to/catalog.json --apply
 ```
 
 Import chỉ tạo catalog khi chưa có; không ghi đè, trộn ngầm hay tiếp tục liên
@@ -839,11 +821,8 @@ chiếu profiles cho Supervisor/Lead và option/hash cho Peer. `mixed-peer` ki�
 tra pool có cả Codex/Pi, không cần thêm saved profile hay ép family của Lead
 theo mỗi Peer. Các scenario ngoài scope giữ NOT_RUN.
 
-Đường CLI offline vẫn có: `prepare <request.json>` (từ `bin/slp.mjs` của
-source checkout) xuất create_agent arguments có role envelope, và
-`install <dir> --apply` chỉ stage package — xem
-[docs/reports/legacy-install.md](docs/reports/legacy-install.md). Đường này không đăng ký
-profile hay tự tạo agent.
+CLI offline có `prepare <request.json>` để in ra đối số `create_agent` có role
+envelope. Lệnh này không đăng ký profile và không tự tạo agent.
 
 ## Tài liệu
 
@@ -860,12 +839,11 @@ Spec implement:
 - [Plugin implementation spec](docs/spec/paseo-plugin-implementation.md)
 - [Plugin feasibility audit](docs/spec/paseo-plugin-feasibility.md)
 - [Settings-driven providers + hook injection](docs/spec/settings-driven-providers.md) —
-  sketch hướng post-v1
+  khám phá thiết kế
 
 Báo cáo và điều tra:
 
 - [Trace guide → policy, procedure và protocol](docs/reports/guide-coverage.md)
-- [Installer standalone cũ](docs/reports/legacy-install.md)
 
 Cơ chế host tham chiếu:
 [custom providers](https://paseo.sh/docs/custom-providers.md),
