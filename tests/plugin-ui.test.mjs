@@ -1118,7 +1118,7 @@ test('the Peer pool card authors the pool through catalog-backed pickers', () =>
 
   // Jev banner when the routing capability is armed.
   assert.ok(
-    peerCard.includes('jevView?.enabled === true && jevView.capabilities?.routing === true'),
+    peerCard.includes('jev.view?.enabled === true && jev.view.capabilities?.routing === true'),
     'armed-Jev banner missing',
   );
   assert.ok(peerCard.includes('candidate set Jev picks from'), 'banner names the consequence');
@@ -1141,13 +1141,15 @@ test('the Peer pool card authors the pool through catalog-backed pickers', () =>
 
 test('the Jev card offers both provider kinds with per-kind model/baseUrl/key surfaces', () => {
   const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  // Kind defaults/labels live in the Jev card module (wave 11 S3b/D).
+  const jevModule = readFileSync(join(root, 'plugin/client/cards/jev.ts'), 'utf8');
   // Kind picker with both options — the Human asked for a TypeSafe
   // first-party path beside the OpenRouter relay.
   assert.ok(source.includes('"TypeSafe (first-party)"'), 'typesafe kind option missing');
   assert.ok(source.includes('{ label: "OpenRouter", value: "openrouter" }'), 'openrouter kind option missing');
   // Per-kind defaults and the per-kind key file label.
-  assert.ok(source.includes('jev-1.13.0'), 'typesafe pinned model default missing');
-  assert.ok(source.includes('jev-typesafe.key'), 'typesafe key file missing');
+  assert.ok(jevModule.includes('jev-1.13.0'), 'typesafe pinned model default missing');
+  assert.ok(jevModule.includes('jev-typesafe.key'), 'typesafe key file missing');
   // Custom base URL is the Human-requested surface — an editable field that
   // marks itself when the value diverges from the kind default.
   assert.ok(source.includes('"Base URL (custom)"'), 'custom baseUrl marker missing');
@@ -1261,32 +1263,46 @@ test('saving and reloading are separate pending states with their own labels', (
 
 test('the Jev card splits saved settings from the draft and invalidates tests', () => {
   const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  // Card state/handlers live in the Jev card module (wave 11 S3b/D).
+  const jevModule = readFileSync(join(root, 'plugin/client/cards/jev.ts'), 'utf8');
   const jevCard = source.slice(source.indexOf('title="Jev"'), source.indexOf('</Card>', source.indexOf('title="Jev"')));
   // Saved-provider strip names the SAVED provider, not the draft pick.
   assert.ok(jevCard.includes('Saved provider'), 'saved-provider strip missing');
-  assert.ok(jevCard.includes('jevView.provider'), 'saved strip reads the stored provider');
+  assert.ok(jevCard.includes('jev.view.provider'), 'saved strip reads the stored provider');
   assert.ok(jevCard.includes('Unsaved settings'), 'unsaved-settings header missing');
   assert.ok(jevCard.includes('Apply before key actions'), 'dirty-draft key lock missing');
   // Key/test actions name the saved provider.
   for (const label of ['Save ${', 'Remove ${', 'Test ${']) {
     assert.ok(jevCard.includes(`\`${label}`), `named key action missing: ${label}`);
   }
-  assert.ok(jevCard.includes('JEV_KIND_LABEL[jevView.provider?.kind ?? jevKind]'), 'key actions must name the saved provider');
+  assert.ok(jevCard.includes('JEV_KIND_LABEL[jev.view.provider?.kind ?? jev.kind]'), 'key actions must name the saved provider');
   // Dirty settings lock the key/test actions.
-  assert.ok(jevCard.includes('jevKeyBusy || jevDirty'), 'save-key lock missing');
-  assert.ok(jevCard.includes('jevTestBusy || jevDirty'), 'test lock missing');
+  assert.ok(jevCard.includes('jev.keyBusy || jev.dirty'), 'save-key lock missing');
+  assert.ok(jevCard.includes('jev.testBusy || jev.dirty'), 'test lock missing');
   // Any settings edit (kind/model/baseUrl/toggles) invalidates the prior
-  // test result — five call sites — and a pending key input does too.
-  assert.equal(occurrences(jevCard, 'markJevEdited()'), 5, 'every settings edit must invalidate the test');
-  assert.ok(jevCard.includes('setJevKeyInput(text); setJevTest(null)'), 'pending key must invalidate the test');
+  // test result — five edit sites in the JSX route through the card's
+  // setters, and every setter runs markEdited() — and a pending key input
+  // does too.
+  assert.equal(
+    occurrences(jevCard, 'jev.setKind(') + occurrences(jevCard, 'jev.setModel(')
+      + occurrences(jevCard, 'jev.setBaseUrl(') + occurrences(jevCard, 'jev.setEnabledOn(')
+      + occurrences(jevCard, 'jev.setRoutingOn('),
+    5,
+    'every settings edit must route through an invalidating setter',
+  );
+  for (const setter of ['setKind', 'setModel', 'setBaseUrl', 'setEnabledOn', 'setRoutingOn']) {
+    const fn = jevModule.slice(jevModule.indexOf(`const ${setter} =`), jevModule.indexOf('};', jevModule.indexOf(`const ${setter} =`)));
+    assert.ok(fn.includes('markEdited()'), `${setter} must invalidate the test via markEdited`);
+  }
+  assert.ok(jevModule.includes('{ setJevKeyInput(text); setJevTest(null); }'), 'pending key must invalidate the test');
   assert.ok(jevCard.includes('Unsaved key — save it before testing'), 'pending-key marker missing');
   // Per-field errors land at their own fields.
-  assert.ok(jevCard.includes('jevModelError'), 'model field error missing');
-  assert.ok(jevCard.includes('jevUrlError'), 'baseUrl field error missing');
+  assert.ok(jevCard.includes('jev.modelError'), 'model field error missing');
+  assert.ok(jevCard.includes('jev.urlError'), 'baseUrl field error missing');
   // Load states are distinct: loading, error+Retry, loaded.
   assert.ok(jevCard.includes('Loading Jev settings…'), 'loading branch missing');
   assert.ok(jevCard.includes('Could not load Jev settings'), 'error branch missing');
-  assert.ok(jevCard.includes('loadJev(target)'), 'Retry path missing');
+  assert.ok(jevCard.includes('jev.retryLoad()'), 'Retry path missing');
   // Endpoint preview follows provider-specific rules.
   assert.ok(jevCard.includes('/v1/systemone'), 'typesafe endpoint preview missing');
   assert.ok(jevCard.includes('/api/alpha/decisions'), 'openrouter endpoint preview missing');
@@ -1360,33 +1376,41 @@ test('target-scoped Jev reads refuse to paint a stale response over the displaye
   // fields — the same issueKey discipline the pool ops use, on EVERY
   // Jev write-site: loadJev (load/Retry), saveJev (set-jev response),
   // saveJevKey (post-write refresh) and runJevTest (success AND error).
+  // The Jev card module owns the handlers (wave 11 S3b/D); the stale-guard
+  // mechanism is still the shell's — the card receives it as `sameTarget`,
+  // which the shell wires to keyRef === targetKey.
   const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
-  const loadJev = source.slice(source.indexOf('const loadJev'), source.indexOf('useEffect(() => {', source.indexOf('const loadJev')));
+  const jevModule = readFileSync(join(root, 'plugin/client/cards/jev.ts'), 'utf8');
+  assert.ok(
+    source.includes('keyRef.current === targetKey(forTarget)'),
+    'the shell must wire sameTarget to the keyRef/targetKey guard',
+  );
+  const loadJev = jevModule.slice(jevModule.indexOf('const loadJev'), jevModule.indexOf('useEffect(() => {', jevModule.indexOf('const loadJev')));
   assert.equal(
-    occurrences(loadJev, 'keyRef.current !== targetKey(forTarget)'),
+    occurrences(loadJev, '!sameTarget(forTarget)'),
     2,
     'loadJev must gate the success AND error writes on the displayed key',
   );
-  const saveJev = source.slice(source.indexOf('const saveJev ='), source.indexOf('const saveJevKey'));
+  const saveJev = jevModule.slice(jevModule.indexOf('const save ='), jevModule.indexOf('const saveKey'));
   assert.ok(
-    saveJev.includes('keyRef.current !== targetKey(target)'),
+    saveJev.includes('!sameTarget(target)'),
     'saveJev must gate its response writes on the displayed key',
   );
-  const saveJevKey = source.slice(source.indexOf('const saveJevKey'), source.indexOf('const runJevTest'));
+  const saveJevKey = jevModule.slice(jevModule.indexOf('const saveKey'), jevModule.indexOf('const runTest'));
   assert.ok(
-    saveJevKey.includes('keyRef.current !== targetKey(target)'),
+    saveJevKey.includes('!sameTarget(target)'),
     'the key-save getJev refresh must be stale-guarded too',
   );
   // The key-input/test clears must sit AFTER the guard — a stale resolution
   // may not touch the new target's pending state.
-  const guardIdx = saveJevKey.indexOf('keyRef.current !== targetKey(target)');
+  const guardIdx = saveJevKey.indexOf('!sameTarget(target)');
   assert.ok(
     guardIdx !== -1 && saveJevKey.indexOf('setJevKeyInput("")') > guardIdx,
     'saveJevKey clears must come after the stale-write guard',
   );
-  const runJevTest = source.slice(source.indexOf('const runJevTest'), source.indexOf('// Prefill the routing form'));
+  const runJevTest = jevModule.slice(jevModule.indexOf('const runTest'), jevModule.indexOf('const setKind'));
   assert.equal(
-    occurrences(runJevTest, 'keyRef.current !== targetKey(target)'),
+    occurrences(runJevTest, '!sameTarget(target)'),
     2,
     'runJevTest must gate the success AND error result writes',
   );
@@ -1395,15 +1419,15 @@ test('target-scoped Jev reads refuse to paint a stale response over the displaye
   for (const flag of ['setJevBusy(false)', 'setJevKeyBusy(false)', 'setJevTestBusy(false)']) {
     const fn = flag === 'setJevBusy(false)' ? saveJev : flag === 'setJevKeyBusy(false)' ? saveJevKey : runJevTest;
     assert.ok(
-      fn.includes(`keyRef.current === targetKey(target)) ${flag}`),
+      fn.includes(`sameTarget(target)) ${flag}`),
       `${flag} must be conditioned on the displayed key`,
     );
   }
   // And the target-switch reset drops the Jev draft + pending flags — a
   // skipped stale clear can never leak busy state onto the new target.
-  const resetBlock = source.slice(
-    source.indexOf('// Pool state is keyed to the displayed target'),
-    source.indexOf('// Fetch the peer pool once per target'),
+  const resetBlock = jevModule.slice(
+    jevModule.indexOf('// Target switch drops the draft'),
+    jevModule.indexOf('// Prefill the toggles'),
   );
   for (const reset of ['setJevDirty(false)', 'setJevBusy(false)', 'setJevKeyBusy(false)', 'setJevTestBusy(false)']) {
     assert.ok(resetBlock.includes(reset), `target-switch reset must drop ${reset}`);
