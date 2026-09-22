@@ -400,3 +400,177 @@ test('redaction parity edge inputs — caps after scrub, non-strings, payload pa
     assert.ok(!error.message.includes(embedded), 'the key text never reaches the error');
   }
 });
+
+// ---------------------------------------------------------------------------
+// Config/key parity — characterization style (S2). Shared semantics are
+// pinned across both validators against the same on-disk file; intentional
+// diffs are asserted as OBSERVED behavior and marked observed-not-ratified —
+// they pin what the code does, not what the contract should be, and must
+// never be silently unified.
+// ---------------------------------------------------------------------------
+
+test('absent and corrupt config share one semantic on both sides — never silently misread', async t => {
+  const home = makeHome(t);
+  const jev = createJev();
+  // Absent file = unconfigured OFF on both sides (no error).
+  assert.equal(readJevConfig(home), null);
+  assert.deepEqual((await getJev(jev, home)).jev, {
+    configured: false, enabled: null, capabilities: null, provider: null,
+    hasKey: false, keyPermissionsOk: null, error: null,
+  });
+  // Corrupt bytes are evidence, not absence: the runtime throws, the plugin
+  // reports configured-but-broken — same "not OFF" verdict, different
+  // surfacing mechanism (exception vs error field).
+  mkdirSync(dirname(jevPath(home)), { recursive: true });
+  writeFileSync(jevPath(home), '{not json');
+  assert.throws(() => readJevConfig(home), /not valid JSON/);
+  const corrupt = (await getJev(jev, home)).jev;
+  assert.equal(corrupt.configured, true);
+  assert.match(corrupt.error, /not valid JSON/);
+  // Schema-mismatched content fails on both sides too.
+  writeFileSync(jevPath(home), JSON.stringify({ schemaVersion: 2, enabled: false }));
+  assert.throws(() => readJevConfig(home), /schemaVersion=1/);
+  assert.match((await getJev(jev, home)).jev.error, /schema validation/);
+  // enabled must be a boolean on both sides.
+  writeFileSync(jevPath(home), JSON.stringify({ schemaVersion: 1, enabled: 'yes' }));
+  assert.throws(() => readJevConfig(home), /enabled must be a boolean/);
+  assert.match((await getJev(jev, home)).jev.error, /schema validation/);
+});
+
+test('minimal OFF config: runtime accepts the bare marker, plugin requires the full document', async t => {
+  // Same bytes, two verdicts — observed-not-ratified. The runtime reads
+  // {schemaVersion:1, enabled:false} as a coherent "disabled, not configured
+  // yet" marker and never validates enabled-only fields on the OFF path
+  // (tests/jev.test.mjs pins that a Peer prepare keeps working under it).
+  // The plugin schema always requires the full document, so the same file
+  // surfaces as configured-but-broken in the Manager view.
+  const home = makeHome(t);
+  mkdirSync(dirname(jevPath(home)), { recursive: true });
+  writeFileSync(jevPath(home), JSON.stringify({ schemaVersion: 1, enabled: false }) + '\n', { mode: 0o600 });
+  const runtime = readJevConfig(home);
+  assert.equal(runtime.enabled, false);
+  assert.deepEqual(runtime.capabilities, {});
+  assert.equal(runtime.provider, null);
+  const view = (await getJev(createJev(), home)).jev;
+  assert.equal(view.configured, true, 'observed: the plugin reads this as broken, not OFF');
+  assert.equal(view.enabled, null);
+  assert.match(view.error, /schema validation/);
+});
+
+test('strict-vs-lenient validation: unknown keys rejected on write/read by plugin, ignored by runtime', async t => {
+  const home = makeHome(t);
+  const jev = createJev();
+  mkdirSync(dirname(jevPath(home)), { recursive: true });
+  // observed-not-ratified: the runtime reader is field-oriented and ignores
+  // unknown keys anywhere; the plugin schema is strict at every level, at
+  // write time AND when viewing a hand-edited file.
+  const extra = over => ({ schemaVersion: 1, enabled: true, capabilities: { routing: true }, provider: { kind: 'openrouter', model: 'typesafe/jev-1.13', ...over } });
+  writeFileSync(jevPath(home), JSON.stringify({ ...extra({}), comment: 'human note' }));
+  assert.equal(readJevConfig(home).enabled, true, 'runtime ignores an unknown top-level key');
+  assert.match((await getJev(jev, home)).jev.error, /schema validation/);
+  writeFileSync(jevPath(home), JSON.stringify(extra({ comment: 'field note' })));
+  assert.equal(readJevConfig(home).provider.model, 'typesafe/jev-1.13', 'runtime ignores an unknown provider key');
+  assert.match((await getJev(jev, home)).jev.error, /schema validation/);
+  // And the write path refuses them up front — a Manager round-trip can
+  // never produce a file the runtime would silently misread.
+  await assert.rejects(() => setJev(jev, home, { ...config(), extra: 1 }), /invalid set-jev input/);
+  await assert.rejects(() => setJev(jev, home, config({ provider: { kind: 'openrouter', model: 'typesafe/jev-1.13', comment: 'x' } })), /invalid set-jev input/);
+  // Shared permissiveness, pinned identically: unknown CAPABILITY keys are
+  // future-proof on both sides (boolean catchall vs record-of-booleans).
+  const futureCap = { schemaVersion: 1, enabled: true, capabilities: { routing: true, futureCap: false }, provider: { kind: 'openrouter', model: 'typesafe/jev-1.13' } };
+  writeFileSync(jevPath(home), JSON.stringify(futureCap));
+  assert.equal(readJevConfig(home).capabilities.futureCap, false);
+  assert.equal((await getJev(jev, home)).jev.error, null);
+  await setJev(jev, home, futureCap);
+  assert.equal((await getJev(jev, home)).jev.capabilities.futureCap, false);
+});
+
+test('stored-but-disabled: the runtime reports a bare OFF view while the plugin shows the stored document', async t => {
+  // observed-not-ratified: with enabled:false the runtime view drops the
+  // stored capabilities/provider entirely (unvalidated fields are reported
+  // absent — runtime-state.mjs applies the same rule to status output),
+  // while the plugin view surfaces the stored document so the Manager can
+  // render what re-enabling would restore.
+  const home = makeHome(t);
+  const jev = createJev();
+  await setJev(jev, home, config({ enabled: false }));
+  const runtime = readJevConfig(home);
+  assert.equal(runtime.enabled, false);
+  assert.deepEqual(runtime.capabilities, {});
+  assert.equal(runtime.provider, null);
+  const view = (await getJev(jev, home)).jev;
+  assert.equal(view.enabled, false);
+  assert.deepEqual(view.capabilities, { routing: true });
+  assert.equal(view.provider.kind, 'openrouter');
+});
+
+test('key whitespace asymmetry: the write gate is strict, the runtime reader trims', async t => {
+  const home = makeHome(t);
+  const jev = createJev();
+  // Write-side (plugin): any whitespace anywhere in the key input is refused.
+  await assert.rejects(() => setJevKey(jev, home, ' padded '), /whitespace/);
+  await assert.rejects(() => setJevKey(jev, home, 'has internal space'), /whitespace/);
+  await assert.rejects(() => setJevKey(jev, home, ''), /invalid set-jev-key input/);
+  assert.equal(existsSync(keyPath(home)), false, 'rejected writes never create the file');
+  // Read-side (runtime): surrounding whitespace in the file is trimmed away —
+  // observed-not-ratified leniency vs the write gate (a hand-edited key file
+  // with a trailing newline/indent still resolves).
+  mkdirSync(dirname(keyPath(home)), { recursive: true });
+  writeFileSync(keyPath(home), '  padded-key  \n', { mode: 0o600 });
+  assert.equal(readJevKey(home, 'openrouter'), 'padded-key');
+  // Internal whitespace is rejected by BOTH sides — shared semantics: the
+  // write gate refuses it and the reader fails on it.
+  writeFileSync(keyPath(home), 'has internal space\n', { mode: 0o600 });
+  assert.throws(() => readJevKey(home, 'openrouter'), /empty or contains whitespace/);
+});
+
+test('key file content is re-validated by the runtime but only presence-checked by the plugin', async t => {
+  const home = makeHome(t);
+  const jev = createJev();
+  await setJev(jev, home, config());
+  // Empty/whitespace-only content: the runtime reader fails jev-key-invalid
+  // on every read; the plugin's keyProbe is lstat-only metadata — the file
+  // exists and is private, so hasKey:true with no content inspection.
+  // observed-not-ratified.
+  mkdirSync(dirname(keyPath(home)), { recursive: true });
+  for (const bytes of ['', '   \n']) {
+    writeFileSync(keyPath(home), bytes, { mode: 0o600 });
+    assert.throws(() => readJevKey(home, 'openrouter'), /empty or contains whitespace/);
+    const view = (await getJev(jev, home)).jev;
+    assert.equal(view.hasKey, true, `presence-only metadata for ${JSON.stringify(bytes)}`);
+    assert.equal(view.keyPermissionsOk, true);
+    assert.equal(view.error, null, 'an empty key file is not a view error');
+  }
+  // Non-regular file: both sides refuse it as a key — shared semantics,
+  // different surfacing (throw vs hasKey:false metadata).
+  rmSync(keyPath(home));
+  mkdirSync(keyPath(home));
+  assert.throws(() => readJevKey(home, 'openrouter'), /regular file/);
+  const dirView = (await getJev(jev, home)).jev;
+  assert.equal(dirView.hasKey, false);
+  assert.equal(dirView.keyPermissionsOk, null);
+});
+
+test('keyProbe is metadata-only: key bytes never enter the view, only hasKey and permission bits', async t => {
+  const home = makeHome(t);
+  const jev = createJev();
+  await setJev(jev, home, config());
+  const marker = fakeOrKey('content-never-read-000');
+  mkdirSync(dirname(keyPath(home)), { recursive: true });
+  writeFileSync(keyPath(home), marker + '\n', { mode: 0o600 });
+  const view = (await getJev(jev, home)).jev;
+  assert.equal(view.hasKey, true);
+  assert.equal(view.keyPermissionsOk, true);
+  assert.ok(!JSON.stringify(view).includes(marker), 'key material never crosses the view');
+  // A 0o077-accessible key file: shared "must be private" semantics with
+  // different surfacing — the runtime throws jev-key-permissions while the
+  // plugin reports the failure as view metadata (and testJev fails closed).
+  chmodSync(keyPath(home), 0o640);
+  const weak = (await getJev(jev, home)).jev;
+  assert.equal(weak.hasKey, true);
+  assert.equal(weak.keyPermissionsOk, false);
+  assert.throws(() => readJevKey(home, 'openrouter'), /group\/other-accessible/);
+  const probed = await testJev(jev, home);
+  assert.equal(probed.ok, false);
+  assert.match(probed.detail, /chmod 600/);
+});
