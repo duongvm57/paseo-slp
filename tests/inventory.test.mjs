@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync, chmodSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync, chmodSync, symlinkSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -8,6 +8,7 @@ import { install, snapshot, json } from '../src/package.mjs';
 import { launchPlan } from '../src/launch.mjs';
 import { inventory } from '../src/inventory.mjs';
 import { agents } from '../src/agents.mjs';
+import { monitor } from '../src/monitor.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 function fixture(t) {
@@ -129,6 +130,48 @@ test('agents returns [] for a home without an agents directory and rejects stray
   const stray = () => execFileSync(process.execPath, [join(root, 'bin/slp.mjs'), 'agents', 'extra', '--paseo-home', home],
     { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   assert.throws(stray, /takes no arguments/);
+});
+
+test('agent readers skip broken records and linked groups while preserving their duplicate-ID policies', t => {
+  const dir = fixture(t), home = join(dir, 'home'), group = join(home, 'agents', 'group');
+  mkdirSync(group, { recursive: true });
+  const state = title => ({ id: 'duplicate', title, requiresAttention: true, attentionReason: title });
+  writeFileSync(join(group, '01.json'), json(state('first')));
+  writeFileSync(join(group, '02.json'), json(state('last')));
+  for (const [name, bytes] of Object.entries({
+    'broken.json': '{not json', 'null.json': 'null', 'array.json': '[]',
+    'scalar.json': '1', 'missing-id.json': '{}', 'numeric-id.json': '{"id":1}',
+    'ignored.txt': json({ id: 'ignored' }),
+  })) writeFileSync(join(group, name), bytes);
+  mkdirSync(join(group, 'directory.json'));
+  symlinkSync(join(dir, 'missing.json'), join(group, 'dangling.json'));
+  writeFileSync(join(home, 'agents', 'stray.txt'), 'not a group');
+  const external = join(dir, 'external');
+  mkdirSync(external);
+  writeFileSync(join(external, 'hidden.json'), json({ id: 'hidden' }));
+  symlinkSync(external, join(home, 'agents', 'linked-group'));
+  // Existing readers follow file links but never recurse into linked groups.
+  writeFileSync(join(dir, 'linked.json'), json({ id: 'linked' }));
+  symlinkSync(join(dir, 'linked.json'), join(group, 'linked.json'));
+
+  assert.deepEqual(agents(home).map(({ id, title }) => ({ id, title })), [
+    { id: 'duplicate', title: 'first' }, { id: 'duplicate', title: 'last' }, { id: 'linked', title: null },
+  ]);
+  const out = monitor({ paseoHome: home, agents: [{ id: 'duplicate' }, { id: 'linked' }, { id: 'hidden' }] });
+  assert.deepEqual(out.signals.map(({ agentId, kind, evidence }) => ({ agentId, kind, reason: evidence.reason })),
+    [{ agentId: 'duplicate', kind: 'attention', reason: 'last' }]);
+  assert.deepEqual(out.gaps.filter(gap => gap.gap === 'no agent state under paseoHome').map(gap => gap.agentId), ['hidden']);
+});
+
+test('agent readers distinguish missing state storage from an invalid agents root', t => {
+  const dir = fixture(t), home = join(dir, 'home');
+  mkdirSync(home);
+  assert.deepEqual(agents(home), []);
+  assert.ok(monitor({ paseoHome: home, agents: [{ id: 'missing' }] }).gaps
+    .some(gap => gap.gap === 'no agent state under paseoHome'));
+  writeFileSync(join(home, 'agents'), 'not a directory');
+  assert.throws(() => agents(home), error => error.code === 'ENOTDIR');
+  assert.throws(() => monitor({ paseoHome: home, agents: [{ id: 'missing' }] }), error => error.code === 'ENOTDIR');
 });
 
 test('prepare adds an Assignment file line without inlining file bytes', t => {

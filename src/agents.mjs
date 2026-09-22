@@ -1,5 +1,5 @@
-import { readdirSync, readFileSync, lstatSync } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
+import { isAbsolute } from 'node:path';
+import { readAgentStates } from './agent-state.mjs';
 import { resolveHome } from './managed-home.mjs';
 import { devinProviderPattern } from './binding.mjs';
 
@@ -19,40 +19,21 @@ const attachHint = (provider, cwd, nativeHandle) =>
 // SLP_DAEMON_HOME/PASEO_HOME or throw — never infer ~/.paseo (spec §10).
 export function agents(home = resolveHome()) {
   if (typeof home !== 'string' || !isAbsolute(home)) throw new Error('Absolute Paseo home required');
-  const dir = join(home, 'agents');
-  let groups;
-  try { groups = readdirSync(dir); } catch (error) {
-    if (error.code === 'ENOENT') return [];
-    throw error;
-  }
-  const result = [];
-  for (const group of groups) {
-    const groupDir = join(dir, group);
-    let names;
-    try {
-      if (!lstatSync(groupDir).isDirectory()) continue;
-      names = readdirSync(groupDir);
-    } catch { continue; }
-    for (const name of names) {
-      if (!name.endsWith('.json')) continue;
-      let state;
-      try { state = JSON.parse(readFileSync(join(groupDir, name), 'utf8')); } catch { continue; }
-      if (state === null || typeof state !== 'object' || typeof state.id !== 'string') continue;
-      const provider = text(state.provider) ?? text(state.persistence?.provider);
-      const cwd = text(state.cwd) ?? text(state.persistence?.metadata?.cwd);
-      const nativeHandle = text(state.persistence?.nativeHandle);
-      result.push({
-        id: state.id,
-        title: text(state.title),
-        provider,
-        cwd,
-        workspaceId: text(state.workspaceId),
-        status: text(state.lastStatus) ?? text(state.status),
-        lastActivityAt: text(state.lastActivityAt),
-        nativeHandle,
-        attach: attachHint(provider, cwd, nativeHandle),
-      });
-    }
-  }
+  const result = readAgentStates(home).map(state => {
+    const provider = text(state.provider) ?? text(state.persistence?.provider);
+    const cwd = text(state.cwd) ?? text(state.persistence?.metadata?.cwd);
+    const nativeHandle = text(state.persistence?.nativeHandle);
+    return {
+      id: state.id,
+      title: text(state.title),
+      provider,
+      cwd,
+      workspaceId: text(state.workspaceId),
+      status: text(state.lastStatus) ?? text(state.status),
+      lastActivityAt: text(state.lastActivityAt),
+      nativeHandle,
+      attach: attachHint(provider, cwd, nativeHandle),
+    };
+  });
   return result.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
