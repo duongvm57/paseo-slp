@@ -46,20 +46,7 @@ hỏng theo vài cách quen thuộc:
 SLP trả lời bằng cách tách *các loại phán đoán* thay vì xây một thứ bậc
 cứng `Supervisor > Lead > Peer`:
 
-```
-                         Human
-                           │
-              ┌────────────┴────────────┐
-              │                         │
-        Supervisor                    Lead
-   quan sát quy trình           điều phối dự án
-              │                         │
-              └──── observes ───────────┤
-                                        │
-                                    Peer(s)
-                        Engineer / Architect /
-                          Reviewer / Scout
-```
+![Mô hình role Paseo SLP: Human giữ intent, ranh giới và nghiệm thu cuối; Supervisor quan sát workflow của Lead nhưng không tham gia execution; Lead điều phối project và giao outcome hữu hạn cho các Peer Engineer, Architect, Reviewer và Scout độc lập. Peer trả evidence, challenge, dependency request hoặc BLOCKED về Lead.](docs/images/slp-role-model.png)
 
 - **Human** giữ owner authority: intent, trade-off quan trọng, grant đặc
   biệt, thay đổi protocol và nghiệm thu cuối.

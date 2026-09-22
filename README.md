@@ -48,20 +48,7 @@ correctness. Multi-agent coding commonly fails in the same few ways:
 SLP answers by separating *kinds of judgment* rather than building a
 rigid `Supervisor > Lead > Peer` hierarchy:
 
-```
-                         Human
-                           │
-              ┌────────────┴────────────┐
-              │                         │
-        Supervisor                    Lead
-   process observation          project coordination
-              │                         │
-              └──── observes ───────────┤
-                                        │
-                                    Peer(s)
-                        Engineer / Architect /
-                          Reviewer / Scout
-```
+![Paseo SLP role model: Human owns intent, boundaries and final acceptance; a Supervisor observes the Lead's workflow without joining execution; the Lead coordinates the project and delegates bounded outcomes to independent Engineer, Architect, Reviewer and Scout Peers, which return evidence, challenges, dependency requests or blocked work.](docs/images/slp-role-model.png)
 
 - **Human** keeps owner authority: intent, important trade-offs,
   exceptional grants, protocol changes and final acceptance.
