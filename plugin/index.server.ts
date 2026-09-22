@@ -8,6 +8,9 @@ import { realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { activate, reconcile, deactivate, status, localTarget, catalog, setLanguage, getRoleRouting, setRoleRouting, getPeerPool, setPeerPool, getJev, setJev, setJevKey, testJev } from "./shared/contracts.ts";
 import type { CatalogRequest, FamilyName, Manager } from "./shared/contracts.ts";
+import { ownedProviderId } from "./shared/families.ts";
+import { pickSnapshotEntry, snapshotEntryCatalog } from "./shared/snapshot-catalog.ts";
+import type { ProviderSnapshotEntryLike } from "./shared/snapshot-catalog.ts";
 import { createManager } from "./server/manager.ts";
 import { createJev } from "./server/jev.ts";
 import { createMaterializer } from "./server/materializer.ts";
@@ -101,10 +104,18 @@ function detectDaemonHome() {
   return { daemonHome: resolve(expanded), source: "env" as const };
 }
 
-/** Narrowed provider-catalog surface (§2 convention): model/mode/feature
- * listings only. The SDK PaseoApi is structurally assignable. */
+/** Narrowed provider-catalog surface (§2 convention): one snapshot call plus
+ * model/mode/feature listings. The SDK PaseoApi is structurally assignable. */
 interface ProviderCatalogApi {
   providers: {
+    // Optional — daemons predating the snapshot RPC don't implement it.
+    // PaseoApi exposes no serverInfo accessor to pre-check the
+    // providersSnapshot feature flag (recorded missing host capability),
+    // so support is probed once and latched below.
+    snapshot?(options?: { cwd?: string }): Promise<{
+      entries?: ProviderSnapshotEntryLike[];
+      error?: string | null;
+    }>;
     listModels(provider: string): Promise<{
       models?: {
         id: string; label?: string;
@@ -131,13 +142,70 @@ interface ProviderCatalogApi {
   };
 }
 
-// The catalog is read-only and advisory — queried on the family's provider
-// entry (the same CLI a managed slp-<family>-* provider reaches through its
-// shim), so it returns the model/mode/feature list a managed provider
-// reports. A provider that cannot answer reports in `error` rather than
-// rejecting; the picker degrades to free text.
+// Probe-and-latch capability flag: the daemon version is fixed for the life
+// of the plugin process, so one failed/absent snapshot call can never flip
+// back — latching avoids paying an RPC rejection on every catalog read.
+let snapshotUnsupported = false;
+
+// The catalog is read-only and advisory — queried on the role's managed
+// provider entry (slp-<family>-<role>) when the daemon answers
+// providers.snapshot, matching how the host's own agent profile resolves
+// provider data; older daemons keep the legacy per-family listModels/
+// listModes path verbatim. A provider that cannot answer reports in `error`
+// rather than rejecting; the picker degrades to free text.
 async function loadCatalog(input: CatalogRequest, paseo: ProviderCatalogApi) {
   const provider = input.family;
+  // Entry selection parity with the host agent profile: the managed
+  // provider id for the request's role, then the base family entry.
+  const preferredId = input.role ? ownedProviderId(input.family, input.role) : input.family;
+  if (!snapshotUnsupported) {
+    if (typeof paseo.providers.snapshot === "function") {
+      try {
+        const snapshot = await paseo.providers.snapshot(input.cwd ? { cwd: input.cwd } : undefined);
+        const errors: string[] = [];
+        if (snapshot.error) errors.push(snapshot.error);
+        const entry = pickSnapshotEntry(snapshot.entries ?? [], preferredId, provider);
+        if (!entry) {
+          // The daemon just proved snapshot-capable — a missing entry is a
+          // real absence, not a reason to re-ask the legacy endpoints.
+          errors.push(`provider ${preferredId} not found in providers.snapshot`);
+          return { schemaVersion: 1 as const, models: [], modes: [], features: [], error: errors.join("; ") };
+        }
+        const mapped = snapshotEntryCatalog(entry);
+        if (mapped.error) errors.push(mapped.error);
+        // Snapshot entries carry no features field — listFeatures stays,
+        // but on the RESOLVED provider id (host still calls
+        // listProviderFeatures per entry).
+        let features: Awaited<ReturnType<ProviderCatalogApi["providers"]["listFeatures"]>>["features"] = [];
+        if (input.model) {
+          try {
+            const result = await paseo.providers.listFeatures({
+              provider: `${entry.provider}/${input.model}`,
+              cwd: input.cwd ?? "/",
+              ...(input.modeId ? { modeId: input.modeId } : {}),
+            });
+            features = result.features ?? [];
+            if (result.error) errors.push(result.error);
+          } catch (error) {
+            errors.push(error instanceof Error ? error.message : String(error));
+          }
+        }
+        return {
+          schemaVersion: 1 as const,
+          resolvedProvider: entry.provider,
+          models: mapped.models,
+          modes: mapped.modes,
+          features,
+          error: errors.length > 0 ? errors.join("; ") : null,
+        };
+      } catch {
+        snapshotUnsupported = true;
+      }
+    } else {
+      snapshotUnsupported = true;
+    }
+  }
+  // Legacy path (pre-snapshot daemons) — unchanged.
   const errors: string[] = [];
   const settle = <T,>(result: PromiseSettledResult<T>): T | null => {
     if (result.status === "fulfilled") return result.value;

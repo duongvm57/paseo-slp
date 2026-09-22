@@ -56,7 +56,11 @@ import {
   targetKey,
 } from '../plugin/client/manager-state.ts';
 import { PEER_SEAT_ARCHETYPES } from '../plugin/shared/archetypes.ts';
-import { PeerPoolOption } from '../plugin/shared/contracts.ts';
+import { CatalogInput, PeerPoolOption } from '../plugin/shared/contracts.ts';
+import {
+  pickSnapshotEntry,
+  snapshotEntryCatalog,
+} from '../plugin/shared/snapshot-catalog.ts';
 import { validateCatalog } from '../src/routing.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -1507,4 +1511,102 @@ test('no hardcoded hex colors live in the client', () => {
   const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
   const hits = source.match(/#[0-9a-fA-F]{3,8}\b/g) ?? [];
   assert.deepEqual(hits, [], `hex color literals found: ${hits.join(', ')}`);
+});
+
+// Wave 9b — the catalog rides providers.snapshot (host parity): the managed
+// slp-<family>-<role> entry first, base family as fallback.
+test('pickSnapshotEntry prefers the managed provider id, then the base family', () => {
+  const entries = [
+    { provider: 'slp-devin-peer' },
+    { provider: 'devin' },
+    { provider: 'slp-devin-lead' },
+  ];
+  assert.equal(pickSnapshotEntry(entries, 'slp-devin-lead', 'devin')?.provider, 'slp-devin-lead');
+  // Managed id absent → base family entry.
+  assert.equal(pickSnapshotEntry(entries, 'slp-codex-peer', 'devin')?.provider, 'devin');
+  // Neither managed nor base → undefined (the caller reports, no legacy retry).
+  assert.equal(pickSnapshotEntry(entries, 'slp-pi-peer', 'pi'), undefined);
+  // Role-less request (preferredId === family) resolves the base entry.
+  assert.equal(pickSnapshotEntry(entries, 'devin', 'devin')?.provider, 'devin');
+});
+
+test('snapshotEntryCatalog filters isSelectable === false only', () => {
+  const mapped = snapshotEntryCatalog({
+    provider: 'slp-devin-peer',
+    status: 'ready',
+    models: [
+      { id: 'swe-2-max', label: 'SWE' },
+      { id: 'hidden', isSelectable: false },
+      { id: 'plain' },
+    ],
+  });
+  assert.deepEqual(mapped.models.map(m => m.id), ['swe-2-max', 'plain']);
+  // thinkingOptions pass through untouched.
+  const withOptions = snapshotEntryCatalog({
+    provider: 'slp-codex-lead',
+    status: 'ready',
+    models: [{ id: 'gpt-5.6', thinkingOptions: [{ id: 'medium', label: 'Medium' }], defaultThinkingOptionId: 'medium' }],
+  });
+  assert.equal(withOptions.models[0].thinkingOptions[0].id, 'medium');
+  assert.equal(withOptions.models[0].defaultThinkingOptionId, 'medium');
+});
+
+test('snapshotEntryCatalog ships modes only for a ready entry', () => {
+  const entry = {
+    provider: 'slp-devin-peer',
+    modes: [{ id: 'fast' }, { id: 'deep', label: 'Deep' }],
+  };
+  assert.equal(snapshotEntryCatalog({ ...entry, status: 'ready' }).modes.length, 2);
+  assert.equal(snapshotEntryCatalog({ ...entry, status: 'error' }).modes.length, 0);
+  // status absent → not provably ready → no modes.
+  assert.equal(snapshotEntryCatalog(entry).modes.length, 0);
+});
+
+test('snapshotEntryCatalog surfaces entry errors instead of swallowing', () => {
+  const mapped = snapshotEntryCatalog({
+    provider: 'slp-pi-peer',
+    status: 'error',
+    error: 'credential missing',
+    models: [],
+  });
+  assert.match(mapped.error, /credential missing/);
+  assert.match(mapped.error, /slp-pi-peer is error/);
+  const clean = snapshotEntryCatalog({ provider: 'devin', status: 'ready', models: [] });
+  assert.equal(clean.error, null);
+});
+
+test('the catalog RPC rides providers.snapshot with legacy list calls kept', () => {
+  const source = readFileSync(join(root, 'plugin/index.server.ts'), 'utf8');
+  assert.ok(source.includes('providers.snapshot'), 'snapshot RPC missing');
+  assert.ok(source.includes('paseo.providers.snapshot('), 'snapshot call missing');
+  // Legacy endpoints stay verbatim for pre-snapshot daemons.
+  assert.ok(source.includes('listModels(provider)'), 'legacy listModels path removed');
+  assert.ok(source.includes('listModes(provider)'), 'legacy listModes path removed');
+  // Probe-and-latch: no serverInfo accessor exists on PaseoApi, so the flag
+  // must be the documented latch — and the comment must record why.
+  assert.ok(source.includes('snapshotUnsupported'), 'capability latch missing');
+  assert.match(source, /serverInfo/, 'the missing serverInfo capability must be recorded in a comment');
+  // Features resolve against the SNAPSHOT-selected entry, not the base family.
+  assert.ok(source.includes('`${entry.provider}/${input.model}`'), 'features must query the resolved provider id');
+  // Snapshot path emits provenance; legacy path does not.
+  assert.ok(source.includes('resolvedProvider: entry.provider'), 'resolvedProvider missing on the snapshot path');
+});
+
+test('catalog input accepts a role and the client caches by family|role', () => {
+  const parsed = CatalogInput.parse({ schemaVersion: 1, family: 'devin', role: 'peer' });
+  assert.equal(parsed.role, 'peer');
+  // Role stays optional for wire back-compat.
+  assert.equal(CatalogInput.parse({ schemaVersion: 1, family: 'devin' }).role, undefined);
+  assert.throws(() => CatalogInput.parse({ schemaVersion: 1, family: 'devin', role: 'manager' }));
+
+  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  assert.ok(source.includes('`${family}|${role}`'), 'catalog scope key missing');
+  // Every catalog request carries its role scope.
+  assert.ok(occurrences(source, 'schemaVersion: 1, family, role') >= 2, 'catalog requests must send role');
+  // Feature cache keys are family|role|model|modeId.
+  assert.ok(source.includes('`${family}|${role}|${model}|'), 'feature key missing the role segment');
+  assert.ok(source.includes('`${seat.family}|peer|'), 'seat feature key missing the peer segment');
+  // No bare-family catalog lookups remain.
+  assert.ok(!/catalogs\[form\.family\]/.test(source), 'bare-family role-card lookup remains');
+  assert.ok(!/catalogs\[seat\.family\]/.test(source), 'bare-family seat lookup remains');
 });

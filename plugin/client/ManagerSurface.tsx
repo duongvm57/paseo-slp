@@ -23,6 +23,7 @@ import {
 } from "react-native";
 import { activate, catalog, deactivate, reconcile, status, localTarget, setLanguage, getRoleRouting, setRoleRouting, getJev, setJev, setJevKey, testJev, getPeerPool, setPeerPool, JevProvider } from "../shared/contracts.ts";
 import { FAMILY_IDS, FAMILY_LABEL, FAMILY_PICKER_ORDER } from "../shared/families.ts";
+import type { RoleName } from "../shared/families.ts";
 import { PEER_SEAT_ARCHETYPES } from "../shared/archetypes.ts";
 import {
   HOW_TO_READ,
@@ -804,8 +805,12 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   const [binaries, setBinaries] = useState<Record<FamilyName, string>>(
     () => Object.fromEntries(FAMILY_IDS.map(family => [family, ""])) as Record<FamilyName, string>,
   );
-  const [catalogs, setCatalogs] = useState<Partial<Record<FamilyName, CatalogResult>>>({});
-  const [catalogLoadingFor, setCatalogLoadingFor] = useState<FamilyName | null>(null);
+  // Catalog entries are scoped `family|role` — providers.snapshot resolves
+  // the managed provider id slp-<family>-<role>, so a supervisor and a peer
+  // on the same family can report different catalogs.
+  const catalogScope = (family: FamilyName, role: RoleName): string => `${family}|${role}`;
+  const [catalogs, setCatalogs] = useState<Partial<Record<string, CatalogResult>>>({});
+  const [catalogLoadingFor, setCatalogLoadingFor] = useState<string | null>(null);
   // Feature definitions depend on the selected model (the host requires a
   // provider/model draft) — cached per family|model|modeId key.
   const [featureSets, setFeatureSets] = useState<Record<string, { defs: CatalogResult["features"]; error: string | null }>>({});
@@ -1317,7 +1322,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     setRoutingForm(current => ({
       ...current,
       [role]: field === "model" || field === "modeId"
-        ? applySettingChange(current[role], field, value, catalogs[current[role].family])
+        ? applySettingChange(current[role], field, value, catalogs[catalogScope(current[role].family, role)])
         : { ...current[role], [field]: value },
     }));
   };
@@ -1337,7 +1342,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     setRoutingSaved(false);
     setRoutingForm(current => ({
       ...current,
-      [role]: applyFamilyChange(current[role], family, catalogs[family]),
+      [role]: applyFamilyChange(current[role], family, catalogs[catalogScope(family, role)]),
     }));
   };
 
@@ -1395,7 +1400,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   // non-empty seat list).
   const featureDefsForSeat = (seat: PeerSeatForm) => {
     const key = seat.family !== "" && seat.model.trim() !== ""
-      ? `${seat.family}|${seat.model.trim()}|${seat.modeId.trim()}`
+      ? `${seat.family}|peer|${seat.model.trim()}|${seat.modeId.trim()}`
       : null;
     const set = key ? featureSets[key] : undefined;
     return {
@@ -1441,7 +1446,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
       seats: form.seats.map((seat, i) =>
         i === index
           ? (field === "model" || field === "modeId"
-            ? applySettingChange(seat, field, value, seat.family !== "" ? catalogs[seat.family] : undefined)
+            ? applySettingChange(seat, field, value, seat.family !== "" ? catalogs[catalogScope(seat.family, "peer")] : undefined)
             : { ...seat, [field]: value })
           : seat,
       ),
@@ -1471,7 +1476,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
               ...seat,
               ...(family === ""
                 ? { family: "" as const, model: "", modeId: "", thinkingOptionId: "", features: "", feature: {} }
-                : applyFamilyChange(seat, family, catalogs[family])),
+                : applyFamilyChange(seat, family, catalogs[catalogScope(family, "peer")])),
             },
       ),
     }));
@@ -1691,21 +1696,22 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
 
   // "Retry catalog" (§7.4.E): the cached error entry is only overwritten
   // by a fresh RPC — a failed retry keeps the last error visible.
-  const retryCatalog = async (family: FamilyName) => {
-    setCatalogLoadingFor(family);
+  const retryCatalog = async (family: FamilyName, role: RoleName) => {
+    const scope = catalogScope(family, role);
+    setCatalogLoadingFor(scope);
     try {
       const result = await callCatalog({
-        schemaVersion: 1, family,
+        schemaVersion: 1, family, role,
         ...(target ? { cwd: target.daemonHome } : {}),
       });
-      setCatalogs(current => ({ ...current, [family]: result }));
+      setCatalogs(current => ({ ...current, [scope]: result }));
     } catch (error) {
       setCatalogs(current => ({
         ...current,
-        [family]: { schemaVersion: 1, models: [], modes: [], features: [], error: errorMessage(error) },
+        [scope]: { schemaVersion: 1, models: [], modes: [], features: [], error: errorMessage(error) },
       }));
     } finally {
-      setCatalogLoadingFor(current => (current === family ? null : current));
+      setCatalogLoadingFor(current => (current === scope ? null : current));
     }
   };
 
@@ -1737,60 +1743,64 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     }
   };
 
-  // Fetch the model/mode catalog for the families the routing card and the
-  // peer-pool seats pick — the routing card's two picks plus every seated
-  // family are the only ones the form needs. Cached per family; a failure
-  // caches an error result so the picker degrades to free text instead of
-  // retrying forever.
-  const neededFamilies: FamilyName[] = [...new Set([
-    routingForm.supervisor.family,
-    routingForm.lead.family,
-    ...poolForm.seats.map(seat => seat.family).filter((f): f is FamilyName => f !== ""),
-  ])];
-  const neededKey = neededFamilies.join(",");
+  // Fetch the model/mode catalog for the scopes the routing card and the
+  // peer-pool seats pick — the routing card's two role-scoped picks plus
+  // every seated family's peer scope are the only ones the form needs.
+  // Cached per family|role scope; a failure caches an error result so the
+  // picker degrades to free text instead of retrying forever.
+  const neededScopes: { family: FamilyName; role: RoleName }[] = [
+    { family: routingForm.supervisor.family, role: "supervisor" },
+    { family: routingForm.lead.family, role: "lead" },
+    ...poolForm.seats
+      .filter((seat): seat is PeerSeatForm & { family: FamilyName } => seat.family !== "")
+      .map(seat => ({ family: seat.family, role: "peer" as const })),
+  ];
+  const neededKey = [...new Set(neededScopes.map(scope => catalogScope(scope.family, scope.role)))].join(",");
   useEffect(() => {
-    const missing = neededKey.split(",").filter(f => f !== "" && catalogs[f as FamilyName] === undefined);
+    const missing = neededKey.split(",").filter(k => k !== "" && catalogs[k] === undefined);
     if (missing.length === 0) return;
     let cancelled = false;
     void (async () => {
-      for (const family of missing as FamilyName[]) {
-        setCatalogLoadingFor(family);
+      for (const scope of missing) {
+        const [family, role] = scope.split("|") as [FamilyName, RoleName];
+        setCatalogLoadingFor(scope);
         try {
           const result = await callCatalog({
-            schemaVersion: 1, family,
+            schemaVersion: 1, family, role,
             ...(target ? { cwd: target.daemonHome } : {}),
           });
-          if (!cancelled) setCatalogs(current => ({ ...current, [family]: result }));
+          if (!cancelled) setCatalogs(current => ({ ...current, [scope]: result }));
         } catch {
           if (!cancelled) {
             const failed: CatalogResult = {
               schemaVersion: 1, models: [], modes: [], features: [],
               error: "Catalog query failed",
             };
-            setCatalogs(current => ({ ...current, [family]: failed }));
+            setCatalogs(current => ({ ...current, [scope]: failed }));
           }
         }
       }
       if (!cancelled) setCatalogLoadingFor(null);
     })();
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the needed family set
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the needed scope set
   }, [neededKey]);
 
   // Feature definitions need a model — fetch per role's routing-form
-  // family|model|modeId pick.
+  // family|role|model|modeId pick (features resolve against the managed
+  // provider id, which differs per role on the snapshot path).
   const featureKeyFor = (role: "supervisor" | "lead"): string | null => {
     const family = routingForm[role].family;
     const model = routingForm[role].model.trim();
     if (!model) return null;
-    return `${family}|${model}|${routingForm[role].modeId.trim()}`;
+    return `${family}|${role}|${model}|${routingForm[role].modeId.trim()}`;
   };
   const neededFeatureKeys = (["supervisor", "lead"] as const)
     .map(role => featureKeyFor(role))
     .concat(
       poolForm.seats.map(seat =>
         seat.family !== "" && seat.model.trim() !== ""
-          ? `${seat.family}|${seat.model.trim()}|${seat.modeId.trim()}`
+          ? `${seat.family}|peer|${seat.model.trim()}|${seat.modeId.trim()}`
           : null,
       ).filter((key): key is string => key !== null),
     );
@@ -1800,9 +1810,9 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   // "provider declares no features". One automatic retry absorbs transient
   // drops; only a persistent failure degrades to the JSON field + Retry.
   const fetchFeatureSet = async (key: string) => {
-    const [family, model, modeId] = key.split("|") as [FamilyName, string, string];
+    const [family, role, model, modeId] = key.split("|") as [FamilyName, RoleName, string, string];
     const request = {
-      schemaVersion: 1 as const, family, model,
+      schemaVersion: 1 as const, family, role, model,
       ...(modeId ? { modeId } : {}),
       ...(target ? { cwd: target.daemonHome } : {}),
     };
@@ -2224,7 +2234,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
           >
           {(["supervisor", "lead"] as const).map(role => {
             const form = routingForm[role];
-            const roleCatalog = catalogs[form.family];
+            const roleCatalog = catalogs[catalogScope(form.family, role)];
             const thinking = thinkingOptionsFor(roleCatalog, form.model);
             const featureDefs = featureDefsFor(role);
             const disabled = !target || routingBusy;
@@ -2255,7 +2265,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                     disabled={disabled}
                   />
                 </View>
-                {catalogLoadingFor === form.family ? (
+                {catalogLoadingFor === catalogScope(form.family, role) ? (
                   <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
                     Loading {FAMILY_LABEL[form.family]} catalog…
                   </Text>
@@ -2660,7 +2670,8 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
             </View>
           ) : null}
           {poolForm.seats.map((seat, index) => {
-            const seatCatalog = seat.family !== "" ? catalogs[seat.family] : undefined;
+            const seatScope = seat.family !== "" ? catalogScope(seat.family, "peer") : null;
+            const seatCatalog = seatScope !== null ? catalogs[seatScope] : undefined;
             const thinking = seat.family !== "" ? thinkingOptionsFor(seatCatalog, seat.model) : null;
             const featureDefs = featureDefsForSeat(seat);
             const open = openSeat === index;
@@ -2875,9 +2886,9 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                         </Text>
                       ) : null}
                     </View>
-                    {seat.family !== "" && catalogLoadingFor === seat.family ? (
+                    {seatScope !== null && catalogLoadingFor === seatScope ? (
                       <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-                        Loading {FAMILY_LABEL[seat.family]} catalog…
+                        Loading {seat.family !== "" ? FAMILY_LABEL[seat.family] : ""} catalog…
                       </Text>
                     ) : null}
                     {seatCatalog?.error ? (
@@ -2888,8 +2899,8 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                         <Button
                           colors={colors}
                           label="Retry catalog"
-                          onPress={() => void retryCatalog(seat.family as FamilyName)}
-                          disabled={disabled || catalogLoadingFor === seat.family}
+                          onPress={() => { if (seat.family !== "") void retryCatalog(seat.family, "peer"); }}
+                          disabled={disabled || catalogLoadingFor === seatScope}
                         />
                       </>
                     ) : null}

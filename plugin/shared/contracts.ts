@@ -9,7 +9,7 @@
 
 import { z } from "zod";
 import { defineRpc } from "@getpaseo/plugin";
-import { FAMILY_IDS, OWNED_PROVIDER_ID_RE, PROVIDER_EXTENDS_IDS } from "./families.ts";
+import { FAMILY_IDS, OWNED_PROVIDER_ID_RE, PROVIDER_EXTENDS_IDS, ROLES } from "./families.ts";
 
 // ---------------------------------------------------------------------------
 // §3 wire schemas
@@ -459,6 +459,11 @@ export const LocalTargetOutput = z.object({
 export const CatalogInput = z.object({
   schemaVersion: z.literal(1),
   family: Family,
+  // Which managed provider entry to read in a providers.snapshot response —
+  // slp-<family>-<role>, the same entry the host agent profile resolves.
+  // Optional for wire back-compat; absent scopes the query to the base
+  // family entry.
+  role: z.enum(ROLES).optional(),
   // Feature listing runs on a draft agent config — cwd is required by the
   // host API; model/modeId refine which features a provider reports.
   cwd: AbsolutePath.optional(),
@@ -520,6 +525,10 @@ export const CatalogOutput = z.object({
   features: z.array(CatalogFeature),
   /** Non-fatal: a provider that cannot answer reports here instead of rejecting. */
   error: z.string().nullable(),
+  /** The provider id whose snapshot entry actually served this catalog —
+   *  the managed `slp-<family>-<role>` id, or the base family on fallback.
+   *  Absent on the legacy listModels/listModes path (pre-snapshot daemons). */
+  resolvedProvider: z.string().min(1).optional(),
 }).strict();
 export const activate = defineRpc({ name: "activate", input: ActivateInput, output: StartOutput });
 export const reconcile = defineRpc({ name: "reconcile", input: ReconcileInput, output: StartOutput });
