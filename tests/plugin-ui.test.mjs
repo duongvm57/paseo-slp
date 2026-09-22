@@ -615,6 +615,80 @@ test('applySettingChange clears feature values on a model OR mode change', () =>
   assert.equal(applySettingChange(unchanged, 'modeId', 'bypass'), unchanged);
 });
 
+test('applySettingChange clears a stored thinkingOptionId only on a resolved 0-declare model', () => {
+  // Host parity (wave 9): a model declaring ZERO thinking options renders
+  // no control, so a stored ID could never be surfaced or corrected — the
+  // model-switch path clears it before it can reach Save.
+  const catalogResult = (models, over = {}) => ({
+    schemaVersion: 1, models, modes: [], features: [], error: null, ...over,
+  });
+  const devinCatalog = catalogResult([
+    { id: 'swe-2-max', label: 'SWE Max' },
+    { id: 'swe-2-medium', label: 'SWE Medium' },
+  ]);
+  const codexCatalog = catalogResult([
+    {
+      id: 'gpt-5.6',
+      label: 'GPT',
+      thinkingOptions: [{ id: 'low', label: 'low' }, { id: 'medium', label: 'medium' }],
+      defaultThinkingOptionId: 'medium',
+    },
+    {
+      id: 'gpt-5.6-mini',
+      label: 'GPT Mini',
+      thinkingOptions: [{ id: 'low', label: 'low' }],
+    },
+  ]);
+  const form = (over = {}) => ({
+    family: 'codex',
+    model: 'gpt-5.6',
+    modeId: 'auto',
+    thinkingOptionId: 'medium',
+    features: '',
+    feature: {},
+    ...over,
+  });
+
+  // Switching to a resolved 0-declare model clears the stored ID.
+  const toZero = applySettingChange(
+    form({ family: 'devin', model: 'swe-2-max', thinkingOptionId: 'high' }),
+    'model',
+    'swe-2-medium',
+    devinCatalog,
+  );
+  assert.equal(toZero.model, 'swe-2-medium');
+  assert.equal(toZero.thinkingOptionId, '', 'stored ID must clear on a 0-declare model');
+
+  // Switching to a model declaring a DIFFERENT option set keeps the ID —
+  // the "(stored)" chip stays visible and clearable in the picker.
+  const toDeclared = applySettingChange(
+    form({ thinkingOptionId: 'ultra' }),
+    'model',
+    'gpt-5.6-mini',
+    codexCatalog,
+  );
+  assert.equal(toDeclared.model, 'gpt-5.6-mini');
+  assert.equal(toDeclared.thinkingOptionId, 'ultra', 'declaring model keeps the stored ID');
+
+  // Unresolved targets keep the ID: catalog absent, errored, or the new
+  // model unlisted — the free-text fallback owns those paths.
+  for (const catalog of [undefined, catalogResult([], { error: 'Catalog query failed' })]) {
+    const kept = applySettingChange(form(), 'model', 'unlisted-model', catalog);
+    assert.equal(kept.thinkingOptionId, 'medium', 'unresolved model must keep the stored ID');
+  }
+  const unlisted = applySettingChange(form(), 'model', 'unlisted-model', codexCatalog);
+  assert.equal(unlisted.thinkingOptionId, 'medium', 'unlisted model keeps the stored ID');
+
+  // A mode switch never touches thinking.
+  const byMode = applySettingChange(
+    form({ family: 'devin', model: 'swe-2-max', thinkingOptionId: 'high' }),
+    'modeId',
+    'plan',
+    devinCatalog,
+  );
+  assert.equal(byMode.thinkingOptionId, 'high', 'mode switch keeps thinking');
+});
+
 test('familyFromProviderId parses managed provider ids for form prefill', () => {
   assert.equal(familyFromProviderId('slp-pi-supervisor'), 'pi');
   assert.equal(familyFromProviderId('slp-claude-peer'), 'claude');
@@ -771,11 +845,10 @@ test('the routing UI is one card with one save and one divergence warning', () =
   assert.ok(source.includes('errorMessage(error)'), 'fetch rejection recorded, not swallowed');
 
   // Thinking options resolve per picked model from the catalog (§9
-  // corrected finding): a ChipSelect when the model declares options (a
-  // stored unknown value stays visible via the "(stored)" escape), a
-  // static hint when it declares none, and the free-text Field kept only
-  // as the unresolvable fallback. The stale "catalog does not list" copy
-  // is gone.
+  // corrected finding): a ChipSelect ONLY when the model declares options
+  // (a stored unknown value stays visible via the "(stored)" escape inside
+  // that branch), NO control at all on a 0-declare model — host parity —
+  // and the free-text Field kept only as the unresolvable fallback.
   assert.equal(occurrences(roleCard, 'thinkingOptionsFor('), 1, 'thinking resolves via the catalog helper');
   assert.equal(occurrences(roleCard, 'thinking === null'), 1, 'free text remains only the fallback path');
   assert.ok(
@@ -783,13 +856,17 @@ test('the routing UI is one card with one save and one divergence warning', () =
     'auto entry names the declared default',
   );
   assert.ok(roleCard.includes('(stored)'), 'unknown stored option stays visible');
-  assert.ok(roleCard.includes('This model declares no thinking options'), 'empty-options hint present');
+  // Host parity (wave 9): the control must not be resurrected by a stored
+  // ID on a 0-declare model — the render condition is options.length only.
+  assert.ok(!roleCard.includes('thinking.options.length > 0 ||'), 'stored ID must not resurrect the control');
+  assert.equal(occurrences(roleCard, 'This model declares no thinking options'), 0, 'no 0-declare hint');
+  assert.equal(occurrences(source, 'Not applicable — the model declares no thinking option'), 0, 'seat 0-declare hint removed');
   assert.equal(
     occurrences(source, 'The catalog does not list thinking options'),
     0,
     'stale free-text hint removed',
   );
-  assert.ok(bundle.includes('This model declares no thinking options'), 'empty-options hint bundled');
+  assert.ok(!bundle.includes('This model declares no thinking options'), '0-declare hint must not bundle');
   assert.equal(occurrences(roleCard, '"Thinking option"'), 1, 'thinking option field present');
 
   // The family picker goes through a dedicated handler — not the generic

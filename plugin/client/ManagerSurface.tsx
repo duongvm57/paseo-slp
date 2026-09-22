@@ -1305,7 +1305,9 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
 
   // A model or mode pick is not a plain field write: feature defs are keyed
   // family|model|modeId, so values authored under the previous key must
-  // clear (applySettingChange) instead of persisting undeclared keys.
+  // clear (applySettingChange) instead of persisting undeclared keys — and
+  // a model that resolves with zero thinking options clears a stored
+  // thinkingOptionId since no control can surface or correct it.
   const setRoutingField = (
     role: "supervisor" | "lead",
     field: "model" | "modeId" | "thinkingOptionId" | "features",
@@ -1315,7 +1317,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     setRoutingForm(current => ({
       ...current,
       [role]: field === "model" || field === "modeId"
-        ? applySettingChange(current[role], field, value)
+        ? applySettingChange(current[role], field, value, catalogs[current[role].family])
         : { ...current[role], [field]: value },
     }));
   };
@@ -1438,7 +1440,9 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
       ...form,
       seats: form.seats.map((seat, i) =>
         i === index
-          ? (field === "model" || field === "modeId" ? applySettingChange(seat, field, value) : { ...seat, [field]: value })
+          ? (field === "model" || field === "modeId"
+            ? applySettingChange(seat, field, value, seat.family !== "" ? catalogs[seat.family] : undefined)
+            : { ...seat, [field]: value })
           : seat,
       ),
     }));
@@ -2390,7 +2394,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                     placeholder="Thinking option ID"
                     disabled={disabled}
                   />
-                ) : thinking.options.length > 0 || form.thinkingOptionId !== "" ? (
+                ) : thinking.options.length > 0 ? (
                   <View style={styles.field}>
                     <Text style={[styles.legend, { color: colors.foregroundMuted }]}>Thinking option</Text>
                     <ChipSelect
@@ -2412,7 +2416,10 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                         // Same escape hatch as the mode picker: a stored
                         // option the model doesn't declare stays visible and
                         // clearable, marked "(stored)" so it reads as
-                        // leftover rather than a real option.
+                        // leftover rather than a real option. It only exists
+                        // inside this declaring-model branch — a model
+                        // declaring ZERO options renders no control at all
+                        // (host parity: the stored ID is never surfaced).
                         ...(form.thinkingOptionId !== "" &&
                           !thinking.options.some(option => option.id === form.thinkingOptionId)
                           ? [{ label: `${form.thinkingOptionId} (stored)`, value: form.thinkingOptionId }]
@@ -2422,17 +2429,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                       disabled={disabled}
                     />
                   </View>
-                ) : (
-                  // Options resolved but the model declares none (devin
-                  // bakes thinking into model ids) — no free text to type
-                  // garbage into.
-                  <View style={styles.field}>
-                    <Text style={[styles.legend, { color: colors.foregroundMuted }]}>Thinking option</Text>
-                    <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-                      This model declares no thinking options
-                    </Text>
-                  </View>
-                )}
+                ) : null}
               </View>
             );
           })}
@@ -3038,7 +3035,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                         placeholder="Thinking option ID"
                         disabled={disabled}
                       />
-                    ) : thinking.options.length > 0 || seat.thinkingOptionId !== "" ? (
+                    ) : thinking.options.length > 0 ? (
                       <View style={styles.field}>
                         <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Thinking option</Text>
                         <ChipSelect
@@ -3060,7 +3057,10 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                             // Same escape hatch as the mode picker: a stored
                             // option the model doesn't declare stays visible and
                             // clearable, marked "(stored)" so it reads as
-                            // leftover rather than a real option.
+                            // leftover rather than a real option. It only exists
+                            // inside this declaring-model branch — a model
+                            // declaring ZERO options renders no control at all
+                            // (host parity: the stored ID is never surfaced).
                             ...(seat.thinkingOptionId !== "" &&
                               !thinking.options.some(option => option.id === seat.thinkingOptionId)
                               ? [{ label: `${seat.thinkingOptionId} (stored)`, value: seat.thinkingOptionId }]
@@ -3070,17 +3070,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                           disabled={disabled}
                         />
                       </View>
-                    ) : (
-                      // Options resolved but the model declares none (devin
-                      // bakes thinking into model ids) — no free text to type
-                      // garbage into.
-                      <View style={styles.field}>
-                        <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Thinking option</Text>
-                        <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-                          Not applicable — the model declares no thinking option
-                        </Text>
-                      </View>
-                    )}
+                    ) : null}
                     <View style={styles.field}>
                       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                         <Text style={[styles.fieldLabel, { color: colors.foreground, flex: 1 }]}>

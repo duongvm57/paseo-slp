@@ -355,11 +355,14 @@ After this refactor the remaining steps are exactly three:
   `Provider default (<id>)` when `defaultThinkingOptionId` is known,
   else `Provider default`), each declared option with `(default)`
   appended to its label, plus a `<id> (stored)` escape — same pattern as
-  the mode picker — when the stored value isn't in the list. A resolved
-  model declaring zero options shows the static hint "This model
-  declares no thinking options" instead of a free-text field (typing
-  would invite garbage), unless a stale stored value exists — then the
-  ChipSelect still renders so the leftover stays visible and clearable.
+  the mode picker — when the stored value isn't in the list.
+  **Corrected render contract (wave 9, host parity):** a resolved model
+  declaring zero options renders **no thinking control at all** — no
+  hint, no `(stored)` chip, matching the host where the control only
+  exists when `selectedModel.thinkingOptions.length > 0` — and picking
+  such a model clears a stored `thinkingOptionId` from the form via
+  `applySettingChange`, so nothing stale reaches Save. A model
+  declaring a *different* option set still shows the `(stored)` chip.
   No catalog, no picked model, or a model the catalog doesn't list keeps
   the free-text field — the established degradation path. Save maps
   empty fields to absent keys (`RoleChoice` unset semantics — the live

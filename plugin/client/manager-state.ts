@@ -505,12 +505,28 @@ export function applyFamilyChange(
  *  declare them — the same rule applyFamilyChange applies on a family
  *  switch. The role card and the seat editor share this path. A no-change
  *  set returns the form untouched so a redundant pick never clears authored
- *  values. */
+ *  values. On a model switch the current family's catalog (when known) also
+ *  decides the thinking option's fate (host parity): a resolved model that
+ *  declares ZERO options renders no thinking control at all, so a stored ID
+ *  would never be visible or correctable — it clears here instead of
+ *  surviving into Save. An unresolved model (catalog absent/errored/model
+ *  unlisted) keeps the ID for the free-text fallback, and a model declaring
+ *  a different option set keeps it under the picker's "(stored)" hatch. */
 export function applySettingChange<
-  F extends { model: string; modeId: string; features: string; feature: Record<string, string> },
->(form: F, field: "model" | "modeId", value: string): F {
+  F extends {
+    model: string;
+    modeId: string;
+    thinkingOptionId: string;
+    features: string;
+    feature: Record<string, string>;
+  },
+>(form: F, field: "model" | "modeId", value: string, catalog?: CatalogResult | null): F {
   if (value === form[field]) return form;
-  return { ...form, [field]: value, features: "", feature: {} };
+  const thinkingOptionId =
+    field === "model" && thinkingOptionsFor(catalog, value)?.options.length === 0
+      ? ""
+      : form.thinkingOptionId;
+  return { ...form, [field]: value, thinkingOptionId, features: "", feature: {} };
 }
 
 // ---------------------------------------------------------------------------
