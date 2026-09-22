@@ -780,6 +780,7 @@ test('the routing UI is one card with one save and one divergence warning', () =
   // S3b/D) — pins on build/save/setter internals read that file; render
   // pins keep reading the shell JSX.
   const routingCard = readFileSync(join(root, 'plugin/client/cards/routing.ts'), 'utf8');
+  const poolCard = readFileSync(join(root, 'plugin/client/cards/peer-pool.ts'), 'utf8');
   const bundle = clientBundle();
 
   // One consolidated "Role profiles" card edits the full profile each role
@@ -887,14 +888,16 @@ test('the routing UI is one card with one save and one divergence warning', () =
   // applyFamilyChange — two application sites, same re-validation rule —
   // one in the routing card module, one on the seat editor in the shell.
   assert.equal(
-    occurrences(source, 'applyFamilyChange(') + occurrences(routingCard, 'applyFamilyChange('),
+    occurrences(source, 'applyFamilyChange(') + occurrences(routingCard, 'applyFamilyChange(')
+      + occurrences(poolCard, 'applyFamilyChange('),
     2,
     'family-change sites: role + seat',
   );
   // Same for the feature-key fields: a model OR mode pick clears the feature
   // form via the shared helper — two application sites, one rule.
   assert.equal(
-    occurrences(source, 'applySettingChange(') + occurrences(routingCard, 'applySettingChange('),
+    occurrences(source, 'applySettingChange(') + occurrences(routingCard, 'applySettingChange(')
+      + occurrences(poolCard, 'applySettingChange('),
     2,
     'feature-key sites: role + seat',
   );
@@ -1083,10 +1086,11 @@ test('the Peer pool card authors the pool through catalog-backed pickers', () =>
 
   // One save path, CAS-guarded — the sha256 get-peer-pool returned is sent
   // back as expectedSha256; a conflict reloads instead of overwriting.
-  assert.equal(occurrences(source, 'callSetPeerPool('), 1, 'one set-peer-pool call site');
-  assert.equal(occurrences(source, 'callGetPeerPool('), 2, 'load + reload reads');
-  assert.ok(source.includes('expectedSha256'), 'CAS token is sent on save');
-  assert.ok(source.includes('peerPoolDiffers('), 'Save is diff-gated on the built pool');
+  const poolCardModule = readFileSync(join(root, 'plugin/client/cards/peer-pool.ts'), 'utf8');
+  assert.equal(occurrences(poolCardModule, 'callSetPeerPool('), 1, 'one set-peer-pool call site');
+  assert.equal(occurrences(poolCardModule, 'callGetPeerPool('), 2, 'load + reload reads');
+  assert.ok(poolCardModule.includes('expectedSha256'), 'CAS token is sent on save');
+  assert.ok(poolCardModule.includes('peerPoolDiffers('), 'Save is diff-gated on the built pool');
   assert.equal(occurrences(peerCard, '"Save pool"'), 1, 'one pool save button');
   assert.ok(peerCard.includes('reloadPeerPool'), 'reload affordance for a CAS conflict');
 
@@ -1159,7 +1163,8 @@ test('featureDefsForSeat is declared before poolBuild calls it eagerly', () => {
   // Regression: poolBuild runs during render and invokes the lambda per seat
   // — a const declared below it is a TDZ crash on any non-empty seat list
   // (host report: picker renders, adding a seat crashes the surface).
-  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  // Both live in the pool card module (wave 11 S3b/D).
+  const source = readFileSync(join(root, 'plugin/client/cards/peer-pool.ts'), 'utf8');
   const decl = source.indexOf('const featureDefsForSeat');
   const use = source.indexOf('const poolBuild = buildPeerPool(');
   assert.ok(decl !== -1 && use !== -1, 'featureDefsForSeat/poolBuild must exist');
@@ -1169,7 +1174,11 @@ test('featureDefsForSeat is declared before poolBuild calls it eagerly', () => {
 test('the Manager UI renders in English — no Vietnamese strings in plugin/client', () => {
   // Human override (wave 5): §7.4's Vietnamese action names are source
   // identifiers only; every user-visible label renders in English.
-  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  const source = [
+    'plugin/client/ManagerSurface.tsx',
+    'plugin/client/ui-kit.tsx',
+    'plugin/client/cards/peer-pool.ts',
+  ].map(f => readFileSync(join(root, f), 'utf8')).join('\n');
   for (const label of [
     'Add a standard seat', 'Already present — open seat',
     'Create a custom seat from template', 'Create a custom copy',
@@ -1181,8 +1190,12 @@ test('the Manager UI renders in English — no Vietnamese strings in plugin/clie
   }
   // No Vietnamese letters remain in any client source — comments included.
   const viRe = /[\u00C0-\u1EF9]/u;
-  for (const name of readdirSync(join(root, 'plugin/client')).filter(f => /\.tsx?$/.test(f))) {
-    const hit = readFileSync(join(root, 'plugin/client', name), 'utf8').split('\n').find(l => viRe.test(l));
+  const clientFiles = [
+    ...readdirSync(join(root, 'plugin/client')).filter(f => /\.tsx?$/.test(f)).map(f => `plugin/client/${f}`),
+    ...readdirSync(join(root, 'plugin/client/cards')).filter(f => /\.tsx?$/.test(f)).map(f => `plugin/client/cards/${f}`),
+  ];
+  for (const name of clientFiles) {
+    const hit = readFileSync(join(root, name), 'utf8').split('\n').find(l => viRe.test(l));
     assert.equal(hit, undefined, `Vietnamese text remains in ${name}: ${hit}`);
   }
 });
@@ -1240,7 +1253,8 @@ test('the standard-seat picker filters and closes at the top', () => {
 
 test('CAS confirmation renders at the control that triggered it', () => {
   const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
-  assert.ok(source.includes('"notice" | "footer" | null'), 'origin-typed confirm state missing');
+  const poolModule = readFileSync(join(root, 'plugin/client/cards/peer-pool.ts'), 'utf8');
+  assert.ok(poolModule.includes('"notice" | "footer" | null'), 'origin-typed confirm state missing');
   assert.ok(source.includes('requestReload("notice")'), 'notice-origin reload missing');
   assert.ok(source.includes('requestReload("footer")'), 'footer-origin reload missing');
   assert.ok(source.includes('poolReloadConfirm === "notice"'), 'notice-local confirm missing');
@@ -1255,8 +1269,9 @@ test('CAS confirmation renders at the control that triggered it', () => {
 
 test('saving and reloading are separate pending states with their own labels', () => {
   const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
-  assert.ok(source.includes('setPoolSaving(true)'), 'save busy flag missing');
-  assert.ok(source.includes('setPoolReloading(true)'), 'reload busy flag missing');
+  const poolModule = readFileSync(join(root, 'plugin/client/cards/peer-pool.ts'), 'utf8');
+  assert.ok(poolModule.includes('setPoolSaving(true)'), 'save busy flag missing');
+  assert.ok(poolModule.includes('setPoolReloading(true)'), 'reload busy flag missing');
   assert.ok(source.includes('poolSaving ? "Saving…"'), 'Saving… label missing');
   assert.ok(source.includes('poolReloading ? "Reloading…"'), 'Reloading… label missing');
 });
@@ -1667,7 +1682,8 @@ test('catalog input accepts a role and the client caches by family|role', () => 
   assert.ok(occurrences(source, 'schemaVersion: 1, family, role') >= 2, 'catalog requests must send role');
   // Feature cache keys are family|role|model|modeId.
   assert.ok(managerState.includes('`${family}|${role}|${model}|'), 'feature key missing the role segment');
-  assert.ok(source.includes('`${seat.family}|peer|'), 'seat feature key missing the peer segment');
+  const poolCard = readFileSync(join(root, 'plugin/client/cards/peer-pool.ts'), 'utf8');
+  assert.ok(poolCard.includes('`${seat.family}|peer|'), 'seat feature key missing the peer segment');
   // No bare-family catalog lookups remain.
   assert.ok(!/catalogs\[form\.family\]/.test(source), 'bare-family role-card lookup remains');
   assert.ok(!/catalogs\[seat\.family\]/.test(source), 'bare-family seat lookup remains');
