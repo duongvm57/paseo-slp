@@ -10,20 +10,13 @@
 // RECOVERY_REQUIRED and wait for reconcile inspect/complete/restore-before.
 
 import { randomUUID } from "node:crypto";
-import { lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+
 import { join } from "node:path";
 import {
   ActivateInput,
   DeactivateInput,
-  GetPeerPoolInput,
-  GetRoleRoutingInput,
   OperationConflict,
-  PeerPool,
   ReconcileInput,
-  RoleRouting,
-  SetLanguageInput,
-  SetPeerPoolInput,
-  SetRoleRoutingInput,
   StatusInput,
   normalizeConflict,
   type ActivateRequest,
@@ -32,28 +25,22 @@ import {
   type ConflictValue,
   type ConnectedDaemon,
   type DeactivateRequest,
-  type GetPeerPoolResult,
-  type GetRoleRoutingResult,
   type IntentValue,
   type Manager,
   type ManagerDeps,
   type OperationViewValue,
-  type PeerPoolValue,
   type PlanValue,
   type ReceiptValue,
   type ReconcileRequest,
-  type RoleRoutingValue,
-  type SetLanguageResult,
-  type SetPeerPoolResult,
-  type SetRoleRoutingResult,
   type StartResult,
   type StateValue,
   type StatusRequest,
   type StatusResult,
 } from "../shared/contracts.ts";
 import { createJournal, emptyReceipt, findOperation, pendingOperation } from "./journal.ts";
+import { resolveDaemonHome } from "./daemon-home.ts";
+import { readLanguage, readRoleRouting } from "./state-store.ts";
 import { OWNED_PROVIDER_ID_RE } from "../shared/families.ts";
-import { catalogTokenConflicts } from "../shared/routing-vocabulary.ts";
 import {
   FAMILIES,
   OWNED_PROVIDER_IDS,
@@ -85,93 +72,6 @@ import {
 
 const MAX_RPC_BYTES = 64 * 1024;
 
-// Plugin-owned mutable state, outside the immutable candidate tree: the role
-// bundle reads this file at session entry and injects the language only when
-// set. <stableRoot>/state is created lazily — set-language must work before
-// any activation has run.
-const LANGUAGE_FILE = join("state", "communication-language");
-function readLanguage(stableRoot: string): string | null {
-  try {
-    const value = readFileSync(join(stableRoot, LANGUAGE_FILE), "utf8").trim();
-    return value || null;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
-  }
-}
-
-// Plugin-owned mutable state, same class as communication-language but read
-// by the activation planner instead of the role bundle:
-// <stableRoot>/state/role-routing.json picks the supervisor/lead provider
-// families (+ optional model/mode/thinking/feature fields) that
-// desiredProviderEntries/desiredProfiles generate from. Backward
-// compatibility decision (settings-driven-providers.md §5 Phase 1): an
-// absent file, unparseable bytes, or a schema/legacy-version mismatch all
-// mean "no routing" — activation then keeps the v1 all-twelve provider
-// generation exactly as before. The file is plugin-owned and rewritten
-// atomically by set-role-routing, so foreign or truncated content degrades
-// to the legacy path rather than blocking activation on a recoverable file.
-const ROUTING_FILE = join("state", "role-routing.json");
-function readRoleRouting(stableRoot: string): RoleRoutingValue | null {
-  let raw: string;
-  try {
-    raw = readFileSync(join(stableRoot, ROUTING_FILE), "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
-  }
-  try {
-    const parsed = RoleRouting.safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
-  }
-}
-
-// Plugin-owned user-scope Peer pool: <stableRoot>/state/peer-pool.json is the
-// catalog src/routing.mjs resolves for repositories without their own
-// .paseo-slp/slp-routing.json. The plugin is its sole writer; set-peer-pool
-// overwrites it atomically under sha256 CAS (same class of state write as
-// set-role-routing). The retired pre-plugin catalog still sits directly under
-// the daemon home — read here only so the Manager surface can offer a
-// one-time import; the file is never written or deleted.
-const PEER_POOL_FILE = join("state", "peer-pool.json");
-const LEGACY_POOL_FILE = "slp-routing.json";
-interface PeerPoolFileView {
-  pool: PeerPoolValue | null;
-  sha256: string | null;
-  error: string | null;
-}
-// Absent file = no pool (all null). A file that exists but fails JSON or
-// schema parsing still reports its raw-bytes sha256 — the client can then
-// overwrite it under CAS — and the parse error is surfaced as evidence
-// rather than silently read as an empty pool. Other fs failures are the
-// caller's choice: the pool file must fail loud (a Manager that cannot read
-// the pool must not render it as empty), while the legacy probe is advisory
-// and degrades to an error string instead of killing the whole RPC.
-function readPeerPoolFile(file: string, softErrors: boolean): PeerPoolFileView {
-  let raw: string;
-  try {
-    raw = readFileSync(file, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { pool: null, sha256: null, error: null };
-    if (softErrors) return { pool: null, sha256: null, error: `peer pool unreadable: ${(error as Error).message}` };
-    throw new OperationConflict(
-      "IO_FAILURE",
-      `peer pool unreadable: ${(error as Error).message}`,
-      { path: file },
-    );
-  }
-  const sha256 = sha256Hex(raw);
-  try {
-    const parsed = PeerPool.safeParse(JSON.parse(raw));
-    return parsed.success
-      ? { pool: parsed.data, sha256, error: null }
-      : { pool: null, sha256, error: `peer pool failed schema validation: ${parsed.error.issues[0]?.message ?? "schema"}` };
-  } catch (error) {
-    return { pool: null, sha256, error: `peer pool is not valid JSON: ${(error as Error).message}` };
-  }
-}
 const MAX_CONFLICTS = 64;
 const POLL_PENDING_MS = 1000;
 const POLL_TERMINAL_MS = 0;
@@ -399,56 +299,12 @@ export function createManager(deps: ManagerDeps): Manager {
 
   // -------------------------------------------------------------------------
   // Home verification (§8.1): canonical realpath, regular config.json, real dirs
+  // — shared implementation in server/daemon-home.ts; this caller keeps its
+  // distinct "not a link" message for a non-regular config.json.
   // -------------------------------------------------------------------------
 
-  function resolveHome(target: { hostId: string; daemonHome: string }): HomeContext {
-    let canonicalHome: string;
-    try {
-      canonicalHome = realpathSync(target.daemonHome);
-    } catch {
-      throw new OperationConflict(
-        "HOME_UNVERIFIED",
-        `daemon home does not resolve: ${target.daemonHome}`,
-        { path: target.daemonHome },
-      );
-    }
-    const homeStat = lstatSync(canonicalHome);
-    if (!homeStat.isDirectory()) {
-      throw new OperationConflict("HOME_UNVERIFIED", "daemon home is not a directory", {
-        path: canonicalHome,
-      });
-    }
-    const configPath = join(canonicalHome, "config.json");
-    let configStat;
-    try {
-      configStat = lstatSync(configPath);
-    } catch {
-      throw new OperationConflict(
-        "HOME_UNVERIFIED",
-        "daemon home lacks a readable regular config.json",
-        { path: configPath },
-      );
-    }
-    if (!configStat.isFile() || configStat.isSymbolicLink()) {
-      throw new OperationConflict("HOME_UNVERIFIED", "config.json must be a regular file, not a link", {
-        path: configPath,
-      });
-    }
-    const stableRoot = join(canonicalHome, "slp-runtime");
-    try {
-      const rootStat = lstatSync(stableRoot);
-      if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
-        throw new OperationConflict(
-          "HOME_UNVERIFIED",
-          "slp-runtime exists but is not a real directory",
-          { path: stableRoot },
-        );
-      }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
-    return { canonicalHome, configPath, stableRoot };
-  }
+  const resolveHome = (target: { hostId: string; daemonHome: string }): HomeContext =>
+    resolveDaemonHome(target, "config.json must be a regular file, not a link");
 
   // -------------------------------------------------------------------------
   // Journal transitions — one atomic receipt replacement per phase
@@ -820,50 +676,127 @@ export function createManager(deps: ManagerDeps): Manager {
     return startAccepted(receipt.state, existing, existing.conflicts);
   }
 
+  /**
+   * Shared mutation preamble: schema parse, closed/size/platform gates, mutex
+   * acquisition, receipt resolution, idempotent replay (BEFORE admission —
+   * an accepted op replays even when admission would reject a new one), and
+   * the per-kind admission check. A completed `{ reply }` always returns with
+   * the mutex released — including when the preamble throws before any
+   * context exists. A successful admission transfers `release` ownership to
+   * the caller, which must release on every exit; workers are only ever
+   * scheduled to run after the critical section ends. `adoptIdentical` is an
+   * activate-only admission parameter.
+   */
+  function admitMutation<
+    Req extends { operationId: string; target: { hostId: string; daemonHome: string } },
+  >(args: {
+    schema: {
+      safeParse(
+        input: unknown,
+      ):
+        | { success: true; data: Req }
+        | { success: false; error: { issues: { message?: string }[] } };
+    };
+    input: unknown;
+    kind: "activate" | "deactivate" | "reconcile";
+  }):
+    | { reply: StartResult }
+    | {
+        request: Req;
+        ctx: HomeContext;
+        receipt: ReceiptValue | null;
+        state: StateValue;
+        requestSha: string;
+        release: () => void;
+      } {
+    const { schema, input, kind } = args;
+    const parsed = schema.safeParse(input);
+    if (!parsed.success) {
+      return {
+        reply: startReject("INACTIVE", [
+          conflictOf(
+            "INVALID_REQUEST",
+            `invalid ${kind} input: ${parsed.error.issues[0]?.message ?? "schema"}`,
+          ),
+        ]),
+      };
+    }
+    const request = parsed.data;
+    if (closed) {
+      return { reply: startReject("INACTIVE", [conflictOf("INVALID_REQUEST", "manager is closed")]) };
+    }
+    if (Buffer.byteLength(JSON.stringify(request)) > MAX_RPC_BYTES) {
+      return {
+        reply: startReject("INACTIVE", [
+          conflictOf("INVALID_REQUEST", "input exceeds the 64 KiB bound"),
+        ]),
+      };
+    }
+    if (platform === "win32") {
+      return {
+        reply: startReject("INACTIVE", [
+          conflictOf("UNSUPPORTED_PLATFORM", "SLP plugin transport is POSIX-only in v1"),
+        ]),
+      };
+    }
+    const release = tryAcquire();
+    if (!release) {
+      return {
+        reply: startReject("INACTIVE", [
+          conflictOf("BUSY", "another request is being evaluated"),
+        ]),
+      };
+    }
+    // The mutex is held from here on: every reply or throw below releases it;
+    // only a successful admission hands `release` to the caller.
+    let owned = true;
+    try {
+      const { ctx, receipt } = resolveReceipt(request);
+      const state = receipt?.state ?? "INACTIVE";
+      const requestSha = requestSha256(kind, request);
+      if (receipt) {
+        const reply = existingOperationReply(receipt, requestSha, request.operationId);
+        if (reply === "conflict") {
+          return {
+            reply: startReject(state, [
+              conflictOf(
+                "IDEMPOTENCY_CONFLICT",
+                `operationId ${request.operationId} was already used with a different payload`,
+              ),
+            ]),
+          };
+        }
+        if (reply) return { reply };
+      }
+      if (kind === "reconcile") {
+        assertReconcileAdmission(receipt);
+      } else {
+        assertMutationAdmission(receipt, {
+          adoptIdentical:
+            kind === "activate"
+              ? (request as { adoptIdentical?: boolean }).adoptIdentical
+              : undefined,
+        });
+      }
+      owned = false;
+      return { request, ctx, receipt, state, requestSha, release };
+    } catch (error) {
+      const receipt = safeRead(ctx_or_null(input as { target: { daemonHome: string } }));
+      return { reply: rejectWith(receipt?.state ?? "INACTIVE", error) };
+    } finally {
+      if (owned) release();
+    }
+  }
+
   // -------------------------------------------------------------------------
   // activate
   // -------------------------------------------------------------------------
 
   async function activate(input: ActivateRequest, daemon: ConnectedDaemon): Promise<StartResult> {
-    const parsed = ActivateInput.safeParse(input);
-    if (!parsed.success) {
-      return startReject("INACTIVE", [
-        conflictOf("INVALID_REQUEST", `invalid activate input: ${parsed.error.issues[0]?.message ?? "schema"}`),
-      ]);
-    }
-    const request = parsed.data;
-    if (closed) {
-      return startReject("INACTIVE", [conflictOf("INVALID_REQUEST", "manager is closed")]);
-    }
-    if (Buffer.byteLength(JSON.stringify(request)) > MAX_RPC_BYTES) {
-      return startReject("INACTIVE", [conflictOf("INVALID_REQUEST", "input exceeds the 64 KiB bound")]);
-    }
-    if (platform === "win32") {
-      return startReject("INACTIVE", [
-        conflictOf("UNSUPPORTED_PLATFORM", "SLP plugin transport is POSIX-only in v1"),
-      ]);
-    }
-    const release = tryAcquire();
-    if (!release) {
-      return startReject("INACTIVE", [conflictOf("BUSY", "another request is being evaluated")]);
-    }
+    const admission = admitMutation({ schema: ActivateInput, input, kind: "activate" });
+    if ("reply" in admission) return admission.reply;
+    const { request, ctx, receipt, state, requestSha, release } = admission;
     try {
-      const { ctx, receipt } = resolveReceipt(request);
-      const state = receipt?.state ?? "INACTIVE";
-      const requestSha = requestSha256("activate", request);
-      if (receipt) {
-        const reply = existingOperationReply(receipt, requestSha, request.operationId);
-        if (reply === "conflict") {
-          return startReject(state, [
-            conflictOf(
-              "IDEMPOTENCY_CONFLICT",
-              `operationId ${request.operationId} was already used with a different payload`,
-            ),
-          ]);
-        }
-        if (reply) return reply;
-      }
-      assertMutationAdmission(receipt, { adoptIdentical: request.adoptIdentical });
       if (request.candidateSha256 !== deps.payload.candidate.sha256) {
         return startReject(state, [
           conflictOf("INVALID_REQUEST", "candidateSha256 must equal the embedded candidate", {
@@ -1145,46 +1078,10 @@ export function createManager(deps: ManagerDeps): Manager {
   // -------------------------------------------------------------------------
 
   async function deactivate(input: DeactivateRequest, daemon: ConnectedDaemon): Promise<StartResult> {
-    const parsed = DeactivateInput.safeParse(input);
-    if (!parsed.success) {
-      return startReject("INACTIVE", [
-        conflictOf("INVALID_REQUEST", `invalid deactivate input: ${parsed.error.issues[0]?.message ?? "schema"}`),
-      ]);
-    }
-    const request = parsed.data;
-    if (closed) {
-      return startReject("INACTIVE", [conflictOf("INVALID_REQUEST", "manager is closed")]);
-    }
-    if (Buffer.byteLength(JSON.stringify(request)) > MAX_RPC_BYTES) {
-      return startReject("INACTIVE", [conflictOf("INVALID_REQUEST", "input exceeds the 64 KiB bound")]);
-    }
-    if (platform === "win32") {
-      return startReject("INACTIVE", [
-        conflictOf("UNSUPPORTED_PLATFORM", "SLP plugin transport is POSIX-only in v1"),
-      ]);
-    }
-    const release = tryAcquire();
-    if (!release) {
-      return startReject("INACTIVE", [conflictOf("BUSY", "another request is being evaluated")]);
-    }
+    const admission = admitMutation({ schema: DeactivateInput, input, kind: "deactivate" });
+    if ("reply" in admission) return admission.reply;
+    const { request, ctx, receipt, state, requestSha, release } = admission;
     try {
-      const { ctx, receipt } = resolveReceipt(request);
-      const state = receipt?.state ?? "INACTIVE";
-      const requestSha = requestSha256("deactivate", request);
-      if (receipt) {
-        const reply = existingOperationReply(receipt, requestSha, request.operationId);
-        if (reply === "conflict") {
-          return startReject(state, [
-            conflictOf(
-              "IDEMPOTENCY_CONFLICT",
-              `operationId ${request.operationId} was already used with a different payload`,
-            ),
-          ]);
-        }
-        if (reply) return reply;
-      }
-      assertMutationAdmission(receipt);
-
       if (!receipt?.binding) {
         // §8.3.2 no-op rules: matching last-deactivated binding, or a journal
         // that never owned a binding with no SLP entries present.
@@ -1388,46 +1285,10 @@ export function createManager(deps: ManagerDeps): Manager {
   // -------------------------------------------------------------------------
 
   async function reconcile(input: ReconcileRequest, daemon: ConnectedDaemon): Promise<StartResult> {
-    const parsed = ReconcileInput.safeParse(input);
-    if (!parsed.success) {
-      return startReject("INACTIVE", [
-        conflictOf("INVALID_REQUEST", `invalid reconcile input: ${parsed.error.issues[0]?.message ?? "schema"}`),
-      ]);
-    }
-    const request = parsed.data;
-    if (closed) {
-      return startReject("INACTIVE", [conflictOf("INVALID_REQUEST", "manager is closed")]);
-    }
-    if (Buffer.byteLength(JSON.stringify(request)) > MAX_RPC_BYTES) {
-      return startReject("INACTIVE", [conflictOf("INVALID_REQUEST", "input exceeds the 64 KiB bound")]);
-    }
-    if (platform === "win32") {
-      return startReject("INACTIVE", [
-        conflictOf("UNSUPPORTED_PLATFORM", "SLP plugin transport is POSIX-only in v1"),
-      ]);
-    }
-    const release = tryAcquire();
-    if (!release) {
-      return startReject("INACTIVE", [conflictOf("BUSY", "another request is being evaluated")]);
-    }
+    const admission = admitMutation({ schema: ReconcileInput, input, kind: "reconcile" });
+    if ("reply" in admission) return admission.reply;
+    const { request, ctx, receipt, state, requestSha, release } = admission;
     try {
-      const { ctx, receipt } = resolveReceipt(request);
-      const state = receipt?.state ?? "INACTIVE";
-      const requestSha = requestSha256("reconcile", request);
-      if (receipt) {
-        const reply = existingOperationReply(receipt, requestSha, request.operationId);
-        if (reply === "conflict") {
-          return startReject(state, [
-            conflictOf(
-              "IDEMPOTENCY_CONFLICT",
-              `operationId ${request.operationId} was already used with a different payload`,
-            ),
-          ]);
-        }
-        if (reply) return reply;
-      }
-      assertReconcileAdmission(receipt);
-
       if (request.action === "inspect") {
         // Inspect is journaled like every other operation: the intent lands
         // before execution so status(operationId) resolves and an identical
@@ -2773,142 +2634,9 @@ export function createManager(deps: ManagerDeps): Manager {
     });
   }
 
-  // One atomic file write under plugin-owned state — no journal, no mutex:
-  // the role bundle reads it at the next session entry, and nothing else in
-  // the operation pipeline touches it.
-  async function setLanguage(input: unknown): Promise<SetLanguageResult> {
-    const parsed = SetLanguageInput.safeParse(input);
-    if (!parsed.success) {
-      throw new OperationConflict(
-        "INVALID_REQUEST",
-        `invalid set-language input: ${parsed.error.issues[0]?.message ?? "schema"}`,
-      );
-    }
-    const ctx = resolveHome(parsed.data.target);
-    const file = join(ctx.stableRoot, LANGUAGE_FILE);
-    if (parsed.data.value === null) {
-      rmSync(file, { force: true });
-      return { schemaVersion: 1, value: null };
-    }
-    mkdirSync(join(ctx.stableRoot, "state"), { recursive: true });
-    writeFileSync(file, `${parsed.data.value}\n`, "utf8");
-    return { schemaVersion: 1, value: parsed.data.value };
-  }
-
-  // Plugin-owned role routing — same class of operation as set-language:
-  // one file under slp-runtime/state, no journal, no mutex. Read returns
-  // null on absent/legacy content; write validates the strict schema then
-  // lands atomically (temp sibling + rename) so a crash never leaves a
-  // half-written routing for the next activation to read.
-  async function getRoleRouting(input: unknown): Promise<GetRoleRoutingResult> {
-    const parsed = GetRoleRoutingInput.safeParse(input);
-    if (!parsed.success) {
-      throw new OperationConflict(
-        "INVALID_REQUEST",
-        `invalid get-role-routing input: ${parsed.error.issues[0]?.message ?? "schema"}`,
-      );
-    }
-    const ctx = resolveHome(parsed.data.target);
-    return { schemaVersion: 1, routing: readRoleRouting(ctx.stableRoot) };
-  }
-
-  async function setRoleRouting(input: unknown): Promise<SetRoleRoutingResult> {
-    const parsed = SetRoleRoutingInput.safeParse(input);
-    if (!parsed.success) {
-      throw new OperationConflict(
-        "INVALID_REQUEST",
-        `invalid set-role-routing input: ${parsed.error.issues[0]?.message ?? "schema"}`,
-      );
-    }
-    const ctx = resolveHome(parsed.data.target);
-    const dir = join(ctx.stableRoot, "state");
-    const file = join(ctx.stableRoot, ROUTING_FILE);
-    mkdirSync(dir, { recursive: true });
-    const temp = `${file}.${uuid()}.tmp`;
-    try {
-      writeFileSync(temp, `${JSON.stringify(parsed.data.routing, null, 2)}\n`, { mode: 0o600 });
-      renameSync(temp, file);
-    } catch (error) {
-      rmSync(temp, { force: true });
-      throw error;
-    }
-    return { schemaVersion: 1, routing: parsed.data.routing };
-  }
-
-  // The user-scope Peer pool — same class of plugin-owned state as
-  // role-routing (one file under slp-runtime/state, no journal, no mutex, no
-  // authority gate). The package's readCatalog resolves this file for every
-  // repository without its own .paseo-slp/slp-routing.json, and the plugin is
-  // its sole writer. Writes are whole-file overwrites under sha256 CAS so a
-  // stale editor never clobbers a newer pool silently — a mismatch forces a
-  // reload before saving.
-  async function getPeerPool(input: unknown): Promise<GetPeerPoolResult> {
-    const parsed = GetPeerPoolInput.safeParse(input);
-    if (!parsed.success) {
-      throw new OperationConflict(
-        "INVALID_REQUEST",
-        `invalid get-peer-pool input: ${parsed.error.issues[0]?.message ?? "schema"}`,
-      );
-    }
-    const ctx = resolveHome(parsed.data.target);
-    const { pool, sha256, error } = readPeerPoolFile(join(ctx.stableRoot, PEER_POOL_FILE), false);
-    // The retired user catalog is offered as a one-time import source —
-    // advisory only: a read failure degrades to legacyError and never kills
-    // get-peer-pool. The plugin never modifies or deletes the legacy file.
-    const legacy = readPeerPoolFile(join(ctx.canonicalHome, LEGACY_POOL_FILE), true);
-    return { schemaVersion: 1, pool, sha256, error, legacy: legacy.pool, legacyError: legacy.error };
-  }
-
-  async function setPeerPool(input: unknown): Promise<SetPeerPoolResult> {
-    const parsed = SetPeerPoolInput.safeParse(input);
-    if (!parsed.success) {
-      throw new OperationConflict(
-        "INVALID_REQUEST",
-        `invalid set-peer-pool input: ${parsed.error.issues[0]?.message ?? "schema"}`,
-      );
-    }
-    const ctx = resolveHome(parsed.data.target);
-    const file = join(ctx.stableRoot, PEER_POOL_FILE);
-    // Semantic gate (§7.2), shared with the form build and the routing-read
-    // path: a seat on a reserved standard id whose tokens diverge from the
-    // package set is a Token conflict — never stored as a valid standard
-    // seat. The conflict survives in the file only when it arrived by import
-    // or package upgrade; every write must resolve it first.
-    const conflicts = catalogTokenConflicts(parsed.data.pool);
-    if (conflicts.length > 0) {
-      throw new OperationConflict(
-        "INVALID_REQUEST",
-        `peer pool has unresolved Token conflicts on standard seats: ${conflicts.map(c => c.id).join(", ")} — resolve each seat in the Manager surface (use the standard set or convert to a custom id)`,
-      );
-    }
-    // CAS gate next, after the semantic gate above: the on-disk bytes must
-    // hash to the token the writer read. An unreadable pool fails loud
-    // rather than comparing against null.
-    const actualSha256 = readPeerPoolFile(file, false).sha256;
-    if (actualSha256 !== parsed.data.expectedSha256) {
-      throw new OperationConflict(
-        "IDEMPOTENCY_CONFLICT",
-        "peer pool changed since it was read — reload before saving",
-        { path: file, expectedSha256: parsed.data.expectedSha256, actualSha256 },
-      );
-    }
-    const dir = join(ctx.stableRoot, "state");
-    const bytes = `${JSON.stringify(parsed.data.pool, null, 2)}\n`;
-    mkdirSync(dir, { recursive: true });
-    const temp = `${file}.${uuid()}.tmp`;
-    try {
-      writeFileSync(temp, bytes, { mode: 0o600 });
-      renameSync(temp, file);
-    } catch (error) {
-      rmSync(temp, { force: true });
-      throw error;
-    }
-    return { schemaVersion: 1, pool: parsed.data.pool, sha256: sha256Hex(bytes) };
-  }
-
   function close(): void {
     closed = true;
   }
 
-  return { activate, deactivate, reconcile, status, setLanguage, getRoleRouting, setRoleRouting, getPeerPool, setPeerPool, close };
+  return { activate, deactivate, reconcile, status, close };
 }

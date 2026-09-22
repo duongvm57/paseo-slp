@@ -932,27 +932,6 @@ export interface Manager {
   reconcile(input: ReconcileRequest, daemon: ConnectedDaemon): Promise<StartResult>;
   deactivate(input: DeactivateRequest, daemon: ConnectedDaemon): Promise<StartResult>;
   status(input: StatusRequest, daemon: ConnectedDaemon): Promise<StatusResult>;
-  /** Write or clear the plugin-owned communication-language file. No journal,
-   *  no mutex — it is one atomic file under slp-runtime/state that only the
-   *  role bundle reads, at session entry. */
-  setLanguage(input: SetLanguageRequest): Promise<SetLanguageResult>;
-  /** Read the plugin-owned role-routing file; null when unset or legacy. */
-  getRoleRouting(input: GetRoleRoutingRequest): Promise<GetRoleRoutingResult>;
-  /** Validate and atomically persist the role routing — one file under
-   *  slp-runtime/state that only the next activation consumes. No journal,
-   *  no mutex, no authority gate (same class of write as set-language). */
-  setRoleRouting(input: SetRoleRoutingRequest): Promise<SetRoleRoutingResult>;
-  /** Read the plugin-owned user-scope Peer pool (slp-runtime/state/
-   *  peer-pool.json) plus the retired <daemonHome>/slp-routing.json as a
-   *  read-only one-time import source. pool/sha256 are null when the file
-   *  is absent; a present-but-invalid file reports its hash with pool null
-   *  and the parse evidence in `error`. */
-  getPeerPool(input: GetPeerPoolRequest): Promise<GetPeerPoolResult>;
-  /** Whole-file overwrite of the user-scope pool under sha256 CAS —
-   *  expectedSha256 must equal the on-disk bytes (null = expect absent).
-   *  Atomic temp+rename write at 0600, same class of state as
-   *  set-role-routing: no journal, no mutex, no authority gate. */
-  setPeerPool(input: SetPeerPoolRequest): Promise<SetPeerPoolResult>;
   /** Stop accepting work and close owned resources. Does not deactivate SLP
    * or remove files; recovery stays journal-driven. */
   close(): void;

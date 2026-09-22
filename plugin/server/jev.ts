@@ -15,7 +15,7 @@
 // action — per kind: GET {origin}/api/v1/auth/key for openrouter, GET
 // {baseUrl}/v1/models for typesafe); the fetch seam is injectable.
 
-import { lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { lstatSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import {
@@ -32,6 +32,8 @@ import {
   type SetJevKeyResult,
   type TestJevResult,
 } from "../shared/contracts.ts";
+import { resolveDaemonHome } from "./daemon-home.ts";
+import { writePrivate } from "./state-store.ts";
 
 const JEV_FILE = join("state", "jev.json");
 const keyFileName = (kind: string) => join("state", `jev-${kind}.key`);
@@ -87,41 +89,11 @@ export interface JevDeps {
   fetchImpl?: typeof fetch;
 }
 
-// Same home verification as manager.ts resolveHome (§8.1): canonical realpath,
-// a real directory, a readable regular config.json, and a real slp-runtime
-// directory (a symlinked stableRoot would redirect credential writes outside
-// the canonical home).
-function resolveHome(target: { hostId: string; daemonHome: string }): { canonicalHome: string; stableRoot: string } {
-  let canonicalHome: string;
-  try {
-    canonicalHome = realpathSync(target.daemonHome);
-  } catch {
-    throw new OperationConflict("HOME_UNVERIFIED", `daemon home does not resolve: ${target.daemonHome}`, { path: target.daemonHome });
-  }
-  if (!lstatSync(canonicalHome).isDirectory()) {
-    throw new OperationConflict("HOME_UNVERIFIED", "daemon home is not a directory", { path: canonicalHome });
-  }
-  const configPath = join(canonicalHome, "config.json");
-  let configStat;
-  try {
-    configStat = lstatSync(configPath);
-  } catch {
-    throw new OperationConflict("HOME_UNVERIFIED", "daemon home lacks a readable regular config.json", { path: configPath });
-  }
-  if (!configStat.isFile()) {
-    throw new OperationConflict("HOME_UNVERIFIED", "daemon home lacks a readable regular config.json", { path: configPath });
-  }
-  const stableRoot = join(canonicalHome, "slp-runtime");
-  try {
-    const rootStat = lstatSync(stableRoot);
-    if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
-      throw new OperationConflict("HOME_UNVERIFIED", "slp-runtime exists but is not a real directory", { path: stableRoot });
-    }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-  return { canonicalHome, stableRoot };
-}
+// Home verification lives in server/daemon-home.ts (§8.1, shared with the
+// manager) — this caller keeps its generic "lacks a readable regular
+// config.json" message for a non-regular config.json.
+const resolveHome = (target: { hostId: string; daemonHome: string }): { canonicalHome: string; stableRoot: string } =>
+  resolveDaemonHome(target, "daemon home lacks a readable regular config.json");
 
 // Absent file = unconfigured (null); corrupt or schema-mismatched content is
 // evidence — surfaced as an error string, never silently treated as OFF.
@@ -171,20 +143,8 @@ function view(stableRoot: string): JevViewValue {
   };
 }
 
-// Atomic 0600 write, same shape as set-role-routing's temp+rename.
-function writePrivate(stableRoot: string, relative: string, bytes: string, uuid: () => string): void {
-  const dir = join(stableRoot, "state");
-  const file = join(stableRoot, relative);
-  mkdirSync(dir, { recursive: true });
-  const temp = `${file}.${uuid()}.tmp`;
-  try {
-    writeFileSync(temp, bytes, { mode: 0o600 });
-    renameSync(temp, file);
-  } catch (error) {
-    rmSync(temp, { force: true });
-    throw error;
-  }
-}
+// Atomic 0600 write — shared with the manager's state-file writes via
+// ./state-store.ts.
 
 export function createJev(deps: JevDeps = {}) {
   const uuid = deps.uuid ?? randomUUID;

@@ -12,6 +12,7 @@ import { readCatalog } from '../src/routing.mjs';
 import { roleBundle } from '../src/role-bundle.mjs';
 import { createJev } from '../plugin/server/jev.ts';
 import { createManager } from '../plugin/server/manager.ts';
+import { createStateStore } from '../plugin/server/state-store.ts';
 import { fakeOrKey } from './fake-secrets.mjs';
 import {
   activateInput, makeBinaries, makeDaemon, makeDeps, makeHome,
@@ -228,6 +229,7 @@ test('plugin-written jev config and key read back through the package readers', 
 test('manager-written language, routing and pool state read back through the package probes', async t => {
   const home = makeHome(t);
   const manager = createManager(makeDeps());
+  const store = createStateStore();
   const managedEnv = {
     SLP_MANAGED_RUNTIME: '1', SLP_NODE_BIN: process.execPath,
     SLP_RUNTIME_ROOT: root, SLP_DAEMON_HOME: realpathSync(home),
@@ -237,13 +239,13 @@ test('manager-written language, routing and pool state read back through the pac
   // probe and by role-bundle at managed-session entry.
   assert.equal(runtimeStatus(home).communicationLanguage, null);
   assert.equal(roleBundle(root, 'peer', managedEnv).instructions.includes('Communication language:'), false);
-  await manager.setLanguage({ schemaVersion: 1, target: targetOf(home), value: 'Vietnamese' });
+  await store.setLanguage({ schemaVersion: 1, target: targetOf(home), value: 'Vietnamese' });
   // Observed asymmetry: the status probe surfaces the stored bytes verbatim
   // (the writer terminates the file with a newline) while the bundle render
   // and the plugin's own status reader trim at consume time.
   assert.equal(runtimeStatus(home).communicationLanguage, 'Vietnamese\n');
   assert.ok(roleBundle(root, 'peer', managedEnv).instructions.includes('Communication language: Vietnamese'));
-  await manager.setLanguage({ schemaVersion: 1, target: targetOf(home), value: null });
+  await store.setLanguage({ schemaVersion: 1, target: targetOf(home), value: null });
   assert.equal(runtimeStatus(home).communicationLanguage, null);
   assert.equal(roleBundle(root, 'peer', managedEnv).instructions.includes('Communication language:'), false);
 
@@ -254,9 +256,9 @@ test('manager-written language, routing and pool state read back through the pac
     supervisor: { family: 'devin', model: 'swe-2-max' },
     lead: { family: 'codex', model: 'gpt-5-codex' },
   };
-  await manager.setRoleRouting({ schemaVersion: 1, target: targetOf(home), routing });
+  await store.setRoleRouting({ schemaVersion: 1, target: targetOf(home), routing });
   assert.deepEqual(runtimeStatus(home).roleRouting, routing);
-  assert.deepEqual((await manager.getRoleRouting({ schemaVersion: 1, target: targetOf(home) })).routing, routing);
+  assert.deepEqual((await store.getRoleRouting({ schemaVersion: 1, target: targetOf(home) })).routing, routing);
 
   // peer-pool.json: set-peer-pool writes under sha256 CAS; readCatalog
   // resolves it as the user-scope catalog for a repository without its own
@@ -274,7 +276,7 @@ test('manager-written language, routing and pool state read back through the pac
       notes: 'Local-only annotation — never sent to Jev.',
     }],
   };
-  const written = await manager.setPeerPool({ schemaVersion: 1, target: targetOf(home), pool, expectedSha256: null });
+  const written = await store.setPeerPool({ schemaVersion: 1, target: targetOf(home), pool, expectedSha256: null });
   const catalog = readCatalog(repo, home);
   assert.equal(catalog.scope, 'user');
   assert.equal(catalog.sha256, written.sha256, 'the CAS token the writer returned is the file hash the reader recomputes');
@@ -289,7 +291,8 @@ test('an activated binding reads back through both the plugin status RPC and the
   const daemon = await makeDaemon(t, home);
   const deps = makeDeps({ execOpts: { binaries } });
   const manager = createManager(deps);
-  await manager.setLanguage({ schemaVersion: 1, target: targetOf(home), value: 'Vietnamese' });
+  const store = createStateStore();
+  await store.setLanguage({ schemaVersion: 1, target: targetOf(home), value: 'Vietnamese' });
 
   const opId = randomUUID();
   const start = await manager.activate(activateInput(home, deps.payload, opId), daemon);

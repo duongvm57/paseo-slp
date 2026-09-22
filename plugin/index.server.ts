@@ -11,6 +11,7 @@ import type { Manager } from "./shared/contracts.ts";
 import { loadCatalog } from "./server/provider-catalog.ts";
 import { createManager } from "./server/manager.ts";
 import { createJev } from "./server/jev.ts";
+import { createStateStore } from "./server/state-store.ts";
 import { createMaterializer } from "./server/materializer.ts";
 import { embeddedPayload } from "./server/generated/runtime-payload.ts";
 import { createExecutableResolver } from "./server/executables.ts";
@@ -34,11 +35,14 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   server.handle(status, (input, { paseo }) => manager.status(input, paseo));
   server.handle(localTarget, () => detectDaemonHome());
   server.handle(catalog, (input, { paseo }) => loadCatalog(input, paseo));
-  server.handle(setLanguage, input => manager.setLanguage(input));
-  server.handle(getRoleRouting, input => manager.getRoleRouting(input));
-  server.handle(setRoleRouting, input => manager.setRoleRouting(input));
-  server.handle(getPeerPool, input => manager.getPeerPool(input));
-  server.handle(setPeerPool, input => manager.setPeerPool(input));
+  // Plugin-owned state files under slp-runtime/state — same class of
+  // operation as jev: no journal, no mutex, no authority gate.
+  const store = createStateStore();
+  server.handle(setLanguage, input => store.setLanguage(input));
+  server.handle(getRoleRouting, input => store.getRoleRouting(input));
+  server.handle(setRoleRouting, input => store.setRoleRouting(input));
+  server.handle(getPeerPool, input => store.getPeerPool(input));
+  server.handle(setPeerPool, input => store.setPeerPool(input));
   // Jev (OpenRouter Decisions) — per-daemon config/key under slp-runtime/state;
   // test-jev is the only handler that touches the network (explicit action).
   const jev = createJev();

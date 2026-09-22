@@ -19,6 +19,7 @@ import {
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createManager } from '../plugin/server/manager.ts';
+import { createStateStore } from '../plugin/server/state-store.ts';
 import {
   OWNED_IDS,
   activateInput,
@@ -41,10 +42,10 @@ const writeRoutingFile = (home, text) => {
   writeFileSync(routingPath(home), text, { mode: 0o600 });
 };
 
-const setRouting = (manager, home, supervisor, lead) =>
-  manager.setRoleRouting({ schemaVersion: 1, target: targetOf(home), routing: { schemaVersion: 1, supervisor, lead } });
-const getRouting = (manager, home) =>
-  manager.getRoleRouting({ schemaVersion: 1, target: targetOf(home) });
+const setRouting = (store, home, supervisor, lead) =>
+  store.setRoleRouting({ schemaVersion: 1, target: targetOf(home), routing: { schemaVersion: 1, supervisor, lead } });
+const getRouting = (store, home) =>
+  store.getRoleRouting({ schemaVersion: 1, target: targetOf(home) });
 
 // The six generated ids under a routing: chosen supervisor + chosen lead
 // combos plus all four pool-driven peers — nothing else.
@@ -60,27 +61,28 @@ const absentIds = (supFamily, leadFamily) =>
 test('role-routing file round-trips through get/set before any activation', async t => {
   const home = makeHome(t);
   const manager = createManager(makeDeps());
+  const store = createStateStore();
   const file = routingPath(home);
 
   // Unset → null (the legacy all-twelve generation applies).
   assert.equal(existsSync(file), false);
-  assert.deepEqual(await getRouting(manager, home), { schemaVersion: 1, routing: null });
+  assert.deepEqual(await getRouting(store, home), { schemaVersion: 1, routing: null });
 
   // Set → lands atomically with private mode; get returns the stored value.
   const choice = {
     supervisor: { family: 'pi', model: 'pi-model', modeId: 'fast' },
     lead: { family: 'devin', model: 'swe-2-max', thinkingOptionId: 'high', featureValues: { auto_accept: true } },
   };
-  const set = await setRouting(manager, home, choice.supervisor, choice.lead);
+  const set = await setRouting(store, home, choice.supervisor, choice.lead);
   assert.deepEqual(set, { schemaVersion: 1, routing: { schemaVersion: 1, ...choice } });
   assert.equal(lstatSync(file).mode & 0o777, 0o600);
   assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), { schemaVersion: 1, ...choice });
-  assert.deepEqual(await getRouting(manager, home), { schemaVersion: 1, routing: { schemaVersion: 1, ...choice } });
+  assert.deepEqual(await getRouting(store, home), { schemaVersion: 1, routing: { schemaVersion: 1, ...choice } });
 
   // Overwrite → the whole document is replaced (no field merge).
   const next = { family: 'claude' };
-  await setRouting(manager, home, choice.supervisor, next);
-  const read = await getRouting(manager, home);
+  await setRouting(store, home, choice.supervisor, next);
+  const read = await getRouting(store, home);
   assert.deepEqual(read.routing.lead, next, 'a saved routing replaces the previous document verbatim');
   assert.equal(read.routing.supervisor.model, 'pi-model');
 
@@ -95,6 +97,7 @@ test('role-routing file round-trips through get/set before any activation', asyn
 test('set-role-routing rejects malformed input and unknown keys', async t => {
   const home = makeHome(t);
   const manager = createManager(makeDeps());
+  const store = createStateStore();
   const target = targetOf(home);
   const base = { family: 'codex' };
   const cases = [
@@ -108,10 +111,10 @@ test('set-role-routing rejects malformed input and unknown keys', async t => {
     ['missing routing', { schemaVersion: 1, target }],
   ];
   for (const [name, input] of cases) {
-    await assert.rejects(() => manager.setRoleRouting(input), /invalid set-role-routing input/, name);
+    await assert.rejects(() => store.setRoleRouting(input), /invalid set-role-routing input/, name);
   }
   await assert.rejects(
-    () => manager.getRoleRouting({ schemaVersion: 1 }),
+    () => store.getRoleRouting({ schemaVersion: 1 }),
     /invalid get-role-routing input/,
   );
   assert.equal(existsSync(routingPath(home)), false, 'a rejected write never creates the file');
@@ -127,11 +130,12 @@ test('malformed or legacy-version routing file degrades to all-twelve generation
   const daemon = await makeDaemon(t, home);
   const deps = makeDeps({ execOpts: { binaries } });
   const manager = createManager(deps);
+  const store = createStateStore();
 
   writeRoutingFile(home, '{"schemaVersion":2,"supervisor":{"family":"pi"},"lead":{"family":"pi"}}\n');
-  assert.deepEqual(await getRouting(manager, home), { schemaVersion: 1, routing: null });
+  assert.deepEqual(await getRouting(store, home), { schemaVersion: 1, routing: null });
   writeRoutingFile(home, 'not json at all');
-  assert.deepEqual(await getRouting(manager, home), { schemaVersion: 1, routing: null });
+  assert.deepEqual(await getRouting(store, home), { schemaVersion: 1, routing: null });
 
   const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   const done = await waitTerminal(manager, home, act.operation.operationId, daemon);
@@ -149,9 +153,10 @@ test('routing generates the two chosen combos plus all four peers', async t => {
   const daemon = await makeDaemon(t, home);
   const deps = makeDeps({ execOpts: { binaries } });
   const manager = createManager(deps);
+  const store = createStateStore();
 
   await setRouting(
-    manager, home,
+    store, home,
     { family: 'pi', model: 'pi-model', modeId: 'fast' },
     { family: 'devin', model: 'swe-2-max', thinkingOptionId: 'high', featureValues: { auto_accept: true } },
   );
@@ -194,8 +199,9 @@ test('explicit profiles input overrides routing; a family override generates its
   const daemon = await makeDaemon(t, home);
   const deps = makeDeps({ execOpts: { binaries } });
   const manager = createManager(deps);
+  const store = createStateStore();
 
-  await setRouting(manager, home, { family: 'pi', model: 'routing-model' }, { family: 'devin' });
+  await setRouting(store, home, { family: 'pi', model: 'routing-model' }, { family: 'devin' });
   const act = await manager.activate(
     activateInput(home, deps.payload, randomUUID(), {
       profiles: {
@@ -230,9 +236,10 @@ test('profiles null clears a routing-supplied field on BOTH fresh and rebind pat
   const daemon = await makeDaemon(t, home);
   const deps = makeDeps({ execOpts: { binaries } });
   const manager = createManager(deps);
+  const store = createStateStore();
 
   // Fresh path: routing supplies model, profiles input clears it with null.
-  await setRouting(manager, home, { family: 'pi', model: 'routing-model' }, { family: 'devin', model: 'lead-model' });
+  await setRouting(store, home, { family: 'pi', model: 'routing-model' }, { family: 'devin', model: 'lead-model' });
   const act = await manager.activate(
     activateInput(home, deps.payload, randomUUID(), {
       profiles: { supervisor: { model: null } },
@@ -267,8 +274,9 @@ test('routing that selects an unavailable family fails closed at plan time', asy
   const daemon = await makeDaemon(t, home);
   const deps = makeDeps({ execOpts: { binaries } });
   const manager = createManager(deps);
+  const store = createStateStore();
 
-  await setRouting(manager, home, { family: 'claude' }, { family: 'codex' });
+  await setRouting(store, home, { family: 'claude' }, { family: 'codex' });
   const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   const done = await waitTerminal(manager, home, act.operation.operationId, daemon);
   assert.equal(done.operation.outcome, 'failed');
@@ -286,6 +294,7 @@ test('routing change on an existing binding removes non-chosen providers and rep
   const daemon = await makeDaemon(t, home);
   const deps = makeDeps({ execOpts: { binaries } });
   const manager = createManager(deps);
+  const store = createStateStore();
 
   // Legacy all-twelve binding first.
   const first = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
@@ -293,7 +302,7 @@ test('routing change on an existing binding removes non-chosen providers and rep
   assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 12);
 
   // Route supervisor → devin, lead → pi; re-activate the same candidate.
-  await setRouting(manager, home, { family: 'devin', model: 'swe-2-high' }, { family: 'pi' });
+  await setRouting(store, home, { family: 'devin', model: 'swe-2-high' }, { family: 'pi' });
   const second = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   const done = await waitTerminal(manager, home, second.operation.operationId, daemon);
   assert.equal(done.operation.outcome, 'succeeded');
@@ -318,13 +327,14 @@ test('routing → routing rebind swaps the role providers in one re-activation',
   const daemon = await makeDaemon(t, home);
   const deps = makeDeps({ execOpts: { binaries } });
   const manager = createManager(deps);
+  const store = createStateStore();
 
-  await setRouting(manager, home, { family: 'pi' }, { family: 'devin' });
+  await setRouting(store, home, { family: 'pi' }, { family: 'devin' });
   const first = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   await waitTerminal(manager, home, first.operation.operationId, daemon);
   assert.deepEqual(Object.keys(slpProvidersOf(readConfigJson(home))).sort(), generatedIds('pi', 'devin'));
 
-  await setRouting(manager, home, { family: 'claude' }, { family: 'codex' });
+  await setRouting(store, home, { family: 'claude' }, { family: 'codex' });
   const second = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   const done = await waitTerminal(manager, home, second.operation.operationId, daemon);
   assert.equal(done.operation.outcome, 'succeeded');
@@ -342,8 +352,9 @@ test('a foreign profile referencing a removed provider blocks the rebind with DE
   const daemon = await makeDaemon(t, home);
   const deps = makeDeps({ execOpts: { binaries } });
   const manager = createManager(deps);
+  const store = createStateStore();
 
-  await setRouting(manager, home, { family: 'pi' }, { family: 'devin' });
+  await setRouting(store, home, { family: 'pi' }, { family: 'devin' });
   const first = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   await waitTerminal(manager, home, first.operation.operationId, daemon);
 
@@ -353,7 +364,7 @@ test('a foreign profile referencing a removed provider blocks the rebind with DE
   writeFileSync(join(home, 'config.json'), JSON.stringify(config, null, 2) + '\n', { mode: 0o600 });
   const daemon2 = await makeDaemon(t, home); // live view re-reads persisted config
 
-  await setRouting(manager, home, { family: 'codex' }, { family: 'devin' });
+  await setRouting(store, home, { family: 'codex' }, { family: 'devin' });
   const second = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon2);
   const done = await waitTerminal(manager, home, second.operation.operationId, daemon2);
   assert.equal(done.operation.outcome, 'failed');
@@ -367,8 +378,9 @@ test('deactivation under a settings-driven binding still removes every owned id'
   const daemon = await makeDaemon(t, home);
   const deps = makeDeps({ execOpts: { binaries } });
   const manager = createManager(deps);
+  const store = createStateStore();
 
-  await setRouting(manager, home, { family: 'pi' }, { family: 'devin' });
+  await setRouting(store, home, { family: 'pi' }, { family: 'devin' });
   const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   const doneAct = await waitTerminal(manager, home, act.operation.operationId, daemon);
   assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 6);
@@ -411,39 +423,40 @@ const poolFixture = {
   }],
 };
 
-const getPool = (manager, home) =>
-  manager.getPeerPool({ schemaVersion: 1, target: targetOf(home) });
-const setPool = (manager, home, pool, expectedSha256) =>
-  manager.setPeerPool({ schemaVersion: 1, target: targetOf(home), pool, expectedSha256 });
+const getPool = (store, home) =>
+  store.getPeerPool({ schemaVersion: 1, target: targetOf(home) });
+const setPool = (store, home, pool, expectedSha256) =>
+  store.setPeerPool({ schemaVersion: 1, target: targetOf(home), pool, expectedSha256 });
 
 test('peer pool round-trips through get/set under sha256 CAS', async t => {
   const home = makeHome(t);
   const manager = createManager(makeDeps());
+  const store = createStateStore();
   const file = poolPath(home);
 
   // Absent file → all null, no error.
   assert.equal(existsSync(file), false);
-  assert.deepEqual(await getPool(manager, home), {
+  assert.deepEqual(await getPool(store, home), {
     schemaVersion: 1, pool: null, sha256: null, error: null, legacy: null, legacyError: null,
   });
 
   // First write: expectedSha256 null means "expect no file".
-  const written = await setPool(manager, home, poolFixture, null);
+  const written = await setPool(store, home, poolFixture, null);
   assert.deepEqual(written.pool, poolFixture);
   assert.equal(lstatSync(file).mode & 0o777, 0o600);
   assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), poolFixture);
 
   // Read returns the pool plus the hash token the next write must carry.
-  const read = await getPool(manager, home);
+  const read = await getPool(store, home);
   assert.deepEqual(read.pool, poolFixture);
   assert.equal(read.sha256, written.sha256);
   assert.equal(read.error, null);
 
   // Whole-file overwrite with the correct token lands and rotates the hash.
   const next = { ...poolFixture, policy: 'Amended policy' };
-  const rewritten = await setPool(manager, home, next, read.sha256);
+  const rewritten = await setPool(store, home, next, read.sha256);
   assert.notEqual(rewritten.sha256, read.sha256);
-  assert.deepEqual((await getPool(manager, home)).pool, next);
+  assert.deepEqual((await getPool(store, home)).pool, next);
 
   // No tmp siblings survive the atomic write.
   const stateDir = join(home, 'slp-runtime', 'state');
@@ -453,42 +466,45 @@ test('peer pool round-trips through get/set under sha256 CAS', async t => {
 test('set-peer-pool refuses a stale sha256 and leaves the file untouched', async t => {
   const home = makeHome(t);
   const manager = createManager(makeDeps());
+  const store = createStateStore();
   const file = poolPath(home);
 
-  const first = await setPool(manager, home, poolFixture, null);
+  const first = await setPool(store, home, poolFixture, null);
   const before = readFileSync(file, 'utf8');
 
   // A writer holding the pre-write view (null) or an old token both fail.
   for (const [name, expectedSha256] of [['null token on existing file', null], ['stale token', 'f'.repeat(64)]]) {
-    const err = await setPool(manager, home, poolFixture, expectedSha256).catch(e => e);
+    const err = await setPool(store, home, poolFixture, expectedSha256).catch(e => e);
     assert.equal(err?.name, 'OperationConflict', name);
     assert.equal(err?.code, 'IDEMPOTENCY_CONFLICT', name);
     assert.match(err?.message ?? '', /peer pool changed/, name);
     assert.equal(readFileSync(file, 'utf8'), before, `${name}: conflict never touches the file`);
   }
-  assert.equal(first.sha256, (await getPool(manager, home)).sha256);
+  assert.equal(first.sha256, (await getPool(store, home)).sha256);
 });
 
 test('get-peer-pool surfaces a malformed file with its sha256 so CAS overwrite still works', async t => {
   const home = makeHome(t);
   const manager = createManager(makeDeps());
+  const store = createStateStore();
   const file = poolPath(home);
 
   writeFile(file, '{ not json');
-  const bad = await getPool(manager, home);
+  const bad = await getPool(store, home);
   assert.equal(bad.pool, null);
   assert.match(bad.error, /not valid JSON/);
   assert.equal(typeof bad.sha256, 'string', 'sha256 of raw bytes still reported');
 
   // The editor can overwrite the corrupt file under CAS with that token.
-  const fixed = await setPool(manager, home, poolFixture, bad.sha256);
-  assert.deepEqual((await getPool(manager, home)).pool, poolFixture);
-  assert.equal(fixed.sha256, (await getPool(manager, home)).sha256);
+  const fixed = await setPool(store, home, poolFixture, bad.sha256);
+  assert.deepEqual((await getPool(store, home)).pool, poolFixture);
+  assert.equal(fixed.sha256, (await getPool(store, home)).sha256);
 });
 
 test('legacy slp-routing.json is offered for import and never modified', async t => {
   const home = makeHome(t);
   const manager = createManager(makeDeps());
+  const store = createStateStore();
   const legacyFile = legacyPoolPath(home);
   // The on-disk legacy shape carries the wave-5 optionIds list; reads
   // normalize it to the single-option contract (wave-6 migration, ≤1).
@@ -504,19 +520,19 @@ test('legacy slp-routing.json is offered for import and never modified', async t
 
   // Absent peer-pool.json but present legacy file → legacy pool readable,
   // in its migrated optionId shape.
-  const read = await getPool(manager, home);
+  const read = await getPool(store, home);
   assert.equal(read.pool, null);
   assert.deepEqual(read.legacy, migratedPool);
   assert.equal(read.legacyError, null);
 
   // Saving the pool writes only state/peer-pool.json; legacy bytes untouched.
-  await setPool(manager, home, migratedPool, null);
+  await setPool(store, home, migratedPool, null);
   assert.equal(readFileSync(legacyFile, 'utf8'), before, 'legacy file is read-only');
-  assert.deepEqual((await getPool(manager, home)).pool, migratedPool);
+  assert.deepEqual((await getPool(store, home)).pool, migratedPool);
 
   // A malformed legacy file surfaces as legacyError, not as the pool error.
   writeFile(legacyFile, '{ not json');
-  const broken = await getPool(manager, home);
+  const broken = await getPool(store, home);
   assert.equal(broken.legacy, null);
   assert.match(broken.legacyError, /not valid JSON/);
   assert.equal(broken.error, null, 'pool file is fine — only legacy is broken');
@@ -525,6 +541,7 @@ test('legacy slp-routing.json is offered for import and never modified', async t
 test('set-peer-pool rejects malformed input and unknown keys', async t => {
   const home = makeHome(t);
   const manager = createManager(makeDeps());
+  const store = createStateStore();
   const target = targetOf(home);
   const cases = [
     ['unknown top-level key', { schemaVersion: 1, target, pool: poolFixture, expectedSha256: null, extra: 1 }],
@@ -537,10 +554,10 @@ test('set-peer-pool rejects malformed input and unknown keys', async t => {
     ['wrong schemaVersion', { schemaVersion: 2, target, pool: poolFixture, expectedSha256: null }],
   ];
   for (const [name, input] of cases) {
-    await assert.rejects(() => manager.setPeerPool(input), /invalid set-peer-pool input/, name);
+    await assert.rejects(() => store.setPeerPool(input), /invalid set-peer-pool input/, name);
   }
   await assert.rejects(
-    () => manager.getPeerPool({ schemaVersion: 1 }),
+    () => store.getPeerPool({ schemaVersion: 1 }),
     /invalid get-peer-pool input/,
   );
   assert.equal(existsSync(poolPath(home)), false, 'a rejected write never creates the file');
@@ -655,12 +672,13 @@ test('plugin PeerPool schema and package validateCatalog agree on every verdict'
 test('legacy fs failure degrades to legacyError; pool fs failure throws IO_FAILURE', async t => {
   const home = makeHome(t);
   const manager = createManager(makeDeps());
+  const store = createStateStore();
 
   // A directory where the legacy file should be: the advisory probe reports
   // the fs error as evidence and the healthy pool still answers.
   mkdirSync(legacyPoolPath(home));
-  await setPool(manager, home, poolFixture, null);
-  const read = await getPool(manager, home);
+  await setPool(store, home, poolFixture, null);
+  const read = await getPool(store, home);
   assert.deepEqual(read.pool, poolFixture);
   assert.equal(read.legacy, null);
   assert.match(read.legacyError, /unreadable|EISDIR/);
@@ -669,13 +687,13 @@ test('legacy fs failure degrades to legacyError; pool fs failure throws IO_FAILU
   // conflict, not render the pool as absent.
   rmSync(poolPath(home));
   mkdirSync(poolPath(home));
-  const err = await getPool(manager, home).catch(e => e);
+  const err = await getPool(store, home).catch(e => e);
   assert.equal(err?.name, 'OperationConflict');
   assert.equal(err?.code, 'IO_FAILURE');
   assert.match(err?.message ?? '', /unreadable|EISDIR/);
   // set-peer-pool hits the same wall at the CAS gate rather than treating the
   // unreadable file as absent.
-  const writeErr = await setPool(manager, home, poolFixture, null).catch(e => e);
+  const writeErr = await setPool(store, home, poolFixture, null).catch(e => e);
   assert.equal(writeErr?.code, 'IO_FAILURE');
 });
 
