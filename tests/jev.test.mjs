@@ -330,11 +330,54 @@ test('one bounded retry on transient failures — never a loop', async t => {
   assert.equal(calls, 2, 'at most one retry — the third call never happens');
 });
 
+test('transient retries resend the same payload with a fresh timeout and record the successful attempt', async () => {
+  const request = {
+    provider: { kind: 'typesafe', endpoint: 'https://api.typesafe.ai/v1/systemone', model: 'jev-1.13.0' },
+    key: 'synthetic-key', state: { task: 'pick' },
+    name: 'q', instructions: 'pick one', criteria: { a: 'first' },
+  };
+  const abortFail = async () => { const error = new Error('aborted'); error.name = 'AbortError'; throw error; };
+  for (const fail of [netFail, timeoutFail, abortFail, httpFetch(429), httpFetch(529)]) {
+    const calls = [];
+    const result = await askChoice(request, {
+      now: () => new Date('2026-09-22T00:00:00Z'),
+      fetchImpl: async (url, init) => {
+        calls.push({ url, ...init });
+        if (calls.length === 1) return fail();
+        return okFetch({ q: { type: 'choice', choice: 'a' } }, { model: 'jev-1.13.0' })();
+      },
+    });
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].url, request.provider.endpoint);
+    assert.equal(calls[1].url, calls[0].url);
+    assert.equal(calls[1].body, calls[0].body);
+    assert.deepEqual(calls[1].headers, calls[0].headers);
+    assert.notEqual(calls[1].signal, calls[0].signal);
+    assert.equal(result.receipt.attempts, 2);
+    assert.equal(result.receipt.issuedAt, '2026-09-22T00:00:00.000Z');
+    assert.equal(verifyReceipt(result.receipt), true);
+  }
+  let calls = 0;
+  await assert.rejects(askChoice(request, {
+    retries: 0,
+    fetchImpl: async () => { calls += 1; return netFail(); },
+  }), error => error.code === 'jev-network');
+  assert.equal(calls, 1, 'an explicit zero retry budget makes exactly one request');
+});
+
 test('malformed responses and out-of-set choices fail closed', async t => {
   const { repo, home } = fixture(t);
   catalogFixture(repo);
   jevHome(home);
-  const decide = fetchImpl => routeDecide({ repository: repo, brief: 'x' }, { home, fetchImpl });
+  const decide = async fetchImpl => {
+    let calls = 0;
+    try {
+      return await routeDecide({ repository: repo, brief: 'x' }, { home,
+        fetchImpl: async (...args) => { calls += 1; return fetchImpl(...args); } });
+    } finally {
+      assert.equal(calls, 1, 'successful HTTP responses with invalid answers or JSON are never retried');
+    }
+  };
   assert.equal(await jevCode(decide(async () => ({ ok: true, json: async () => ({ not: 'a decision' }) }))), 'jev-response');
   assert.equal(await jevCode(decide(okFetch(choiceAnswer('no-such-option')))), 'jev-invalid-choice');
   assert.equal(await jevCode(decide(okFetch({ [ROUTE_DECISION_QUESTION]: { type: 'noul', noul: 0.5 } }))), 'jev-response');

@@ -391,17 +391,10 @@ const httpError = async response => {
   return jevError('jev-http', `Jev request failed with HTTP ${response.status}${detail}`, { status: response.status });
 };
 
-export async function askJev({ provider, key, state, questions, context = {} }, { fetchImpl = fetch, timeoutMs = 5000, retries = 1, now = () => new Date() } = {}) {
-  if (typeof state !== 'string' && !record(state) && !Array.isArray(state)) throw jevError('jev-request-invalid', 'state must be a string, object or array');
-  if (!record(questions) || Object.keys(questions).length === 0) throw jevError('jev-request-invalid', 'questions must be a nonempty record');
-  for (const [name, question] of Object.entries(questions)) validateQuestion(name, question);
-  // Per-kind extras: OpenRouter pins provider.allow_fallbacks off; the
-  // native TypeSafe API has no provider field and must not receive one.
-  const body = { model: provider.model, state, questions, ...(transports[provider.kind]?.requestExtras ?? {}) };
-  // Redaction runs over the exact outbound payload — after the request is
-  // assembled, before any network call.
-  assertRedacted(body);
-  const started = Date.now();
+// HTTP delivery owns timeout creation, transport error normalization and the
+// retry budget. Successful bodies stay outside this seam: malformed JSON or
+// typed answers must fail once, never trigger another request.
+async function postDecision(provider, key, body, { fetchImpl, timeoutMs, retries }) {
   let lastError;
   for (let attempt = 1; attempt <= retries + 1; attempt += 1) {
     let response;
@@ -424,28 +417,43 @@ export async function askJev({ provider, key, state, questions, context = {} }, 
       if (attempt <= retries && retryable(lastError)) continue;
       throw lastError;
     }
-    let parsed;
-    try {
-      parsed = await response.json();
-    } catch {
-      throw jevError('jev-response', 'Jev response is not valid JSON');
-    }
-    if (!record(parsed) || !nonempty(parsed.model) || !record(parsed.answers)) throw jevError('jev-response', 'Jev response requires model and answers');
-    for (const [name, question] of Object.entries(questions)) answerValid(parsed.answers[name], question, name);
-    const issuedAt = now().toISOString();
-    const latencyMs = Date.now() - started;
-    const receipt = buildReceipt({
-      provider, state, questions, context,
-      answers: parsed.answers,
-      requestId: parsed.id,
-      responseModel: parsed.model,
-      responseProvider: parsed.provider,
-      usage: parsed.usage,
-      issuedAt, latencyMs, attempts: attempt,
-    });
-    return { answers: parsed.answers, receipt };
+    return { response, attempts: attempt };
   }
   throw lastError;
+}
+
+export async function askJev({ provider, key, state, questions, context = {} }, { fetchImpl = fetch, timeoutMs = 5000, retries = 1, now = () => new Date() } = {}) {
+  if (typeof state !== 'string' && !record(state) && !Array.isArray(state)) throw jevError('jev-request-invalid', 'state must be a string, object or array');
+  if (!record(questions) || Object.keys(questions).length === 0) throw jevError('jev-request-invalid', 'questions must be a nonempty record');
+  for (const [name, question] of Object.entries(questions)) validateQuestion(name, question);
+  // Per-kind extras: OpenRouter pins provider.allow_fallbacks off; the
+  // native TypeSafe API has no provider field and must not receive one.
+  const body = { model: provider.model, state, questions, ...(transports[provider.kind]?.requestExtras ?? {}) };
+  // Redaction runs over the exact outbound payload — after the request is
+  // assembled, before any network call.
+  assertRedacted(body);
+  const started = Date.now();
+  const { response, attempts } = await postDecision(provider, key, body, { fetchImpl, timeoutMs, retries });
+  let parsed;
+  try {
+    parsed = await response.json();
+  } catch {
+    throw jevError('jev-response', 'Jev response is not valid JSON');
+  }
+  if (!record(parsed) || !nonempty(parsed.model) || !record(parsed.answers)) throw jevError('jev-response', 'Jev response requires model and answers');
+  for (const [name, question] of Object.entries(questions)) answerValid(parsed.answers[name], question, name);
+  const issuedAt = now().toISOString();
+  const latencyMs = Date.now() - started;
+  const receipt = buildReceipt({
+    provider, state, questions, context,
+    answers: parsed.answers,
+    requestId: parsed.id,
+    responseModel: parsed.model,
+    responseProvider: parsed.provider,
+    usage: parsed.usage,
+    issuedAt, latencyMs, attempts,
+  });
+  return { answers: parsed.answers, receipt };
 }
 
 // The three typed primitives — one entry point each so future consumers
