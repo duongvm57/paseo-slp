@@ -62,9 +62,10 @@ export const emptyRoutingForm = () => ({
 export type RoutingForm = ReturnType<typeof emptyRoutingForm>;
 type RoutingRole = "supervisor" | "lead";
 
-export function useRoutingCard({ target, targetKey, statusView, callGetRoleRouting, callSetRoleRouting, catalogs, featureSets, featuresLoadingFor, update }: {
+export function useRoutingCard({ target, targetKey, isCurrentKey, statusView, callGetRoleRouting, callSetRoleRouting, catalogs, featureSets, featuresLoadingFor, update }: {
   target: TargetValue | null;
   targetKey: string | null;
+  isCurrentKey: (key: string) => boolean;
   statusView: StatusResult | null;
   callGetRoleRouting: (input: GetRoleRoutingRequest) => Promise<GetRoleRoutingResult>;
   callSetRoleRouting: (input: SetRoleRoutingRequest) => Promise<SetRoleRoutingResult>;
@@ -140,6 +141,16 @@ export function useRoutingCard({ target, targetKey, statusView, callGetRoleRouti
         : next,
     );
   }, [routing, statusView, routingDirty]);
+
+  // Transient flags are per-target: a guarded save-finally skips its busy
+  // clear when the target switched, so the switch itself releases the
+  // abandoned flag — and a "Saved" badge earned on home A must not carry
+  // over to home B. The dirty form deliberately persists across switches.
+  useEffect(() => {
+    setRoutingBusy(false);
+    setRoutingSaved(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- targetKey captures target
+  }, [targetKey]);
 
   // A model or mode pick is not a plain field write: feature defs are keyed
   // family|model|modeId, so values authored under the previous key must
@@ -230,11 +241,12 @@ export function useRoutingCard({ target, targetKey, statusView, callGetRoleRouti
   // feature-values JSON arrives here as the build's error and surfaces in
   // lastError before dispatch rather than mid-operation.
   const save = async () => {
-    if (!target) return;
+    if (!target || !targetKey) return;
     const supervisor = builds.supervisor;
     if ("error" in supervisor) { update({ lastError: supervisor.error }, target); return; }
     const lead = builds.lead;
     if ("error" in lead) { update({ lastError: lead.error }, target); return; }
+    const issueKey = targetKey;
     setRoutingBusy(true);
     try {
       const result = await callSetRoleRouting({
@@ -242,13 +254,20 @@ export function useRoutingCard({ target, targetKey, statusView, callGetRoleRouti
         target,
         routing: { schemaVersion: 1, supervisor: supervisor.choice, lead: lead.choice } as RoleRoutingValue,
       });
+      // Stale-write guard (the issueKey discipline the pool ops use): a save
+      // issued for home A must not land its routing on home B's view, clear
+      // B's dirty gate, or flash "Saved" for a write B never saw.
+      if (!isCurrentKey(issueKey)) return;
       setRouting(result.routing);
       setRoutingDirty(false);
       setRoutingSaved(true);
     } catch (error) {
       update({ lastError: errorMessage(error) }, target);
     } finally {
-      setRoutingBusy(false);
+      // A stale op must not clear the busy flag of a newer op already
+      // in-flight on the displayed target — the target-switch reset above
+      // releases the flag for the abandoned view instead.
+      if (isCurrentKey(issueKey)) setRoutingBusy(false);
     }
   };
 

@@ -449,13 +449,20 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
     } catch (error) {
       const message = errorMessage(error);
       update({ lastError: message }, target);
-      const cas = message.includes("peer pool changed");
-      setPoolError({
-        message: cas ? "The pool changed since the last read; Reload to fetch the new version." : message,
-        cas,
-      });
+      // A stale failure must not paint home A's error onto home B's card —
+      // lastError is target-bound and stays safe unguarded, but the
+      // card-local poolError must check the issue key like the success path.
+      if (isCurrentKey(issueKey)) {
+        const cas = message.includes("peer pool changed");
+        setPoolError({
+          message: cas ? "The pool changed since the last read; Reload to fetch the new version." : message,
+          cas,
+        });
+      }
     } finally {
-      setPoolSaving(false);
+      // A stale op must not clear the busy flag of a newer op in-flight on
+      // the displayed target — the target-switch reset releases it instead.
+      if (isCurrentKey(issueKey)) setPoolSaving(false);
     }
   };
 
@@ -481,9 +488,9 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
     } catch (error) {
       const message = errorMessage(error);
       update({ lastError: message }, target);
-      setPoolError({ message, cas: false });
+      if (isCurrentKey(issueKey)) setPoolError({ message, cas: false });
     } finally {
-      setPoolReloading(false);
+      if (isCurrentKey(issueKey)) setPoolReloading(false);
     }
   };
   const requestReload = (origin: "notice" | "footer") => {
@@ -516,9 +523,12 @@ export function usePeerPoolCard({ target, targetKey, isCurrentKey, callGetPeerPo
   // here too rather than copying JSON that would fail validateCatalog.
   const copyPoolJson = async () => {
     if ("error" in poolBuild) { if (target) update({ lastError: poolBuild.error }, target); return; }
+    const issueKey = targetKey;
     try {
       await copyText(JSON.stringify(poolBuild.pool, null, 2));
-      setPoolCopied(true);
+      // The clipboard write itself is target-agnostic; the "Copied"
+      // confirmation is card state and skips like every other stale paint.
+      if (issueKey === null || isCurrentKey(issueKey)) setPoolCopied(true);
     } catch (error) {
       if (target) update({ lastError: errorMessage(error) }, target);
     }

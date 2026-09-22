@@ -8,8 +8,10 @@ import { useEffect, useState } from "react";
 import type { StatusResult, TargetValue } from "../../shared/contracts.ts";
 import { errorMessage } from "../manager-state.ts";
 
-export function useLanguageCard({ target, statusView, callSetLanguage, refresh, update }: {
+export function useLanguageCard({ target, targetKey, isCurrentKey, statusView, callSetLanguage, refresh, update }: {
   target: TargetValue | null;
+  targetKey: string | null;
+  isCurrentKey: (key: string) => boolean;
   statusView: StatusResult | null;
   callSetLanguage: (input: { schemaVersion: 1; target: TargetValue; value: string | null }) => Promise<unknown>;
   refresh: (target: TargetValue) => void;
@@ -29,19 +31,32 @@ export function useLanguageCard({ target, statusView, callSetLanguage, refresh, 
     setLanguageValue(stored ?? "");
   }, [statusView, languageDirty]);
 
+  // A stale op must not clear the busy flag of a newer op on the displayed
+  // target — the target-switch reset releases the abandoned flag instead.
+  useEffect(() => {
+    setLanguageBusy(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- targetKey captures target
+  }, [targetKey]);
+
   // Toggle off applies immediately (nothing to type); toggle on waits for
   // the Apply press so an empty value is never written.
   const applyLanguage = async (value: string | null) => {
-    if (!target) return;
+    if (!target || !targetKey) return;
+    const issueKey = targetKey;
     setLanguageBusy(true);
     try {
       await callSetLanguage({ schemaVersion: 1, target, value });
+      // Stale-write guard (the issueKey discipline the pool ops use): an
+      // apply issued on the previous target must not clear the displayed
+      // target's dirty flag — the prefill effect would then overwrite its
+      // edits. refresh() itself is target-bound and safe either way.
+      if (!isCurrentKey(issueKey)) return;
       setLanguageDirty(false);
       void refresh(target);
     } catch (error) {
       update({ lastError: errorMessage(error) }, target);
     } finally {
-      setLanguageBusy(false);
+      if (isCurrentKey(issueKey)) setLanguageBusy(false);
     }
   };
 

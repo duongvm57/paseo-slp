@@ -252,9 +252,15 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
 
   const statusView = view.status;
 
+  // The stale-guard predicates are shell-owned — they read keyRef so every
+  // card hook gates its post-await writes against the DISPLAYED target, not
+  // the target the request was issued for.
+  const sameTarget = (forTarget: TargetValue): boolean => keyRef.current === targetKey(forTarget);
+  const isCurrentKey = (issueKey: string): boolean => keyRef.current === issueKey;
+
   // The language card owns its draft/apply lifecycle (prefill from status
   // until the Human edits, immediate-off toggle) — cards/language.ts.
-  const language = useLanguageCard({ target, statusView, callSetLanguage, refresh, update });
+  const language = useLanguageCard({ target, targetKey: key, isCurrentKey, statusView, callSetLanguage, refresh, update });
 
   // The routing card owns the stored value, the editable form, its
   // once-per-target load, prefill and save — cards/routing.tsx. `form` and
@@ -263,6 +269,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   const routing = useRoutingCard({
     target,
     targetKey: key,
+    isCurrentKey,
     statusView,
     callGetRoleRouting,
     callSetRoleRouting,
@@ -275,7 +282,6 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   // The Jev card owns its view, draft fields, load/save/key/test handlers
   // and target-switch reset — cards/jev.tsx. `sameTarget` is the shell-owned
   // stale-guard mechanism passed down unchanged.
-  const sameTarget = (forTarget: TargetValue): boolean => keyRef.current === targetKey(forTarget);
   const jev = useJevCard({
     target,
     targetKey: key,
@@ -291,7 +297,6 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   // state and save/reload/import/copy — cards/peer-pool.tsx. `form` and
   // `featureKeys` feed the catalog-demand computation below; the caches,
   // the issueKey stale guard and the scroll helper stay shell-owned.
-  const isCurrentKey = (issueKey: string): boolean => keyRef.current === issueKey;
   const pool = usePeerPoolCard({
     target,
     targetKey: key,

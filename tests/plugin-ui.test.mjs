@@ -1461,6 +1461,110 @@ test('target-scoped Jev reads refuse to paint a stale response over the displaye
   }
 });
 
+test('every card async completion, error and finally path is stale-guarded', () => {
+  // Regression (wave 11 stale-write fix): a target switch mid-operation must
+  // not let the old target's resolution write into the new target's card —
+  // and a stale finally must not clear a newer in-flight op's busy flag.
+  // Routing/language reuse the pool's isCurrentKey issue-key predicate; the
+  // switch-side flag reset releases whatever the skipped finally abandoned.
+  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  const routingModule = readFileSync(join(root, 'plugin/client/cards/routing.tsx'), 'utf8');
+  const languageModule = readFileSync(join(root, 'plugin/client/cards/language.ts'), 'utf8');
+  const poolModule = readFileSync(join(root, 'plugin/client/cards/peer-pool.tsx'), 'utf8');
+
+  // The shell wires the same keyRef guard to every card hook.
+  assert.ok(
+    source.includes('keyRef.current === issueKey'),
+    'the shell must wire isCurrentKey to the keyRef guard',
+  );
+  for (const call of ['useLanguageCard({', 'useRoutingCard({', 'usePeerPoolCard({']) {
+    const callSite = source.slice(source.indexOf(call), source.indexOf('});', source.indexOf(call)));
+    assert.ok(callSite.includes('isCurrentKey'), `${call} must receive the stale-guard predicate`);
+  }
+
+  // Routing save: the completion writes (stored value, dirty clear, Saved
+  // badge) sit AFTER the guard; the busy clear in finally is conditional.
+  const routingSave = routingModule.slice(
+    routingModule.indexOf('const save ='),
+    routingModule.indexOf('return {', routingModule.indexOf('const save =')),
+  );
+  const rGuard = routingSave.indexOf('!isCurrentKey(issueKey)');
+  assert.ok(rGuard !== -1, 'routing save must guard its completion writes');
+  assert.ok(
+    routingSave.indexOf('setRouting(result.routing)') > rGuard &&
+    routingSave.indexOf('setRoutingDirty(false)') > rGuard &&
+    routingSave.indexOf('setRoutingSaved(true)') > rGuard,
+    'routing save writes must come after the stale guard',
+  );
+  assert.ok(
+    routingSave.includes('if (isCurrentKey(issueKey)) setRoutingBusy(false)'),
+    'routing save finally must not clear a newer op\'s busy flag',
+  );
+
+  // Language apply: the dirty clear sits AFTER the guard; the busy clear in
+  // finally is conditional. refresh()/update() stay unguarded — both are
+  // bound to the issuing target by applyPatch.
+  const applyLanguage = languageModule.slice(
+    languageModule.indexOf('const applyLanguage'),
+    languageModule.indexOf('const onToggle'),
+  );
+  const lGuard = applyLanguage.indexOf('!isCurrentKey(issueKey)');
+  assert.ok(lGuard !== -1, 'language apply must guard its completion writes');
+  assert.ok(
+    applyLanguage.indexOf('setLanguageDirty(false)') > lGuard,
+    'language apply must not clear the displayed target\'s dirty flag on stale',
+  );
+  assert.ok(
+    applyLanguage.includes('if (isCurrentKey(issueKey)) setLanguageBusy(false)'),
+    'language apply finally must not clear a newer op\'s busy flag',
+  );
+
+  // Pool catch paths paint card-local poolError only when the key still
+  // matches, and each finally busy-clear is conditional.
+  const savePeerPool = poolModule.slice(
+    poolModule.indexOf('const savePeerPool'),
+    poolModule.indexOf('const reloadPeerPool'),
+  );
+  assert.ok(
+    savePeerPool.includes('if (isCurrentKey(issueKey))') &&
+    savePeerPool.indexOf('setPoolError({') > savePeerPool.lastIndexOf('if (isCurrentKey(issueKey)) {'),
+    'pool save catch must gate setPoolError on the displayed key',
+  );
+  assert.ok(
+    savePeerPool.includes('if (isCurrentKey(issueKey)) setPoolSaving(false)'),
+    'pool save finally must not clear a newer op\'s busy flag',
+  );
+  const reloadPeerPool = poolModule.slice(
+    poolModule.indexOf('const reloadPeerPool'),
+    poolModule.indexOf('const requestReload'),
+  );
+  assert.ok(
+    reloadPeerPool.includes('if (isCurrentKey(issueKey)) setPoolError({ message, cas: false })'),
+    'pool reload catch must gate setPoolError on the displayed key',
+  );
+  assert.ok(
+    reloadPeerPool.includes('if (isCurrentKey(issueKey)) setPoolReloading(false)'),
+    'pool reload finally must not clear a newer op\'s busy flag',
+  );
+  const copyPoolJson = poolModule.slice(
+    poolModule.indexOf('const copyPoolJson'),
+    poolModule.indexOf('return {', poolModule.indexOf('const copyPoolJson')),
+  );
+  assert.ok(
+    copyPoolJson.includes('isCurrentKey(issueKey)) setPoolCopied(true)'),
+    'the copy confirmation must be stale-guarded',
+  );
+
+  // The guarded-finally discipline needs the switch to release abandoned
+  // flags — routing and language each reset their transient flags on
+  // targetKey change (the pool card already resets everything there).
+  for (const [mod, flag] of [[routingModule, 'setRoutingBusy(false)'], [languageModule, 'setLanguageBusy(false)']]) {
+    const fxEnds = [...mod.matchAll(/\[targetKey\]\);/g)].map(m => m.index);
+    const hasReset = fxEnds.some(pos => mod.slice(Math.max(0, pos - 400), pos).includes(flag));
+    assert.ok(hasReset, `target-switch reset must release ${flag}`);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Visual-system wave — the reviewed mockup's look (nav strip, routing
 // headline, two-column profile panels, choice chips, select-box model row,
