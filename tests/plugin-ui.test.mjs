@@ -1103,7 +1103,7 @@ test('the Peer pool card authors the pool through catalog-backed pickers', () =>
   // catalog-backed pickers — hand-typed ids only when the provider lists none.
   assert.ok(peerCard.includes('PEER_SEAT_ARCHETYPES'), 'archetype list feeds Add seat');
   assert.ok(peerCard.includes('availableFamilies'), 'family picker filters on availability');
-  assert.ok(peerCard.includes('A stored mode the catalog doesn\'t list stays visible.'),
+  assert.ok(peerCard.includes('${seat.modeId} (stored)'),
     'mode picker keeps the stored-value escape hatch');
   assert.ok(peerCard.includes('thinkingOptionsFor('), 'thinking resolves via the catalog helper');
   assert.ok(peerCard.includes('"Feature values (JSON)"'), 'raw-JSON features fallback present');
@@ -1357,6 +1357,36 @@ test('seat rows key on the stable draft uid, not the editable id', () => {
   const source = readFileSync(join(root, 'plugin/client/cards/peer-pool.tsx'), 'utf8');
   assert.ok(source.includes('key={seat.uid}'), 'seat rows must key on the draft uid');
   assert.ok(!source.includes('key={`${index}:${seat.id}`}'), 'index:id key would remount on rename');
+});
+
+test('managed seats pick mode like custom; only features stay a read-only summary', () => {
+  // Wave 12 (§7.1/§7.4.B): the package owns the token set + seat id; the
+  // user binds provider/model/mode/thinking on managed seats too. Mode uses
+  // the same catalog picker + free-text fallback on both kinds — including
+  // the "(stored)" escape — and routes through setSeatField so a mode pick
+  // keeps the shared binding-reset rules. The managed branch keeps only the
+  // read-only Feature values summary.
+  const poolView = readFileSync(join(root, 'plugin/client/cards/peer-pool.tsx'), 'utf8');
+  const summaryOpen = poolView.indexOf('{managed ? (', poolView.indexOf('setSeatField(index, "modeId")'));
+  assert.ok(summaryOpen !== -1, 'managed summary block missing');
+  const modeRegion = poolView.slice(
+    poolView.indexOf('placeholder="Model ID'),
+    summaryOpen,
+  );
+  assert.ok(modeRegion.includes('value={seat.modeId}'), 'mode control missing');
+  assert.ok(
+    modeRegion.includes('onChange={setSeatField(index, "modeId")}') &&
+    modeRegion.includes('onChangeText={setSeatField(index, "modeId")}'),
+    'mode must dispatch through setSeatField (shared reset rules)',
+  );
+  assert.ok(modeRegion.includes('${seat.modeId} (stored)'), 'mode picker needs the "(stored)" escape');
+  assert.ok(!modeRegion.includes('managed'), 'the mode control must not be gated on managed');
+  // The managed block renders Feature values alone — no Mode label inside.
+  const summaryClose = poolView.indexOf('featureDefs.loading', summaryOpen);
+  const summary = poolView.slice(summaryOpen, summaryClose);
+  assert.ok(summary.includes('Feature values'), 'managed read-only feature summary missing');
+  assert.ok(!summary.includes('>Mode<'), 'managed summary must not carry the mode field');
+  assert.ok(!summary.includes('setSeatField(index, "modeId")'), 'managed summary must not edit mode');
 });
 
 test('draft uids are fresh per seat, ignored by form equality, and copied fresh', () => {

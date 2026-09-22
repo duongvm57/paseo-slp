@@ -1127,25 +1127,9 @@ export function PeerPoolCard({ colors, target, compact, statusView, jev, pool, a
                         disabled={disabled}
                       />
                     )}
-                    {managed ? (
-                      // §7.4.B — Mode and Features are the package's binding
-                      // shape for a standard seat; shown as a read-only
-                      // summary so a draft can't silently diverge.
-                      <View style={styles.field}>
-                        <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Mode</Text>
-                        <Text style={[styles.mutedSmall, { color: colors.foreground }]}>
-                          {seat.modeId !== "" ? seat.modeId : "Provider/host default"}
-                        </Text>
-                        <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Feature values</Text>
-                        <Text style={[styles.mutedSmall, { color: colors.foreground }]}>
-                          {seat.features.trim() !== ""
-                            ? seat.features
-                            : Object.keys(seat.feature).some(featureId => seat.feature[featureId] !== "")
-                              ? JSON.stringify(seat.feature)
-                              : "Provider/host default"}
-                        </Text>
-                      </View>
-                    ) : seatCatalog && seatCatalog.modes.length > 0 ? (
+                    {seatCatalog && seatCatalog.modes.length > 0 ? (
+                      // §7.4.B — Mode is a user pick on both seat kinds: the
+                      // same catalog picker and free-text fallback as Custom.
                       <View style={styles.field}>
                         <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Mode</Text>
                         <ChipSelect
@@ -1154,9 +1138,11 @@ export function PeerPoolCard({ colors, target, compact, statusView, jev, pool, a
                           options={[
                             { label: "Provider default", value: "" },
                             ...seatCatalog.modes.map(mode => ({ label: mode.label, value: mode.id })),
-                            // A stored mode the catalog doesn't list stays visible.
+                            // A stored mode the catalog doesn't list stays
+                            // visible and clearable — "(stored)" marks it as
+                            // leftover, same convention as the thinking picker.
                             ...(seat.modeId !== "" && !seatCatalog.modes.some(mode => mode.id === seat.modeId)
-                              ? [{ label: seat.modeId, value: seat.modeId }]
+                              ? [{ label: `${seat.modeId} (stored)`, value: seat.modeId }]
                               : []),
                           ]}
                           onChange={setSeatField(index, "modeId")}
@@ -1173,7 +1159,21 @@ export function PeerPoolCard({ colors, target, compact, statusView, jev, pool, a
                         disabled={disabled}
                       />
                     )}
-                    {managed ? null : featureDefs.loading ? (
+                    {managed ? (
+                      // §7.4.B — Features remain the package's binding shape
+                      // for a standard seat: read-only summary so a draft
+                      // can't silently diverge. Only features hold this lock.
+                      <View style={styles.field}>
+                        <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Feature values</Text>
+                        <Text style={[styles.mutedSmall, { color: colors.foreground }]}>
+                          {seat.features.trim() !== ""
+                            ? seat.features
+                            : Object.keys(seat.feature).some(featureId => seat.feature[featureId] !== "")
+                              ? JSON.stringify(seat.feature)
+                              : "Provider/host default"}
+                        </Text>
+                      </View>
+                    ) : featureDefs.loading ? (
                       <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>Loading features…</Text>
                     ) : null}
                     {managed ? null : featureDefs.defs.length > 0 ? (
