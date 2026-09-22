@@ -90,6 +90,33 @@ const AUTHORITY = { exclusiveAdministrativeWindow: true, verifiedHostHomeMapping
 
 type Colors = PluginTheme["colors"];
 
+// RN-web delivers `hovered`/`focused` through the Pressable style callback at
+// runtime; RN's PressableStateCallbackType declares only `pressed`, so the
+// extras are typed optional here — a host that doesn't deliver them simply
+// skips the hover/focus styling while `pressed` keeps working.
+type ControlState = { pressed: boolean; hovered?: boolean; focused?: boolean };
+
+// The host theme has no focus slot — the accent is the interactive hue and
+// carries the visible focus ring (the mockup's focus blue → colors.accent).
+// Likewise there is no accent-tint slot: tinted fills use colors.surface2
+// with the accent carried by the text/border (documented mapping).
+const focusRing = (colors: Colors) => ({
+  outlineStyle: "solid" as const,
+  outlineWidth: 3,
+  outlineColor: colors.accent,
+  outlineOffset: 2,
+});
+
+// In-surface nav — the mockup's left sidebar nav ported as an anchor strip
+// inside the routing region (the sidebar chrome itself is not ported).
+const MANAGER_SECTIONS = [
+  { id: "profiles", label: "Role profiles" },
+  { id: "pool", label: "Peer pool" },
+  { id: "language", label: "Communication language" },
+  { id: "jev", label: "Jev" },
+] as const;
+type ManagerSectionId = (typeof MANAGER_SECTIONS)[number]["id"];
+
 // ---------------------------------------------------------------------------
 // Small themed primitives — the surface uses plain React Native views rather
 // than the settings-form kit so the flow can read like a wizard.
@@ -160,11 +187,16 @@ function Button({ colors, label, onPress, disabled, kind = "ghost" }: {
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ disabled: disabled === true }}
-      style={({ pressed }) => [
+      style={(state: ControlState) => [
         styles.button,
         base,
+        // No darker-accent slot exists — a primary hover dims slightly while
+        // ghost/danger hover take the tint fill (mockup hover → surface2).
+        state.hovered && !disabled && kind !== "primary" && { backgroundColor: colors.surface2, borderColor: colors.foregroundMuted },
+        state.hovered && !disabled && kind === "primary" && { opacity: 0.88 },
+        state.focused && focusRing(colors),
         disabled && styles.buttonDisabled,
-        pressed && !disabled && { opacity: 0.75 },
+        state.pressed && !disabled && { opacity: 0.75 },
       ]}
     >
       <Text style={[styles.buttonLabel, { color: textColor }]}>{label}</Text>
@@ -186,7 +218,13 @@ function CheckRow({ colors, checked, onToggle, title, hint, disabled }: {
       disabled={disabled}
       accessibilityRole="checkbox"
       accessibilityState={{ checked, disabled: disabled === true }}
-      style={({ pressed }) => [styles.checkRow, disabled && { opacity: 0.45 }, pressed && !disabled && { opacity: 0.75 }]}
+      style={(state: ControlState) => [
+        styles.checkRow,
+        state.hovered && !disabled && { backgroundColor: colors.surface2 },
+        state.focused && focusRing(colors),
+        disabled && { opacity: 0.45 },
+        state.pressed && !disabled && { opacity: 0.75 },
+      ]}
     >
       <View style={[
         styles.checkbox,
@@ -217,7 +255,13 @@ function SwitchRow({ colors, checked, onToggle, title, hint, disabled }: {
       disabled={disabled}
       accessibilityRole="switch"
       accessibilityState={{ checked, disabled }}
-      style={({ pressed }) => [styles.checkRow, disabled && { opacity: 0.45 }, pressed && !disabled && { opacity: 0.75 }]}
+      style={(state: ControlState) => [
+        styles.checkRow,
+        state.hovered && !disabled && { backgroundColor: colors.surface2 },
+        state.focused && focusRing(colors),
+        disabled && { opacity: 0.45 },
+        state.pressed && !disabled && { opacity: 0.75 },
+      ]}
     >
       <View style={[
         styles.switchTrack,
@@ -237,15 +281,19 @@ function SwitchRow({ colors, checked, onToggle, title, hint, disabled }: {
   );
 }
 
-function ChipSelect<T extends string>({ colors, value, options, onChange, disabled }: {
+function ChipSelect<T extends string>({ colors, value, options, onChange, disabled, variant = "pill" }: {
   colors: Colors;
   value: T;
   options: readonly { label: string; value: T }[];
   onChange(next: T): void;
   disabled?: boolean;
+  // "choice" is the mockup's .choice fieldset chip — square-ish, muted until
+  // selected, then accent border/text over a tinted (surface2) fill instead
+  // of the pill's solid accent.
+  variant?: "pill" | "choice";
 }) {
   return (
-    <View style={styles.chipRow}>
+    <View style={variant === "choice" ? styles.choiceRow : styles.chipRow}>
       {options.map(option => {
         const active = option.value === value;
         return (
@@ -255,15 +303,33 @@ function ChipSelect<T extends string>({ colors, value, options, onChange, disabl
             disabled={disabled}
             accessibilityRole="button"
             accessibilityState={{ selected: active, disabled: disabled === true }}
-            style={({ pressed }) => [
-              styles.chip,
-              { borderColor: active ? colors.accent : colors.border },
-              active && { backgroundColor: colors.accent },
-              disabled && { opacity: 0.45 },
-              pressed && !disabled && { opacity: 0.75 },
-            ]}
+            style={(state: ControlState) => variant === "choice"
+              ? [
+                  styles.choice,
+                  {
+                    borderColor: active ? colors.accent : colors.border,
+                    backgroundColor: active ? colors.surface2 : colors.surface0,
+                  },
+                  state.hovered && !disabled && !active && { backgroundColor: colors.surface2 },
+                  state.focused && focusRing(colors),
+                  disabled && { opacity: 0.45 },
+                  state.pressed && !disabled && { opacity: 0.75 },
+                ]
+              : [
+                  styles.chip,
+                  { borderColor: active ? colors.accent : colors.border },
+                  active && { backgroundColor: colors.accent },
+                  state.hovered && !disabled && !active && { backgroundColor: colors.surface2 },
+                  state.focused && focusRing(colors),
+                  disabled && { opacity: 0.45 },
+                  state.pressed && !disabled && { opacity: 0.75 },
+                ]}
           >
-            <Text style={[styles.chipLabel, { color: active ? colors.accentForeground : colors.foreground }]}>
+            <Text
+              style={variant === "choice"
+                ? [styles.choiceLabel, { color: active ? colors.accent : colors.foregroundMuted }]
+                : [styles.chipLabel, { color: active ? colors.accentForeground : colors.foreground }]}
+            >
               {option.label}
             </Text>
           </Pressable>
@@ -284,6 +350,7 @@ function Field({ colors, label, hint, value, onChangeText, placeholder, disabled
   secure?: boolean;
   multiline?: boolean;
 }) {
+  const [focused, setFocused] = useState(false);
   return (
     <View style={styles.field}>
       <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>{label}</Text>
@@ -299,9 +366,11 @@ function Field({ colors, label, hint, value, onChangeText, placeholder, disabled
         multiline={multiline === true}
         accessibilityLabel={label}
         accessibilityState={{ disabled: disabled === true }}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
         style={[
           styles.input,
-          { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.surface0 },
+          { borderColor: focused ? colors.accent : colors.border, color: colors.foreground, backgroundColor: colors.surface0 },
           multiline === true && styles.inputMultiline,
           disabled && { opacity: 0.5 },
         ]}
@@ -311,8 +380,11 @@ function Field({ colors, label, hint, value, onChangeText, placeholder, disabled
   );
 }
 
-/** Searchable single-select for large catalogs (model lists reach hundreds).
- *  Shows the selection as a clearable row; expands into a filtered list. */
+/** Searchable single-select for large catalogs (model lists reach hundreds)
+ *  rendered as the mockup's select-box: a bordered row showing the current
+ *  label with a "Change model ⌄" link. Expanding opens the filter + option
+ *  list IN PLACE without clearing the value, plus a "Provider default" entry
+ *  and a manual-ID disclosure for ids the catalog doesn't list. */
 function OptionPicker({ colors, label, hint, options, value, onChange, disabled, placeholder }: {
   colors: Colors;
   label: string;
@@ -323,7 +395,11 @@ function OptionPicker({ colors, label, hint, options, value, onChange, disabled,
   disabled?: boolean;
   placeholder?: string;
 }) {
+  const [open, setOpen] = useState(false);
+  const [manualOpen, setManualOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [filterFocus, setFilterFocus] = useState(false);
+  const [manualFocus, setManualFocus] = useState(false);
   const selected = options.find(option => option.id === value);
   const filtered = query.trim() === ""
     ? options
@@ -332,64 +408,124 @@ function OptionPicker({ colors, label, hint, options, value, onChange, disabled,
   // A stored value the catalog doesn't list still displays — never let the
   // picker look empty while a real value is applied.
   const effective = selected ?? (value !== "" ? { id: value, label: value } : undefined);
-  if (effective) {
-    return (
-      <View style={styles.field}>
-        <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>{label}</Text>
-        <View style={[styles.pickerSelected, { borderColor: colors.accent, backgroundColor: colors.surface0 }]}>
-          <Text style={[styles.pickerSelectedLabel, { color: colors.foreground }]} numberOfLines={1}>
-            {effective.label !== effective.id ? `${effective.label} · ${effective.id}` : effective.id}
-          </Text>
-          <Pressable
-            onPress={() => onChange("")}
-            disabled={disabled}
-            accessibilityRole="button"
-            accessibilityLabel={`Change ${label}`}
-            style={({ pressed }) => [pressed && { opacity: 0.6 }]}
-          >
-            <Text style={[styles.pickerClear, { color: colors.accent }]}>Change</Text>
-          </Pressable>
-        </View>
-        {hint ? <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>{hint}</Text> : null}
-      </View>
-    );
-  }
+  const pick = (next: string) => {
+    onChange(next);
+    setOpen(false);
+    setQuery("");
+  };
   return (
     <View style={styles.field}>
       <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>{label}</Text>
-      <TextInput
-        value={query}
-        onChangeText={setQuery}
-        placeholder={placeholder ?? "Filter…"}
-        placeholderTextColor={colors.foregroundMuted}
-        editable={!disabled}
-        autoCapitalize="none"
-        autoCorrect={false}
-        accessibilityLabel={`Filter ${label}`}
-        style={[styles.input, { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.surface0 }, disabled && { opacity: 0.5 }]}
-      />
-      <ScrollView style={[styles.pickerList, { borderColor: colors.border, backgroundColor: colors.surface0 }]} nestedScrollEnabled>
-        {shown.map(option => (
-          <Pressable
-            key={option.id}
-            onPress={() => onChange(option.id)}
-            disabled={disabled}
-            accessibilityRole="button"
-            accessibilityLabel={`Select ${option.label !== option.id ? `${option.label} ${option.id}` : option.id}`}
-            style={({ pressed }) => [styles.pickerRow, pressed && { backgroundColor: colors.surface2 }]}
-          >
-            <Text style={[styles.pickerRowLabel, { color: colors.foreground }]} numberOfLines={1}>
-              {option.label !== option.id ? `${option.label} · ${option.id}` : option.id}
+      <View style={[styles.selectBox, { borderColor: colors.border, backgroundColor: colors.surface0 }]}>
+        <Pressable
+          onPress={() => { setOpen(current => !current); setQuery(""); }}
+          disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel={open ? `Close ${label}` : `Change ${label.toLowerCase()}`}
+          accessibilityState={{ expanded: open, disabled: disabled === true }}
+          style={(state: ControlState) => [
+            styles.selectBoxRow,
+            state.hovered && !disabled && { backgroundColor: colors.surface2 },
+            // The select-box clips its children — the ring insets instead of
+            // drawing outside where overflow:hidden would erase it.
+            state.focused && { ...focusRing(colors), outlineOffset: -2 },
+          ]}
+        >
+          <Text style={[styles.pickerSelectedLabel, { color: colors.foreground, fontWeight: "600" }]} numberOfLines={1}>
+            {effective ? (effective.label !== effective.id ? `${effective.label} · ${effective.id}` : effective.id) : "Provider default"}
+          </Text>
+          <Text style={[styles.selectBoxLink, { color: colors.accent }]}>
+            {open ? "Close ⌃" : `Change ${label.toLowerCase()} ⌄`}
+          </Text>
+        </Pressable>
+        {open ? (
+          <View style={[styles.modelList, { borderTopColor: colors.border }]}>
+            <TextInput
+              value={query}
+              onChangeText={setQuery}
+              placeholder={placeholder ?? "Filter…"}
+              placeholderTextColor={colors.foregroundMuted}
+              editable={!disabled}
+              autoCapitalize="none"
+              autoCorrect={false}
+              accessibilityLabel={`Filter ${label}`}
+              onFocus={() => setFilterFocus(true)}
+              onBlur={() => setFilterFocus(false)}
+              style={[styles.input, { borderColor: filterFocus ? colors.accent : colors.border, color: colors.foreground, backgroundColor: colors.surface0 }, disabled && { opacity: 0.5 }]}
+            />
+            <ScrollView style={{ maxHeight: 220 }} nestedScrollEnabled>
+              {shown.map(option => (
+                <Pressable
+                  key={option.id}
+                  onPress={() => pick(option.id)}
+                  disabled={disabled}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Select ${option.label !== option.id ? `${option.label} ${option.id}` : option.id}`}
+                  style={(state: ControlState) => [
+                    styles.pickerRow,
+                    (state.hovered || state.pressed) && !disabled && { backgroundColor: colors.surface2 },
+                    state.focused && focusRing(colors),
+                  ]}
+                >
+                  <Text style={[styles.pickerRowLabel, { color: colors.foreground }]} numberOfLines={1}>
+                    {option.label !== option.id ? `${option.label} · ${option.id}` : option.id}
+                  </Text>
+                </Pressable>
+              ))}
+              <Pressable
+                onPress={() => pick("")}
+                disabled={disabled}
+                accessibilityRole="button"
+                accessibilityLabel="Select Provider default"
+                style={(state: ControlState) => [
+                  styles.pickerRow,
+                  (state.hovered || state.pressed) && !disabled && { backgroundColor: colors.surface2 },
+                  state.focused && focusRing(colors),
+                ]}
+              >
+                <Text style={[styles.pickerRowLabel, { color: colors.foregroundMuted }]}>Provider default</Text>
+              </Pressable>
+              {filtered.length === 0 ? (
+                <Text style={[styles.mutedSmall, { color: colors.foregroundMuted, padding: 10 }]}>No matches.</Text>
+              ) : null}
+            </ScrollView>
+            <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+              {filtered.length} option{filtered.length === 1 ? "" : "s"}{filtered.length > shown.length ? ` — showing first ${shown.length}` : ""}
             </Text>
-          </Pressable>
-        ))}
-        {filtered.length === 0 ? (
-          <Text style={[styles.mutedSmall, { color: colors.foregroundMuted, padding: 10 }]}>No matches.</Text>
+            <Pressable
+              onPress={() => setManualOpen(current => !current)}
+              disabled={disabled}
+              accessibilityRole="button"
+              accessibilityLabel="Enter model ID manually"
+              accessibilityState={{ expanded: manualOpen, disabled: disabled === true }}
+              style={(state: ControlState) => [
+                styles.pickerRow,
+                (state.hovered || state.pressed) && !disabled && { backgroundColor: colors.surface2 },
+                state.focused && focusRing(colors),
+              ]}
+            >
+              <Text style={[styles.mutedSmall, { color: colors.accent, fontWeight: "600" }]}>
+                {manualOpen ? "▾" : "▸"} Enter model ID manually
+              </Text>
+            </Pressable>
+            {manualOpen ? (
+              <TextInput
+                value={value}
+                onChangeText={onChange}
+                placeholder="Model ID — e.g. swe-2-max"
+                placeholderTextColor={colors.foregroundMuted}
+                editable={!disabled}
+                autoCapitalize="none"
+                autoCorrect={false}
+                accessibilityLabel={`${label} ID`}
+                onFocus={() => setManualFocus(true)}
+                onBlur={() => setManualFocus(false)}
+                style={[styles.input, { borderColor: manualFocus ? colors.accent : colors.border, color: colors.foreground, backgroundColor: colors.surface0 }, disabled && { opacity: 0.5 }]}
+              />
+            ) : null}
+          </View>
         ) : null}
-      </ScrollView>
-      <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-        {filtered.length} option{filtered.length === 1 ? "" : "s"}{filtered.length > shown.length ? ` — showing first ${shown.length}` : ""}
-      </Text>
+      </View>
       {hint ? <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>{hint}</Text> : null}
     </View>
   );
@@ -409,7 +545,12 @@ function Collapse({ colors, title, subtitle, open, onToggle, children }: {
         onPress={() => onToggle(!open)}
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
-        style={({ pressed }) => [styles.collapseHeader, pressed && { opacity: 0.75 }]}
+        style={(state: ControlState) => [
+          styles.collapseHeader,
+          state.hovered && { backgroundColor: colors.surface2 },
+          state.focused && focusRing(colors),
+          state.pressed && { opacity: 0.75 },
+        ]}
       >
         <Text style={[styles.collapseChevron, { color: colors.foregroundMuted }]}>{open ? "▾" : "▸"}</Text>
         <View style={styles.collapseHeaderText}>
@@ -455,7 +596,12 @@ function SeatTemplateRow({ colors, archetype, exists, onAdd, onCustom, disabled 
           accessibilityRole="button"
           accessibilityLabel="Notes and custom option"
           accessibilityState={{ expanded: notesOpen }}
-          style={({ pressed }) => [pressed && { opacity: 0.6 }]}
+          style={(state: ControlState) => [
+            { borderRadius: 6, paddingVertical: 3, paddingHorizontal: 6, marginLeft: -6 },
+            state.hovered && { backgroundColor: colors.surface2 },
+            state.focused && focusRing(colors),
+            state.pressed && { opacity: 0.6 },
+          ]}
         >
           <Text style={[styles.mutedSmall, { color: colors.accent }]}>
             {notesOpen ? "Hide notes" : "Notes & custom option"}
@@ -511,16 +657,16 @@ const styles = StyleSheet.create({
   headerRow: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
   pageTitle: { fontSize: 22, fontWeight: "700" },
   card: { borderWidth: 1, borderRadius: 12, padding: 14, gap: 10 },
-  cardTitle: { fontSize: 15, fontWeight: "600" },
-  muted: { fontSize: 13, lineHeight: 18 },
+  cardTitle: { fontSize: 20, fontWeight: "600" },
+  muted: { fontSize: 14, lineHeight: 21 },
   mutedSmall: { fontSize: 12, lineHeight: 16 },
-  button: { borderWidth: 1, borderRadius: 9, paddingVertical: 9, paddingHorizontal: 16, alignItems: "center", alignSelf: "flex-start" },
-  buttonDisabled: { opacity: 0.4 },
+  button: { borderWidth: 1, borderRadius: 7, paddingVertical: 8, paddingHorizontal: 12, alignItems: "center", alignSelf: "flex-start" },
+  buttonDisabled: { opacity: 0.45 },
   buttonLabel: { fontSize: 14, fontWeight: "600" },
-  checkRow: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
+  checkRow: { flexDirection: "row", alignItems: "flex-start", gap: 10, borderRadius: 6, padding: 2 },
   checkbox: { width: 20, height: 20, borderWidth: 1.5, borderRadius: 5, alignItems: "center", justifyContent: "center", marginTop: 1 },
-  switchTrack: { width: 38, height: 22, borderRadius: 11, justifyContent: "center", paddingHorizontal: 3, marginTop: 1 },
-  switchThumb: { width: 16, height: 16, borderRadius: 8 },
+  switchTrack: { width: 32, height: 20, borderRadius: 10, justifyContent: "center", paddingHorizontal: 3, marginTop: 1 },
+  switchThumb: { width: 14, height: 14, borderRadius: 7 },
   switchThumbOn: { alignSelf: "flex-end" },
   switchThumbOff: { alignSelf: "flex-start" },
   checkmark: { fontSize: 13, fontWeight: "700" },
@@ -531,11 +677,11 @@ const styles = StyleSheet.create({
   chipLabel: { fontSize: 13, fontWeight: "500" },
   field: { gap: 5 },
   fieldLabel: { fontSize: 13, fontWeight: "500" },
-  roleBox: { borderWidth: 1, borderRadius: 10, padding: 12, gap: 10 },
+  roleBox: { borderWidth: 1, borderRadius: 8, padding: 12, gap: 10 },
   roleTitle: { fontSize: 14, fontWeight: "600" },
-  input: { borderWidth: 1, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 10, fontSize: 14 },
+  input: { borderWidth: 1, borderRadius: 6, paddingVertical: 8, paddingHorizontal: 10, fontSize: 14 },
   inputMultiline: { minHeight: 72, textAlignVertical: "top" },
-  collapseHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
+  collapseHeader: { flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 6, padding: 2 },
   collapseChevron: { fontSize: 14, width: 14 },
   collapseHeaderText: { flex: 1, gap: 2 },
   collapseBody: { gap: 10, paddingTop: 2 },
@@ -546,10 +692,7 @@ const styles = StyleSheet.create({
   pillLabel: { fontSize: 12, fontWeight: "700", letterSpacing: 0.4 },
   conflictBox: { borderWidth: 1, borderRadius: 8, padding: 10, gap: 6 },
   divider: { borderTopWidth: 1, marginVertical: 2 },
-  pickerSelected: { borderWidth: 1, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 10, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
   pickerSelectedLabel: { fontSize: 14, flexShrink: 1 },
-  pickerClear: { fontSize: 13, fontWeight: "600" },
-  pickerList: { borderWidth: 1, borderRadius: 8, maxHeight: 220 },
   pickerRow: { paddingVertical: 8, paddingHorizontal: 10 },
   pickerRowLabel: { fontSize: 13 },
   // Draft-clarity mockup tokens mapped onto host theme slots — card-head
@@ -557,7 +700,7 @@ const styles = StyleSheet.create({
   cardHeadRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   badge: { borderWidth: 1, borderRadius: 5, paddingVertical: 2, paddingHorizontal: 7 },
   badgeLabel: { fontSize: 11, fontWeight: "700", lineHeight: 16 },
-  eyebrow: { fontSize: 11, fontWeight: "700", letterSpacing: 1.2, textTransform: "uppercase" },
+  eyebrow: { fontSize: 11, fontWeight: "700", letterSpacing: 1.6, textTransform: "uppercase" },
   noticeBox: { borderWidth: 1, borderRadius: 8, padding: 12, gap: 6 },
   confirmBox: { borderWidth: 1, borderRadius: 7, padding: 12, gap: 8 },
   mono: { fontFamily: "monospace" },
@@ -565,6 +708,28 @@ const styles = StyleSheet.create({
   savedProvider: { borderLeftWidth: 3, borderRadius: 6, padding: 12, gap: 4 },
   seatState: { fontSize: 12, lineHeight: 16, fontWeight: "600" },
   pickRow: { borderTopWidth: 1, paddingVertical: 10, gap: 6 },
+  // Visual-system wave — routing headline, in-surface nav strip, the
+  // two-column profile panels, choice chips, and the select-box model row.
+  // All geometry/type from manager-reviewed.html; fills map to surface2
+  // (no accent-tint slot) and the focus ring to accent (no focus slot).
+  routingHeadline: { fontSize: 27, fontWeight: "700", letterSpacing: -0.5, lineHeight: 33 },
+  navStrip: { flexDirection: "row", flexWrap: "wrap", gap: 4 },
+  navItem: { paddingVertical: 9, paddingHorizontal: 12, borderRadius: 6 },
+  navItemCompact: { paddingVertical: 5, paddingHorizontal: 8 },
+  navLabel: { fontSize: 13, fontWeight: "500" },
+  profileGrid: { gap: 18 },
+  profilePanel: { borderWidth: 1, borderRadius: 9, padding: 18, gap: 10 },
+  profileHeading: { borderBottomWidth: 1, paddingBottom: 13, marginBottom: 5, gap: 3 },
+  profileRole: { fontSize: 17, fontWeight: "600" },
+  profileFeature: { borderRadius: 7, padding: 11 },
+  legend: { fontSize: 12, fontWeight: "700" },
+  choiceRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  choice: { borderWidth: 1, borderRadius: 6, paddingVertical: 6, paddingHorizontal: 9 },
+  choiceLabel: { fontSize: 12, fontWeight: "500" },
+  selectBox: { borderWidth: 1, borderRadius: 7, overflow: "hidden" },
+  selectBoxRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, paddingVertical: 10, paddingHorizontal: 11 },
+  selectBoxLink: { fontSize: 12, fontWeight: "600" },
+  modelList: { borderTopWidth: 1, padding: 10, gap: 6 },
 });
 
 // ---------------------------------------------------------------------------
@@ -731,6 +896,28 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   const lookupRefs = useRef(new Map<number, View | null>());
   const definitionRefs = useRef(new Map<number, View | null>());
   const keepEditsRef = useRef<View | null>(null);
+  // In-surface section nav (mockup sidebar → anchor strip): each routing card
+  // records its content offset via onLayout, the root ScrollView scrolls to
+  // it, and onScroll marks the last section whose top passed the viewport.
+  const rootScrollRef = useRef<ScrollView | null>(null);
+  const sectionTops = useRef<Partial<Record<ManagerSectionId, number>>>({});
+  const [activeSection, setActiveSection] = useState<ManagerSectionId>("profiles");
+  const scrollToSection = (id: ManagerSectionId) => {
+    const top = sectionTops.current[id];
+    if (top !== undefined) rootScrollRef.current?.scrollTo({ y: Math.max(0, top - 12), animated: true });
+  };
+  const onRootScroll = (event: { nativeEvent: { contentOffset: { y: number } } }) => {
+    const y = event.nativeEvent.contentOffset.y;
+    let current: ManagerSectionId = "profiles";
+    for (const section of MANAGER_SECTIONS) {
+      const top = sectionTops.current[section.id];
+      if (top !== undefined && top <= y + 40) current = section.id;
+    }
+    setActiveSection(previous => (previous === current ? previous : current));
+  };
+  // Role profiles: the mockup's two-column .profile-grid, measured on the
+  // card body container (never the window) — two panels ≥700px, else stacked.
+  const [profilePanelWide, setProfilePanelWide] = useState(false);
   const scrollFocusNode = (node: unknown, focus = false) => {
     const dom = node as { scrollIntoView?: (options?: { block?: string }) => void; focus?: () => void } | null;
     dom?.scrollIntoView?.({ block: "nearest" });
@@ -1812,7 +1999,12 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   };
 
   return (
-    <ScrollView contentContainerStyle={{ padding: compact ? 12 : 24, gap: compact ? 12 : 16 }}>
+    <ScrollView
+      ref={rootScrollRef}
+      onScroll={onRootScroll}
+      scrollEventThrottle={100}
+      contentContainerStyle={{ padding: compact ? 12 : 24, gap: compact ? 12 : 16 }}
+    >
       <View style={styles.headerRow}>
         <View style={{ flex: 1, gap: 4 }}>
           <Text style={[styles.pageTitle, { color: colors.foreground }]}>SLP</Text>
@@ -1958,6 +2150,54 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
       </Card>
 
       {statusView ? (
+        // The routing region's own intro — the mockup's .route-intro eyebrow +
+        // headline + sub-copy, then the sidebar nav ported as an in-surface
+        // anchor strip (scroll actions, not routes). The host SLP header and
+        // the prototype's sidebar chrome stay outside this surface.
+        <View style={{ gap: compact ? 8 : 12 }}>
+          <View style={{ gap: 4 }}>
+            <Text style={[styles.eyebrow, { color: colors.foregroundMuted }]}>Routing configuration</Text>
+            <Text style={[styles.routingHeadline, { color: colors.foreground }]}>Peer routing configuration</Text>
+            <Text style={[styles.muted, { color: colors.foregroundMuted }]}>
+              Review the draft. Save when the whole pool is ready.
+            </Text>
+          </View>
+          <View role="navigation" accessibilityLabel="Manager sections" style={styles.navStrip}>
+            {MANAGER_SECTIONS.map(section => {
+              const active = activeSection === section.id;
+              return (
+                <Pressable
+                  key={section.id}
+                  onPress={() => scrollToSection(section.id)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Go to ${section.label}`}
+                  accessibilityState={{ selected: active }}
+                  style={(state: ControlState) => [
+                    styles.navItem,
+                    compact && styles.navItemCompact,
+                    (active || (state.hovered && !active)) && { backgroundColor: colors.surface2 },
+                    state.focused && focusRing(colors),
+                    state.pressed && { opacity: 0.75 },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.navLabel,
+                      compact && { fontSize: 12 },
+                      { color: active ? colors.accent : colors.foregroundMuted },
+                      active && { fontWeight: "700" },
+                    ]}
+                  >
+                    {section.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      ) : null}
+
+      {statusView ? (
         // ONE card edits the full profile each role binds — family, model,
         // mode, feature values, thinking option — behind one Save issuing a
         // single set-role-routing call with the full routing object
@@ -1968,11 +2208,16 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
         // card. The peer note lives inside this card because it scopes what
         // routing does NOT configure; a separate card would orphan one line
         // of disclosure.
+        <View onLayout={event => { sectionTops.current.profiles = event.nativeEvent.layout.y; }}>
         <Card
           colors={colors}
           title="Role profiles"
           subtitle="The provider, model, mode, feature values, and thinking option each role's profile binds — applied at the next activation."
         >
+          <View
+            style={[styles.profileGrid, { flexDirection: profilePanelWide ? "row" : "column", alignItems: "flex-start" }]}
+            onLayout={event => setProfilePanelWide(event.nativeEvent.layout.width >= 700)}
+          >
           {(["supervisor", "lead"] as const).map(role => {
             const form = routingForm[role];
             const roleCatalog = catalogs[form.family];
@@ -1980,14 +2225,23 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
             const featureDefs = featureDefsFor(role);
             const disabled = !target || routingBusy;
             return (
-              <View key={role} style={[styles.roleBox, { borderColor: colors.border }]}>
-                <Text style={[styles.roleTitle, { color: colors.foreground }]}>
-                  {role === "supervisor" ? "SLP Supervisor" : "SLP Lead"}
-                </Text>
+              <View
+                key={role}
+                style={[styles.profilePanel, { borderColor: colors.border, backgroundColor: colors.surface0 }, profilePanelWide && { flex: 1, minWidth: 0 }]}
+              >
+                <View style={[styles.profileHeading, { borderBottomColor: colors.border }]}>
+                  <Text style={[styles.profileRole, { color: colors.foreground }]}>
+                    {role === "supervisor" ? "SLP Supervisor" : "SLP Lead"}
+                  </Text>
+                  <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                    {role === "supervisor" ? "Supervision and review" : "Task planning and delegation"}
+                  </Text>
+                </View>
                 <View style={styles.field}>
-                  <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Provider family</Text>
+                  <Text style={[styles.legend, { color: colors.foregroundMuted }]}>Provider family</Text>
                   <ChipSelect
                     colors={colors}
+                    variant="choice"
                     value={form.family}
                     options={FAMILY_PICKER_ORDER.map(entry => ({
                       label: FAMILY_LABEL[entry],
@@ -2031,9 +2285,10 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                 )}
                 {roleCatalog && roleCatalog.modes.length > 0 ? (
                   <View style={styles.field}>
-                    <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Mode</Text>
+                    <Text style={[styles.legend, { color: colors.foregroundMuted }]}>Mode</Text>
                     <ChipSelect
                       colors={colors}
+                      variant="choice"
                       value={form.modeId}
                       options={[
                         { label: "Provider default", value: "" },
@@ -2062,9 +2317,11 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                 ) : null}
                 {featureDefs.defs.length > 0 ? (
                   featureDefs.defs.map(def => (
-                    def.type === "toggle" ? (
+                    // The mockup's .profile-feature tinted box around each
+                    // provider feature control.
+                    <View key={def.id} style={[styles.profileFeature, { backgroundColor: colors.surface2 }]}>
+                    {def.type === "toggle" ? (
                       <SwitchRow
-                        key={def.id}
                         colors={colors}
                         checked={(form.feature[def.id] ?? "") === "" ? def.value : form.feature[def.id] === "true"}
                         onToggle={next => setRoutingFeature(role, def.id)(String(next))}
@@ -2073,10 +2330,11 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                         disabled={disabled}
                       />
                     ) : (
-                      <View key={def.id} style={styles.field}>
-                        <Text style={[styles.fieldLabel, { color: colors.foreground }]}>{def.label}</Text>
+                      <View style={styles.field}>
+                        <Text style={[styles.legend, { color: colors.foregroundMuted }]}>{def.label}</Text>
                         <ChipSelect
                           colors={colors}
+                          variant="choice"
                           value={form.feature[def.id] ?? ""}
                           options={[
                             { label: "Provider default", value: "" },
@@ -2089,7 +2347,8 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                           <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>{def.description}</Text>
                         ) : null}
                       </View>
-                    )
+                    )}
+                    </View>
                   ))
                 ) : (
                   <>
@@ -2133,7 +2392,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                   />
                 ) : thinking.options.length > 0 || form.thinkingOptionId !== "" ? (
                   <View style={styles.field}>
-                    <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Thinking option</Text>
+                    <Text style={[styles.legend, { color: colors.foregroundMuted }]}>Thinking option</Text>
                     <ChipSelect
                       colors={colors}
                       value={form.thinkingOptionId}
@@ -2168,7 +2427,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                   // bakes thinking into model ids) — no free text to type
                   // garbage into.
                   <View style={styles.field}>
-                    <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Thinking option</Text>
+                    <Text style={[styles.legend, { color: colors.foregroundMuted }]}>Thinking option</Text>
                     <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
                       This model declares no thinking options
                     </Text>
@@ -2177,6 +2436,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
               </View>
             );
           })}
+          </View>
           <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
             Peers are pool-driven — each Lead delegation picks a family, so all four managed
             peer providers stay generated; the picks above are the only routed roles.
@@ -2205,6 +2465,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
             onPress={() => void saveRouting()}
           />
         </Card>
+        </View>
       ) : null}
 
       {target ? (
@@ -2213,6 +2474,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
         // .paseo-slp/slp-routing.json. This card is its sole writer; it loads
         // with the target (independent of binding, like the Jev card) and a
         // save takes effect the next time a Lead reads `routes`.
+        <View onLayout={event => { sectionTops.current.pool = event.nativeEvent.layout.y; }}>
         <Card
           colors={colors}
           title="Peer pool"
@@ -2344,7 +2606,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                       onPress={() => setPoolReloadConfirm(null)}
                       accessibilityRole="button"
                       accessibilityLabel="Keep current edits"
-                      style={({ pressed }) => [styles.button, { backgroundColor: colors.accent, borderColor: colors.accent }, pressed && { opacity: 0.75 }]}
+                      style={(state: ControlState) => [styles.button, { backgroundColor: colors.accent, borderColor: colors.accent }, state.hovered && { opacity: 0.88 }, state.focused && focusRing(colors), state.pressed && { opacity: 0.75 }]}
                     >
                       <Text style={[styles.buttonLabel, { color: colors.accentForeground }]}>Keep current edits</Text>
                     </Pressable>
@@ -2446,6 +2708,12 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                         }}
                         accessibilityRole="button"
                         accessibilityLabel={`Define ${token}`}
+                        style={(state: ControlState) => [
+                          { borderRadius: 4, paddingHorizontal: 2 },
+                          state.hovered && { backgroundColor: colors.surface2 },
+                          state.focused && focusRing(colors),
+                          state.pressed && { opacity: 0.7 },
+                        ]}
                       >
                         <Text style={[styles.tokenText, {
                           color: marked === "−" ? colors.statusDanger
@@ -2469,16 +2737,33 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
               <View
                 key={seat.uid}
                 ref={node => { seatRowRefs.current.set(index, node); }}
-                style={[styles.roleBox, { borderColor: conflict ? colors.statusDanger : colors.border }]}
+                style={[styles.roleBox, { borderColor: conflict ? colors.statusDanger : open ? colors.accent : colors.border }, open && { borderWidth: 2, padding: 11 }]}
               >
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                {/* .seat.open — the accent border above plus the accent-tinted
+                    header row (surface2 fill + accent bottom rule). */}
+                <View style={[
+                  { flexDirection: "row", alignItems: "center", gap: 10 },
+                  open && {
+                    backgroundColor: colors.surface2,
+                    marginTop: -11, marginHorizontal: -11,
+                    paddingTop: 11, paddingHorizontal: 11, paddingBottom: 10,
+                    borderTopLeftRadius: 7, borderTopRightRadius: 7,
+                    borderBottomWidth: 1, borderBottomColor: colors.accent,
+                  },
+                ]}>
                   <Pressable
                     onPress={() => setSeatEnabled(index)(!seat.enabled)}
                     disabled={disabled}
                     accessibilityRole="switch"
                     accessibilityLabel={`Enable ${seat.id || "unnamed seat"} in draft`}
                     accessibilityState={{ checked: seat.enabled, disabled }}
-                    style={[styles.switchTrack, { backgroundColor: seat.enabled ? colors.accent : colors.border }]}
+                    style={(state: ControlState) => [
+                      styles.switchTrack,
+                      { backgroundColor: seat.enabled ? colors.accent : colors.border },
+                      state.hovered && !disabled && { opacity: 0.85 },
+                      state.focused && focusRing(colors),
+                      state.pressed && !disabled && { opacity: 0.75 },
+                    ]}
                   >
                     <View style={[
                       styles.switchThumb,
@@ -2491,7 +2776,11 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                     accessibilityRole="button"
                     accessibilityLabel={`${open ? "Close" : "Open"} editor for ${seat.id || "unnamed seat"}`}
                     accessibilityState={{ expanded: open }}
-                    style={{ flex: 1, gap: 2 }}
+                    style={(state: ControlState) => [
+                      { flex: 1, gap: 2, borderRadius: 6, padding: 4, margin: -4 },
+                      state.hovered && !open && { backgroundColor: colors.surface2 },
+                      state.focused && focusRing(colors),
+                    ]}
                   >
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                       <Text style={[styles.roleTitle, styles.mono, { color: colors.foreground }]} numberOfLines={1}>
@@ -3024,7 +3313,14 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                                   }}
                                   accessibilityRole="button"
                                   accessibilityLabel={`Define ${token.id}`}
-                                  style={[styles.chip, tokenLookupToken === token.id && { borderColor: colors.accent }]}
+                                  accessibilityState={{ selected: tokenLookupToken === token.id }}
+                                  style={(state: ControlState) => [
+                                    styles.chip,
+                                    tokenLookupToken === token.id && { borderColor: colors.accent, backgroundColor: colors.surface2 },
+                                    state.hovered && { backgroundColor: colors.surface2 },
+                                    state.focused && focusRing(colors),
+                                    state.pressed && { opacity: 0.75 },
+                                  ]}
                                 >
                                   <Text style={[styles.chipLabel, styles.mono, { color: colors.foreground }]}>{token.id}</Text>
                                 </Pressable>
@@ -3300,7 +3596,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
                     onPress={() => setPoolReloadConfirm(null)}
                     accessibilityRole="button"
                     accessibilityLabel="Keep current edits"
-                    style={({ pressed }) => [styles.button, { backgroundColor: colors.accent, borderColor: colors.accent }, pressed && { opacity: 0.75 }]}
+                    style={(state: ControlState) => [styles.button, { backgroundColor: colors.accent, borderColor: colors.accent }, state.hovered && { opacity: 0.88 }, state.focused && focusRing(colors), state.pressed && { opacity: 0.75 }]}
                   >
                     <Text style={[styles.buttonLabel, { color: colors.accentForeground }]}>Keep current edits</Text>
                   </Pressable>
@@ -3315,9 +3611,11 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
             ) : null}
           </View>
         </Card>
+        </View>
       ) : null}
 
       {statusView ? (
+        <View onLayout={event => { sectionTops.current.language = event.nativeEvent.layout.y; }}>
         <Card
           colors={colors}
           title="Communication language"
@@ -3362,6 +3660,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
             </>
           ) : null}
         </Card>
+        </View>
       ) : null}
 
       {target ? (
@@ -3373,6 +3672,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
         // effect at the NEXT preparation — a running session is never
         // mutated. The key is write-only: the card reports hasKey, never the
         // value.
+        <View onLayout={event => { sectionTops.current.jev = event.nativeEvent.layout.y; }}>
         <Card
           colors={colors}
           title="Jev"
@@ -3573,6 +3873,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
             </>
           )}
         </Card>
+        </View>
       ) : null}
 
       <Collapse

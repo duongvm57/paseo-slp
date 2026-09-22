@@ -704,7 +704,9 @@ test('the routing UI is one card with one save and one divergence warning', () =
   // binds; the old per-role card titles and the separate peer card are gone.
   // The "routing" metaphor is retired from the card title only — the stored
   // artifact keeps its role-routing file/RPC names.
-  assert.equal(occurrences(source, '"Role profiles"'), 1, 'exactly one Role profiles card title');
+  // The nav strip's "Role profiles" anchor label is the only other use.
+  assert.equal(occurrences(source, 'title="Role profiles"'), 1, 'exactly one Role profiles card title');
+  assert.ok(occurrences(source, '"Role profiles"') <= 2, 'card title + nav label');
   assert.equal(occurrences(source, '"Role providers"'), 0);
   assert.equal(occurrences(source, '"Role routing"'), 0);
   assert.equal(occurrences(source, '"Supervisor routing"'), 0);
@@ -1308,4 +1310,124 @@ test('target-scoped Jev reads refuse to paint a stale response over the displaye
   for (const reset of ['setJevDirty(false)', 'setJevBusy(false)', 'setJevKeyBusy(false)', 'setJevTestBusy(false)']) {
     assert.ok(resetBlock.includes(reset), `target-switch reset must drop ${reset}`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Visual-system wave — the reviewed mockup's look (nav strip, routing
+// headline, two-column profile panels, choice chips, select-box model row,
+// hover/focus/pressed/disabled states) ported onto host theme slots.
+// ---------------------------------------------------------------------------
+
+test('the in-surface nav strip anchors the four routing sections in order', () => {
+  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  // Four items in the fixed section order.
+  const nav = source.slice(source.indexOf('MANAGER_SECTIONS = ['), source.indexOf('] as const'));
+  for (const label of ['"Role profiles"', '"Peer pool"', '"Communication language"', '"Jev"']) {
+    assert.ok(nav.includes(`label: ${label}`), `nav item missing: ${label}`);
+  }
+  const order = ['profiles', 'pool', 'language', 'jev'].map(id => nav.indexOf(`id: "${id}"`));
+  assert.deepEqual([...order].sort((a, b) => a - b), order, 'nav order must be profiles → pool → language → jev');
+  // Navigation container semantics + per-item selected state.
+  assert.ok(source.includes('accessibilityLabel="Manager sections"'), 'nav a11y label missing');
+  assert.ok(source.includes('role="navigation"'), 'nav must use a navigation container role');
+  assert.ok(source.includes('accessibilityState={{ selected: active }}'), 'nav items must expose selected state');
+  // Anchors scroll the root ScrollView to measured card offsets.
+  assert.ok(source.includes('sectionTops.current'), 'section offset map missing');
+  assert.ok(source.includes('onLayout'), 'cards must measure their offset via onLayout');
+  assert.ok(source.includes('scrollToSection(section.id)'), 'nav press must scroll to the section');
+  assert.ok(source.includes('scrollTo({ y:'), 'root scrollTo missing');
+  assert.ok(source.includes('onScroll={onRootScroll}'), 'scroll handler wiring missing');
+  assert.ok(source.includes('scrollEventThrottle={100}'), 'scroll throttle missing');
+  // Active section is the last section whose top passed the scroll offset.
+  assert.ok(source.includes('contentOffset.y'), 'active-section tracking must read the scroll offset');
+});
+
+test('the routing region opens with the mockup headline and sub-copy', () => {
+  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  assert.ok(source.includes('Routing configuration'), 'eyebrow missing');
+  assert.ok(source.includes('Peer routing configuration'), 'headline missing');
+  assert.ok(source.includes('Review the draft. Save when the whole pool is ready.'), 'sub-copy missing');
+  // The eyebrow uppercases via the shared style, not a hardcoded string.
+  const eyebrow = source.slice(source.indexOf('eyebrow:'), source.indexOf('noticeBox:'));
+  assert.ok(eyebrow.includes('textTransform: "uppercase"'), 'eyebrow must uppercase via style');
+  // The host SLP header is untouched — no second page title.
+  assert.equal(occurrences(source, 'pageTitle'), 2, 'page title style + its single use only');
+});
+
+test('role profiles lay out in a container-measured two-column panel grid', () => {
+  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  // The threshold is measured on the card body container — never the window.
+  assert.ok(source.includes('profilePanelWide'), 'wide-panel flag missing');
+  assert.ok(
+    source.includes('onLayout={event => setProfilePanelWide(event.nativeEvent.layout.width >= 700)}'),
+    'the grid must measure its own container at the ~700px breakpoint',
+  );
+  assert.ok(!source.includes('Dimensions.get'), 'window measurement is forbidden — use the container');
+  assert.ok(
+    source.includes('flexDirection: profilePanelWide ? "row" : "column"'),
+    'two-column/one-column switch missing',
+  );
+  // Panels are bordered sub-cards on the subtler surface.
+  const panel = source.slice(source.indexOf('profilePanel:'), source.indexOf('profileHeading:'));
+  assert.ok(panel.includes('borderWidth: 1') && panel.includes('padding: 18'), 'profile-panel geometry missing');
+  assert.ok(source.includes('backgroundColor: colors.surface0 }, profilePanelWide'), 'panel fill must use the surface slot');
+});
+
+test('provider family and mode render as mockup choice chips', () => {
+  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  const profiles = source.slice(source.indexOf('title="Role profiles"'), source.indexOf('</Card>', source.indexOf('title="Role profiles"')));
+  // Both fields use the choice variant inside the profile panels.
+  assert.ok(occurrences(profiles, 'variant="choice"') >= 2, 'family + mode must render as choice chips');
+  // Choice-chip visuals: square-ish radius, muted until selected, then the
+  // accent border/text over a tinted fill (surface2 — no accent-tint slot).
+  const choice = source.slice(source.indexOf('choice:'), source.indexOf('choiceLabel:'));
+  assert.ok(choice.includes('borderRadius: 6'), 'choice chip radius missing');
+  assert.ok(
+    source.includes('backgroundColor: active ? colors.surface2 : colors.surface0'),
+    'selected choice must take the tinted fill',
+  );
+  assert.ok(
+    source.includes('color: active ? colors.accent : colors.foregroundMuted'),
+    'selected choice must take the accent text',
+  );
+  // Other ChipSelect consumers keep the pill default.
+  assert.ok(source.includes('variant = "pill"'), 'pill must remain the default variant');
+});
+
+test('the model row is a non-destructive select-box with a manual disclosure', () => {
+  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  const picker = source.slice(source.indexOf('function OptionPicker'), source.indexOf('function Collapse'));
+  // The collapsed row shows the stored value (never blanked by opening).
+  assert.ok(picker.includes('effective ?'), 'stored-value display missing');
+  assert.ok(picker.includes('setOpen(current => !current)'), 'Change expander missing');
+  assert.ok(!/onPress=\{[^}]*onChange\(""\)/.test(picker), 'opening the picker must not clear the model');
+  assert.ok(picker.includes('Change ${label.toLowerCase()} ⌄'), 'Change-model link missing');
+  assert.ok(picker.includes('Enter model ID manually'), 'manual disclosure missing');
+  assert.ok(picker.includes('manualOpen'), 'manual disclosure state missing');
+  // Provider default stays reachable as a list entry.
+  assert.ok(picker.includes('Select Provider default'), 'provider-default entry missing');
+  assert.ok(picker.includes('pick("")'), 'provider default must clear the value');
+  // The searchable filter is kept.
+  assert.ok(picker.includes('Filter ${label}'), 'search filter missing');
+});
+
+test('controls share hover/focus/pressed/disabled states via the theme', () => {
+  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  // RN-web runtime fields are widened once, locally — no untyped destructure.
+  assert.ok(source.includes('type ControlState = { pressed: boolean; hovered?: boolean; focused?: boolean }'),
+    'widened control-state type missing');
+  assert.ok(occurrences(source, 'state.hovered') >= 8, 'hover state must cover the interactive controls');
+  assert.ok(occurrences(source, 'state.focused') >= 8, 'focus state must cover the interactive controls');
+  // The focus ring is the accent outline (no dedicated focus slot exists).
+  assert.ok(source.includes('outlineColor: colors.accent'), 'accent focus ring missing');
+  assert.ok(source.includes('outlineStyle: "solid"'), 'focus ring outline missing');
+  assert.ok(occurrences(source, 'focusRing(colors)') >= 8, 'focus ring must apply across controls');
+  // Disabled stays ~0.45 opacity.
+  assert.ok(source.includes('{ opacity: 0.45 }'), 'disabled opacity missing');
+});
+
+test('no hardcoded hex colors live in the client', () => {
+  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  const hits = source.match(/#[0-9a-fA-F]{3,8}\b/g) ?? [];
+  assert.deepEqual(hits, [], `hex color literals found: ${hits.join(', ')}`);
 });
