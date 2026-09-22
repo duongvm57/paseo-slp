@@ -201,6 +201,14 @@ Six rules fall out of the role model and shape everything below:
 │     state/role-routing.json                                      │
 │                            optional supervisor/lead family+model  │
 │                            picks (settings-driven generation)     │
+│     state/jev.json       optional Jev decision-primitive toggles  │
+│     state/jev-*.key      per-daemon provider key (0600,           │
+│                          write-only; status reports hasKey only)  │
+│     state/peer-pool.json the user-scope Peer pool — catalog-      │
+│                          shaped, written whole-file under a       │
+│                          sha256 CAS; sole writer is the Peer      │
+│                          pool card (a repo's own                  │
+│                          .paseo-slp/slp-routing.json wins)        │
 │                                                                  │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -218,8 +226,9 @@ explicitly activates.
 
 Two saved profiles are the only doors in: **SLP Supervisor** and **SLP
 Lead**. Peers never get saved profiles — the Lead chooses a peer provider
-per task from a routing catalog (`.paseo-slp/slp-routing.json`), which is
-what lets one project mix e.g. a Codex Lead with Devin peers.
+per task from the routing pool: a repository's `.paseo-slp/slp-routing.json`
+when pinned, else the user-scope `state/peer-pool.json` above. Either scope
+is what lets one project mix e.g. a Codex Lead with Devin peers.
 
 ## Two lifecycles
 
@@ -431,6 +440,11 @@ still be executing from them.
 
 - The plugin installs and manages; it does **not** orchestrate. No
   agent-facing tools, no `create_agent`, no delegation logic.
+- Jev is an explicit helper primitive, not an agent feature: the
+  `route-decide` CLI is the only call path (no loops, schedules or
+  prepare-time calls), its key lives in per-daemon state, and routing
+  stays deterministic — prepare verifies the receipt offline and fails
+  closed on any config/transport/validation error.
 - No background watchers — status is computed when asked.
 - The Supervisor/Lead/Peer intelligence is **policy text + Paseo
   primitives**, not code in the plugin. The plugin's correctness job ends

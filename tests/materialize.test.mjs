@@ -47,13 +47,28 @@ test('materialize dry-runs, applies and rebases frontmatter paths without copyin
   assert.ok(again.files.every(file => file.preserved && !file.sha256));
 });
 
+test('materialize works when the source never created a catalog', t => {
+  const dir = fixture(t), source = slpCheckout(join(dir, 'source')), target = join(dir, 'target');
+  mkdirSync(target);
+  // init no longer writes a catalog: a fresh source checkout has protocol +
+  // notebook only. Materialize must carry the protocol and leave the target
+  // to resolve the user-scope pool, exactly like the source does.
+  rmSync(join(source, '.paseo-slp/slp-routing.json'));
+  const applied = materializeWorkspace(source, target, true);
+  assert.equal(applied.applied, true);
+  assert.equal(applied.files.length, 1);
+  assert.equal(applied.files[0].path.endsWith('workspace-protocol.md'), true);
+  assert.equal(existsSync(join(target, '.paseo-slp/slp-routing.json')), false);
+  assert.equal(existsSync(join(target, '.paseo-slp/workspace-protocol.md')), true);
+});
+
 test('materialize copies catalog bytes verbatim so a pinned route hash stays valid', t => {
   const dir = fixture(t), source = slpCheckout(join(dir, 'source')), target = join(dir, 'target');
   mkdirSync(target);
   // A valid catalog with unusual formatting: odd indentation, a CRLF-free
   // compact style and non-canonical key order — reserialization would change
   // every byte and the sha256.
-  const raw = '{\n  "options": [],\n\t"policy": "test pool",\n  "version": 1,\n  "quotaFallback": {"enabled":false,"optionIds":[]}\n}\n\n\n';
+  const raw = '{\n  "options": [],\n\t"policy": "test pool",\n  "version": 1,\n  "quotaFallback": {"enabled":false,"optionId":null}\n}\n\n\n';
   const sourceCatalog = join(source, '.paseo-slp/slp-routing.json');
   writeFileSync(sourceCatalog, raw);
   const applied = materializeWorkspace(source, target, true);

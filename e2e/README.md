@@ -116,8 +116,11 @@ Read and apply <installed>/skills/paseo-slp-onboarding/SKILL.md:
   populate the project pool with authorized options and suitability descriptions.
 ```
 
-These are ordered setup steps, not a shell script: init leaves a template and an
-empty catalog. Complete the protocol and Peer pool before delegation. Saved profiles
+These are ordered setup steps, not a shell script: init leaves a protocol
+template and notebook only — it writes no catalog. The coordinator authors the
+fixture's `.paseo-slp/slp-routing.json` itself (a deliberate repo pin; the
+alternative is `init --routing-from <file>`). Complete the protocol and Peer
+pool before delegation. Saved profiles
 supply Supervisor/Lead settings; the selected pool option supplies Peer settings. The exact completion gate and
 root launch binding are in [workspace-protocol.md](workspace-protocol.md#fixture-setup-and-launch-gate).
 Record fixture files, exact saved profiles, discovery receipts and validation output with

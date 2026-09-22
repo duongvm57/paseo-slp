@@ -6,9 +6,12 @@ description: Set up or revise a repository's Paseo SLP protocol and Peer runtime
 # Paseo SLP repo onboarding
 
 Configure tactics in .paseo-slp/workspace-protocol.md and Peer runtime options in
-.paseo-slp/slp-routing.json. Supervisor/Lead use saved slp-supervisor/slp-lead
-profiles. Peer uses the project pool, falling back to the user-scope catalog
-($PASEO_HOME/slp-routing.json, default ~/.paseo) when the repository has none;
+the plugin-owned user-scope pool
+($PASEO_HOME/slp-runtime/state/peer-pool.json, default ~/.paseo — authored in
+the SLP Manager's Peer pool card) or a repo-pinned .paseo-slp/slp-routing.json.
+Supervisor/Lead use saved slp-supervisor/slp-lead
+profiles. Peer uses the project pool, falling back to the user-scope pool
+when the repository has none;
 no saved slp-peer profile is
 needed. Engineer, Architect and Reviewer are dispositions of the same Peer role.
 
@@ -34,27 +37,31 @@ thinking/mode/features. Then interview the Human: they decide; you supply
 discovered facts and write what they pick. Ask in plain terms — name the files
 and what each choice does. For example:
 
-> Peers need a list of which provider/model they may run as. Init seeded this
-> repo's `.paseo-slp/slp-routing.json` with task-type seats (lightweight-recon,
-> standard-coding, deep-reasoning, independent-second-opinion,
-> autonomous-long-running) — each disabled until it gets a real model found on
-> this host. Or the repo can share your user-level list at
-> `~/.paseo/slp-routing.json` (currently <state>) — every repo without its own
-> list falls back to it, so choosing it means deleting the repo file. Which do
-> you want?
+> Peers need a list of which provider/model they may run as. The shared
+> user-scope pool lives at `~/.paseo/slp-runtime/state/peer-pool.json`
+> (currently <state>) — every repo without its own catalog falls back to it,
+> and the SLP Manager's Peer pool card edits it with seats seeded from the
+> archetype list (each parked until it gets a real provider and model found
+> on this host). Or this repo can pin its own `.paseo-slp/slp-routing.json`
+> through `slp init <repo> --routing-from <file> --apply` — a repo catalog
+> then ignores the shared pool permanently, even if the pool is later
+> emptied. Which do you want?
 
-For a repo pool, walk the seeded seats together: which discovered provider,
-model and settings fill each seat, which seats to drop or add — the seed is a
-starting set the Human reshapes freely. For the shared list, run the same walk
-against `~/.paseo/slp-routing.json`; writing outside the repository needs an
-explicit Human grant. A populated user-scope catalog is the fallback default,
+For the shared pool, walk the seats in the Manager's Peer pool card: pick an
+archetype per kind of work, choose the discovered provider/model/mode in its
+pickers, and enable the seats the Human approves — the card's values come
+from the live provider catalog, so a mistyped mode id cannot reach the file.
+For a repo pool, build the same document as a file (the card's Copy pool
+JSON supplies the shape) and import it with --routing-from. A populated
+user-scope pool is the fallback default,
 not this repository's configuration — its existence never substitutes for the
 Human's choice.
 
 The interview is complete when the Human has named where the list lives and,
 for a list meant to work, picked discovered options seat by seat — or declared
-the repo deliberately without a pool (then strip the seeded seats, leaving
-`options: []`). Record the resolved intent — `pinned`, `inherit` or `empty` —
+the repo deliberately without a pool (then the repo pins an empty or
+all-disabled catalog: an absent catalog would still read every seat the
+shared pool holds, including seats authored for other repos). Record the resolved intent — `pinned`, `inherit` or `empty` —
 in the protocol frontmatter `routing_intent` with who decided and when; the
 catalog file carries the option IDs.
 Within granted setup authority, populate the choices the Human made; otherwise
@@ -148,9 +155,10 @@ heard the table is theirs to revise.
 ## Set up protocol and pool
 
 Use `node <slp-cli> init <absolute-repo>` to preview, then --apply within setup
-authority. Init creates missing protocol, seeds the task-type skeleton catalog
+authority. Init creates missing protocol
 and a `.paseo-slp/notebook.md` Supervisor notebook scaffold without overwriting
-existing files. Fill the frontmatter `supervisor_notebook` field — the scaffolded path with
+existing files, and writes .paseo-slp/slp-routing.json only when
+--routing-from names an explicitly chosen catalog. Fill the frontmatter `supervisor_notebook` field — the scaffolded path with
 its owner, or `timeline:<agentId>` plus a retrieval note the Human can follow.
 Complete tactics: record the task classes and dispositions confirmed in the
 interview, plus ownership, topology, proof, budget, allowed operations,
@@ -164,31 +172,35 @@ mismatch is a blocker, not a partial write. For a revision, bump the
 frontmatter version and refresh last_reviewed in the same diff.
 
 The default pool decision is inherit: a repository with no catalog resolves the
-user-scope catalog automatically. Any catalog file in the repo is authoritative
-— when the Human chooses inherit, remove the seeded slp-routing.json so the
-fallback engages. Then check the user-scope file: if it still holds only the
-seeded skeleton, offer to populate it from the same discovered options (with
-the Human's grant to write outside the repository) or report that the
-inherited pool is currently empty.
+user-scope pool automatically. Any catalog file in the repo is authoritative
+— init creates none, so a repo catalog exists only where --routing-from
+imported one. For inherit, populate the user-scope pool in the Manager's Peer
+pool card (a legacy `$PASEO_HOME/slp-routing.json` can be imported once from
+the card; the plugin is that file's sole writer — never edit it by hand) or
+report that the inherited pool is currently empty.
 
-Populate the project catalog only when the Human chose a pinned pool, before Peer
-delegation. Interview the Human on which options to enable, priority and quota
+Populate a repo catalog only when the Human chose a pinned pool, before Peer
+delegation. Interview the Human on which options to enable and the quota
 fallback rather than copying a catalog verbatim; --routing-from imports an
 explicitly selected source as a starting point for that decision, not as the
 decision itself. Every option has:
 
 - id: unique lowercase identifier; provider: pi, codex, devin or claude; exact
-  discovered model. Devin options accept swe-2 models only.
+  discovered model. Devin options accept swe-2 models only. A disabled seat
+  may park with a blank provider and model until the Human fills them.
 - roles: ["peer"]; enabled: boolean; availability: ready, paused, quota-exhausted
   or unknown. Only enabled/ready options may launch.
 - Optional thinkingOptionId, modeId and features, verified for that runtime.
-- priority: numeric preference; suitableFor and avoidFor: lists of task descriptions;
-  notes: concrete guidance/tradeoffs for Lead. Priority is not automatic selection.
+- suitableFor and avoidFor: on the 12 reserved standard seats these are the
+  package's closed `axis:value` tokens (read-only — docs/spec/routing-criteria.md);
+  custom seats keep free-form lists Jev can read;
+  notes: concrete guidance/tradeoffs for Lead, held back from Jev.
 
-Configure quotaFallback: { enabled: false, optionIds: [] } by default. Enable it
-only under Human fallback authority; optionIds must reference existing pool options.
-Choose allowed fallback options by suitability and budget, not provider model lists.
-Preserve existing fallback preferences on updates. Missing settings mean no fallback.
+Configure quotaFallback: { enabled: false, optionId: null } by default. Enable it
+only under Human fallback authority; optionId must designate one existing pool
+option — a single designated fallback, not an ordered list. Choose it by
+suitability and budget, not provider model lists. Preserve the existing
+designation on updates. Missing settings mean no fallback.
 
 The catalog envelope is version: 1, a nonempty policy describing selection/budget
 boundaries, and options: an array of these bundles. Lead chooses an option per
@@ -212,7 +224,9 @@ repository path and workspaceId, an assignment naming scope, authority, the
 report-recipient agent ID and verification/handback expectations, plus one
 binding source. Keep each seat's full brief in its own assignmentFile — the
 prompt references it read-first and never inlines it. Before any create_agent
-call, Lead records why the chosen topology fits the assignment.
+call, Lead records why the chosen topology fits the assignment (under armed
+Jev routing that reason trail is the decision receipt's distribution, not
+prose).
 For repeated prepares, capture discovery once: `node <slp-cli> inventory
 --paseo-home <absolute-home>` prints {providers, profiles} to stdout in the
 shape prepare consumes — pass the file's absolute path as request.inventoryFile (inline arrays,
@@ -222,12 +236,13 @@ list_providers output from the same daemon inline as providers instead. Inventor
 output proves configuration completeness, not provider readiness — never treat a
 listed entry as healthy.
 
-An empty catalog is valid init output but incomplete Peer onboarding — it also
-remains authoritative and shadows the user-scope catalog until removed. Report no
+Init writes no catalog, so a repository stays on the user-scope pool until
+--routing-from pins it — an empty or ineligible pool then blocks only Peer
+delegation. Report no
 eligible option as unresolved setup, not success. Preserve existing pool entries
 and Human preferences on updates; edit only the authorized scope. --routing-from
 imports an explicitly selected source only into a missing catalog. The user-scope
-catalog is the only declared fallback, resolved automatically when the repository
+pool is the only declared fallback, resolved automatically when the repository
 has none; never read another repository's catalog. No automatic import from retired
 profile bindings occurs during host upgrade.
 

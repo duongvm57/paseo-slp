@@ -6,9 +6,12 @@ import type { PluginServerContribution } from "@getpaseo/plugin/server";
 import { homedir } from "node:os";
 import { realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { activate, reconcile, deactivate, status, localTarget, catalog, setLanguage, getRoleRouting, setRoleRouting } from "./shared/contracts.ts";
-import type { CatalogRequest, FamilyName, Manager } from "./shared/contracts.ts";
+import { activate, reconcile, deactivate, status, localTarget, catalog, setLanguage, getRoleRouting, setRoleRouting, getPeerPool, setPeerPool, getJev, setJev, setJevKey, testJev } from "./shared/contracts.ts";
+import type { Manager } from "./shared/contracts.ts";
+import { loadCatalog } from "./server/provider-catalog.ts";
 import { createManager } from "./server/manager.ts";
+import { createJev } from "./server/jev.ts";
+import { createStateStore } from "./server/state-store.ts";
 import { createMaterializer } from "./server/materializer.ts";
 import { embeddedPayload } from "./server/generated/runtime-payload.ts";
 import { createExecutableResolver } from "./server/executables.ts";
@@ -32,9 +35,21 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   server.handle(status, (input, { paseo }) => manager.status(input, paseo));
   server.handle(localTarget, () => detectDaemonHome());
   server.handle(catalog, (input, { paseo }) => loadCatalog(input, paseo));
-  server.handle(setLanguage, input => manager.setLanguage(input));
-  server.handle(getRoleRouting, input => manager.getRoleRouting(input));
-  server.handle(setRoleRouting, input => manager.setRoleRouting(input));
+  // Plugin-owned state files under slp-runtime/state — same class of
+  // operation as jev: no journal, no mutex, no authority gate.
+  const store = createStateStore();
+  server.handle(setLanguage, input => store.setLanguage(input));
+  server.handle(getRoleRouting, input => store.getRoleRouting(input));
+  server.handle(setRoleRouting, input => store.setRoleRouting(input));
+  server.handle(getPeerPool, input => store.getPeerPool(input));
+  server.handle(setPeerPool, input => store.setPeerPool(input));
+  // Jev (OpenRouter Decisions) — per-daemon config/key under slp-runtime/state;
+  // test-jev is the only handler that touches the network (explicit action).
+  const jev = createJev();
+  server.handle(getJev, input => jev.getJev(input));
+  server.handle(setJev, input => jev.setJev(input));
+  server.handle(setJevKey, input => jev.setJevKey(input));
+  server.handle(testJev, input => jev.testJev(input));
   // Phase 2 (settings-driven-providers.md §6): the hook-family thin aliases
   // need the two halves the sentinel gate cannot supply — role-bundle
   // injection at agent.create and the session-open grant overlay. Both hooks
@@ -89,83 +104,4 @@ function detectDaemonHome() {
   if (!raw) return { daemonHome: join(homedir(), ".paseo"), source: "default" as const };
   const expanded = raw === "~" ? homedir() : raw.startsWith("~/") ? join(homedir(), raw.slice(2)) : raw;
   return { daemonHome: resolve(expanded), source: "env" as const };
-}
-
-/** Narrowed provider-catalog surface (§2 convention): model/mode/feature
- * listings only. The SDK PaseoApi is structurally assignable. */
-interface ProviderCatalogApi {
-  providers: {
-    listModels(provider: string): Promise<{
-      models?: {
-        id: string; label?: string;
-        thinkingOptions?: {
-          id: string; label: string; description?: string;
-          isDefault?: boolean; metadata?: Record<string, unknown>;
-        }[];
-        defaultThinkingOptionId?: string;
-      }[];
-      error?: string | null;
-    }>;
-    listModes(provider: string): Promise<{
-      modes?: { id: string; label?: string }[]; error?: string | null;
-    }>;
-    listFeatures(draft: {
-      provider: string; cwd: string; modeId?: string;
-    }): Promise<{
-      features?: (
-        | { type: "toggle"; id: string; label: string; description?: string; tooltip?: string; icon?: string; value: boolean }
-        | { type: "select"; id: string; label: string; description?: string; tooltip?: string; icon?: string; value: string | null; options: { id: string; label: string; description?: string; isDefault?: boolean; metadata?: Record<string, unknown> }[] }
-      )[];
-      error?: string | null;
-    }>;
-  };
-}
-
-// The catalog is read-only and advisory — queried on the family's provider
-// entry (the same CLI a managed slp-<family>-* provider reaches through its
-// shim), so it returns the model/mode/feature list a managed provider
-// reports. A provider that cannot answer reports in `error` rather than
-// rejecting; the picker degrades to free text.
-async function loadCatalog(input: CatalogRequest, paseo: ProviderCatalogApi) {
-  const provider = input.family;
-  const errors: string[] = [];
-  const settle = <T,>(result: PromiseSettledResult<T>): T | null => {
-    if (result.status === "fulfilled") return result.value;
-    errors.push(result.reason instanceof Error ? result.reason.message : String(result.reason));
-    return null;
-  };
-  // listFeatures runs on a draft config — the host requires provider/model
-  // format, so feature definitions are only queried when a model is chosen.
-  const [modelsResult, modesResult, featuresResult] = await Promise.allSettled([
-    paseo.providers.listModels(provider),
-    paseo.providers.listModes(provider),
-    input.model
-      ? paseo.providers.listFeatures({
-          provider: `${provider}/${input.model}`,
-          cwd: input.cwd ?? "/",
-          ...(input.modeId ? { modeId: input.modeId } : {}),
-        })
-      : Promise.resolve({ features: [] as never[], error: null as string | null }),
-  ]);
-  const modelsPayload = settle(modelsResult);
-  const modesPayload = settle(modesResult);
-  const featuresPayload = settle(featuresResult);
-  if (modelsPayload?.error) errors.push(modelsPayload.error);
-  if (modesPayload?.error) errors.push(modesPayload.error);
-  if (featuresPayload?.error) errors.push(featuresPayload.error);
-  return {
-    schemaVersion: 1 as const,
-    // Per-model thinking options pass through untouched (§9 corrected
-    // finding — the host's AgentModelDefinition carries them; an absent
-    // key stays absent so the wire shape records "not declared").
-    models: (modelsPayload?.models ?? []).map(m => ({
-      id: m.id,
-      label: m.label ?? m.id,
-      ...(m.thinkingOptions ? { thinkingOptions: m.thinkingOptions } : {}),
-      ...(m.defaultThinkingOptionId ? { defaultThinkingOptionId: m.defaultThinkingOptionId } : {}),
-    })),
-    modes: (modesPayload?.modes ?? []).map(m => ({ id: m.id, label: m.label ?? m.id })),
-    features: featuresPayload?.features ?? [],
-    error: errors.length > 0 ? errors.join("; ") : null,
-  };
 }

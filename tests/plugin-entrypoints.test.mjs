@@ -44,7 +44,7 @@ test('paseo-plugin.json parses through the host readPluginManifest', async t => 
   const manifest = await host.readPluginManifest(PLUGIN_DIR);
   assert.deepEqual(manifest, {
     id: 'paseo-slp',
-    requirements: { paseo: '>=0.8.0 <0.9.0' },
+    requirements: { paseo: '>=0.8.0 <0.10.0' },
     build: [['npm', 'install', '--omit=dev', '--no-audit', '--no-fund']],
   });
 });
@@ -139,7 +139,7 @@ async function importContribute(t) {
   return entry.default;
 }
 
-test('contribute() registers the nine RPCs plus the two before-hooks, cleanup unregisters', async t => {
+test('contribute() registers the RPCs plus the two before-hooks, cleanup unregisters', async t => {
   const contribute = await importContribute(t);
   assert.equal(typeof contribute, 'function');
 
@@ -162,12 +162,18 @@ test('contribute() registers the nine RPCs plus the two before-hooks, cleanup un
       'activate',
       'catalog',
       'deactivate',
+      'get-jev',
+      'get-peer-pool',
       'get-role-routing',
       'local-target',
       'reconcile',
+      'set-jev',
+      'set-jev-key',
       'set-language',
+      'set-peer-pool',
       'set-role-routing',
       'status',
+      'test-jev',
     ],
   );
   for (const { handler } of registrations) {

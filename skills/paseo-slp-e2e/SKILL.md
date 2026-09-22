@@ -124,9 +124,10 @@ For ordinary tasks, Supervisor/Lead use saved profiles and Peer uses the project
    and settings.peerPool (the catalog object). begin validates Supervisor/Lead and
    eligible Peer options; it does not choose the Peer's option for Lead.
 3. Create the fixture and apply installed onboarding. Complete its protocol and
-   populate the approved pool. Init's empty catalog is only a scaffold. Preserve
-   unrelated fixture content and existing Human choices; never import another
-   project's options implicitly. Capture the exact pool bytes/hash.
+   write the approved pool — init never creates a catalog, so the fixture's
+   `.paseo-slp/slp-routing.json` is the coordinator's deliberate repo pin.
+   Preserve unrelated fixture content and existing Human choices; never import
+   another project's options implicitly. Capture the exact pool bytes/hash.
 4. Verify installed identity, actual fixture workspace and failing baseline.
    Refresh profiles/providers/pool before launch, reconciling changed configuration.
    Create only Supervisor via Paseo from its saved profile. Supervisor discovers

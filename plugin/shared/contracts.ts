@@ -9,7 +9,7 @@
 
 import { z } from "zod";
 import { defineRpc } from "@getpaseo/plugin";
-import { FAMILY_IDS, OWNED_PROVIDER_ID_RE, PROVIDER_EXTENDS_IDS } from "./families.ts";
+import { FAMILY_IDS, OWNED_PROVIDER_ID_RE, PROVIDER_EXTENDS_IDS, ROLES } from "./families.ts";
 
 // ---------------------------------------------------------------------------
 // §3 wire schemas
@@ -215,6 +215,232 @@ export const SetRoleRoutingOutput = z.object({
   schemaVersion: z.literal(1),
   routing: RoleRouting,
 }).strict();
+/** One seat in the user-scope Peer pool — the wire mirror of the package's
+ *  routing-catalog option (src/routing.mjs validateCatalog). `provider` and
+ *  `model` may be empty while `enabled` is false: an archetype-seeded seat
+ *  stays parked until the Human fills both from live catalog discovery. The
+ *  editor writes availability:"ready" and roles:["peer"] always; the schema
+ *  keeps the full file vocabulary so a stored pool round-trips verbatim.
+ *  Passthrough, not strict — the package validator tolerates extra option
+ *  keys (a legacy file may still carry `priority`), so the wire does too. */
+// These three patterns mirror settingIdPattern / unsafeModelPattern /
+// swe2ModelPattern in src/binding.mjs — the shared boundary cannot import the
+// package, so the parity test in tests/plugin-routing.test.mjs pins this
+// schema to the same accept/reject verdicts as validateCatalog.
+const POOL_SETTING_ID = /^[a-zA-Z0-9._-]+$/;
+const POOL_UNSAFE_MODEL = /[\s\x00-\x1f\x7f]/;
+const POOL_SWE2_MODEL = /^swe-2($|-)/;
+const poolNonempty = (s: string) => s.trim().length > 0;
+
+/** The Jev decline sentinel (src/routing.mjs ROUTE_DECLINE_CANDIDATE) — a
+ *  seat may never take it as an id; validateCatalog rejects it the same way. */
+export const ROUTE_DECLINE_OPTION_ID = "no-suitable-option";
+
+export const PeerPoolOption = z.object({
+  id: z.string().regex(/^[a-z][a-z0-9-]*$/).refine(id => id !== ROUTE_DECLINE_OPTION_ID, {
+    message: `id is reserved for the Jev decline sentinel`,
+  }),
+  provider: z.union([Family, z.literal("")]),
+  roles: z.array(z.enum(["supervisor", "lead", "peer"])).min(1),
+  model: z.string().refine(v => !POOL_UNSAFE_MODEL.test(v)),
+  enabled: z.boolean(),
+  availability: z.enum(["ready", "quota-exhausted", "paused", "unknown"]),
+  // validateCatalog treats explicit null like absence on these four keys.
+  thinkingOptionId: z.string().regex(POOL_SETTING_ID).nullish(),
+  modeId: z.string().regex(POOL_SETTING_ID).nullish(),
+  features: z.record(z.string(), z.unknown()).nullish(),
+  suitableFor: z.array(z.string().refine(poolNonempty)),
+  avoidFor: z.array(z.string().refine(poolNonempty)),
+  notes: z.string().refine(poolNonempty),
+}).passthrough().superRefine((option, ctx) => {
+  // Cross-field rules validateCatalog enforces that field shapes alone cannot:
+  // a blank provider parks the seat (enabled must stay false), an enabled seat
+  // needs a model, and an enabled devin seat needs a swe-2 model.
+  if (option.provider === "" && option.enabled === true) {
+    ctx.addIssue({ code: "custom", path: ["provider"], message: "enabled options require a provider family" });
+  }
+  if (option.enabled === true && !option.model) {
+    ctx.addIssue({ code: "custom", path: ["model"], message: "enabled options require a model" });
+  }
+  if (option.provider === "devin" && option.enabled === true && !POOL_SWE2_MODEL.test(option.model)) {
+    ctx.addIssue({ code: "custom", path: ["model"], message: "devin options require a swe-2 model" });
+  }
+});
+/** Plugin-owned mutable state at slp-runtime/state/peer-pool.json — the
+ *  user-scope Peer pool, whole-file-overwrite under sha256 CAS. quotaFallback
+ *  is strict because the package validator is strict there (unknown keys
+ *  fail); the top-level object stays passthrough like the option schema. */
+export const PeerPool = z.object({
+  version: z.literal(1),
+  policy: z.string().refine(poolNonempty),
+  quotaFallback: z.preprocess((value, ctx) => {
+    // Wave-6 migration: the legacy ordered optionIds list predates the
+    // single designated-option contract. ≤1 unambiguously maps to optionId
+    // (0 → null, 1 → that id); a longer list is an ambiguous choice — fail
+    // closed with a clear reason, never take-first.
+    if (value !== null && typeof value === "object" && !Array.isArray(value)
+        && Object.hasOwn(value, "optionIds") && !Object.hasOwn(value, "optionId")) {
+      const { optionIds, ...rest } = value as Record<string, unknown> & { optionIds: unknown };
+      if (Array.isArray(optionIds) && optionIds.every(id => typeof id === "string")) {
+        if (optionIds.length > 1) {
+          ctx.addIssue({ code: "custom", path: ["optionIds"], message: `quotaFallback lists ${optionIds.length} options — the designated-option model requires exactly one; edit the pool to choose it` });
+        }
+        return { ...rest, optionId: (optionIds[0] as string | undefined) ?? null };
+      }
+    }
+    return value;
+  }, z.object({
+    enabled: z.boolean(),
+    optionId: z.string().nullable(),
+  }).strict().nullish()),
+  options: z.array(PeerPoolOption),
+}).passthrough().superRefine((pool, ctx) => {
+  const ids = new Set<string>();
+  pool.options.forEach((option, index) => {
+    if (ids.has(option.id)) {
+      ctx.addIssue({ code: "custom", path: ["options", index, "id"], message: `duplicate option id ${option.id}` });
+    }
+    ids.add(option.id);
+  });
+  const fallback = pool.quotaFallback;
+  if (fallback != null) {
+    if (fallback.optionId !== null && !ids.has(fallback.optionId)) {
+      ctx.addIssue({ code: "custom", path: ["quotaFallback", "optionId"], message: `quotaFallback option ${fallback.optionId} is not in this pool` });
+    }
+    if (fallback.enabled && fallback.optionId === null) {
+      ctx.addIssue({ code: "custom", path: ["quotaFallback", "optionId"], message: "enabled quotaFallback needs a designated pool option" });
+    }
+  }
+});
+export const GetPeerPoolInput = z.object({
+  schemaVersion: z.literal(1),
+  target: Target,
+}).strict();
+export const GetPeerPoolOutput = z.object({
+  schemaVersion: z.literal(1),
+  /** The stored user-scope pool, or null when no peer-pool.json exists or its
+   *  content fails schema parsing (then `error` carries the evidence). */
+  pool: PeerPool.nullable(),
+  /** sha256 of the raw file bytes — the optimistic-concurrency token
+   *  set-peer-pool requires. Present whenever the file exists, even when
+   *  `pool` is null. null means the file is absent. */
+  sha256: Sha.nullable(),
+  error: z.string().nullable(),
+  /** One-time import source: the retired <daemonHome>/slp-routing.json,
+   *  parsed when present and valid. Read-only — the plugin never writes or
+   *  deletes the legacy file. */
+  legacy: PeerPool.nullable(),
+  legacyError: z.string().nullable(),
+}).strict();
+/** Whole-file overwrite of the user-scope pool. `expectedSha256` is the
+ *  sha256 get-peer-pool returned (null = expect the file to be absent); a
+ *  mismatch is an IDEMPOTENCY_CONFLICT and the client must reload first. */
+export const SetPeerPoolInput = z.object({
+  schemaVersion: z.literal(1),
+  target: Target,
+  pool: PeerPool,
+  expectedSha256: Sha.nullable(),
+}).strict();
+export const SetPeerPoolOutput = z.object({
+  schemaVersion: z.literal(1),
+  pool: PeerPool,
+  /** sha256 of the written file — the next expectedSha256 token. */
+  sha256: Sha,
+}).strict();
+/** Jev provider block stored at slp-runtime/state/jev.json — two kinds.
+ *  openrouter: model must be a pinned `<owner>/jev-<version>` id; aliases
+ *  (~typesafe/jev-latest, jev-latest, jev-preview) drift and are rejected.
+ *  baseUrl accepts the bare origin or the documented prefixed form …/api/v1.
+ *  typesafe (first-party, verified against docs.typesafe.ai): model is a
+ *  pinned bare `jev-<semver>` id; baseUrl accepts a bare https origin or an
+ *  origin+path prefix (custom endpoint/proxy). Both require https and reject
+ *  query/hash (parity with src/jev.mjs readJevConfig); absent baseUrl → the
+ *  kind's default origin. */
+const jevBaseUrl = (allowPath: (path: string) => boolean) =>
+  z.string().min(1).max(512)
+    .refine(s => {
+      try {
+        const u = new URL(s);
+        return u.protocol === "https:" && allowPath(u.pathname.replace(/\/+$/, "")) && u.search === "" && u.hash === "";
+      } catch { return false; }
+    });
+export const JevProvider = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("openrouter"),
+    baseUrl: jevBaseUrl(path => path === "" || path === "/api/v1").default("https://openrouter.ai"),
+    model: z.string().regex(/^[a-z0-9-]+\/jev-\d+\.\d+(\.\d+)?$/),
+  }).strict(),
+  z.object({
+    kind: z.literal("typesafe"),
+    baseUrl: jevBaseUrl(() => true).default("https://api.typesafe.ai"),
+    model: z.string().regex(/^jev-\d+\.\d+\.\d+$/),
+  }).strict(),
+]);
+/** Per-daemon Jev config — all toggles default off; capabilities is a bool
+ *  record so a future capability arrives without a schema bump (a missing
+ *  capability defaults to off, matching src/jev.mjs). Stored as
+ *  jev.json (0600); the key lives in a separate jev-<kind>.key file. */
+export const JevConfig = z.object({
+  schemaVersion: z.literal(1),
+  enabled: z.boolean(),
+  capabilities: z.object({ routing: z.boolean().default(false) }).catchall(z.boolean()),
+  provider: JevProvider,
+}).strict();
+/** Wire view of the Jev setup — hasKey only; the key material never leaves
+ *  the daemon home. */
+export const JevView = z.object({
+  configured: z.boolean(),
+  enabled: z.boolean().nullable(),
+  capabilities: z.record(z.string(), z.boolean()).nullable(),
+  provider: JevProvider.nullable(),
+  hasKey: z.boolean(),
+  keyPermissionsOk: z.boolean().nullable(),
+  error: z.string().nullable(),
+}).strict();
+export const GetJevInput = z.object({
+  schemaVersion: z.literal(1),
+  target: Target,
+}).strict();
+export const GetJevOutput = z.object({
+  schemaVersion: z.literal(1),
+  jev: JevView,
+}).strict();
+/** Plugin-owned state mutation, same class as set-role-routing: writes
+ *  slp-runtime/state/jev.json atomically (0600). Toggling off never removes
+ *  the stored key. */
+export const SetJevInput = z.object({
+  schemaVersion: z.literal(1),
+  target: Target,
+  jev: JevConfig,
+}).strict();
+export const SetJevOutput = z.object({
+  schemaVersion: z.literal(1),
+  jev: JevView,
+}).strict();
+/** Key lifecycle: `key` writes jev-openrouter.key (0600, atomic); `null`
+ *  removes it. The key value itself is never echoed back or journaled. */
+export const SetJevKeyInput = z.object({
+  schemaVersion: z.literal(1),
+  target: Target,
+  key: z.string().min(1).max(512).nullable(),
+}).strict();
+export const SetJevKeyOutput = z.object({
+  schemaVersion: z.literal(1),
+  hasKey: z.boolean(),
+}).strict();
+/** Live key probe: GET {baseUrl}/api/v1/auth/key with the stored key. This is
+ *  the only Jev RPC that touches the network — an explicit human action, not
+ *  a poll. */
+export const TestJevInput = z.object({
+  schemaVersion: z.literal(1),
+  target: Target,
+}).strict();
+export const TestJevOutput = z.object({
+  schemaVersion: z.literal(1),
+  ok: z.boolean(),
+  detail: z.string().max(512).nullable(),
+  latencyMs: z.number().nonnegative(),
+}).strict();
 export const LocalTargetInput = z.object({
   schemaVersion: z.literal(1),
 }).strict();
@@ -233,6 +459,11 @@ export const LocalTargetOutput = z.object({
 export const CatalogInput = z.object({
   schemaVersion: z.literal(1),
   family: Family,
+  // Which managed provider entry to read in a providers.snapshot response —
+  // slp-<family>-<role>, the same entry the host agent profile resolves.
+  // Optional for wire back-compat; absent scopes the query to the base
+  // family entry.
+  role: z.enum(ROLES).optional(),
   // Feature listing runs on a draft agent config — cwd is required by the
   // host API; model/modeId refine which features a provider reports.
   cwd: AbsolutePath.optional(),
@@ -294,6 +525,10 @@ export const CatalogOutput = z.object({
   features: z.array(CatalogFeature),
   /** Non-fatal: a provider that cannot answer reports here instead of rejecting. */
   error: z.string().nullable(),
+  /** The provider id whose snapshot entry actually served this catalog —
+   *  the managed `slp-<family>-<role>` id, or the base family on fallback.
+   *  Absent on the legacy listModels/listModes path (pre-snapshot daemons). */
+  resolvedProvider: z.string().min(1).optional(),
 }).strict();
 export const activate = defineRpc({ name: "activate", input: ActivateInput, output: StartOutput });
 export const reconcile = defineRpc({ name: "reconcile", input: ReconcileInput, output: StartOutput });
@@ -304,6 +539,12 @@ export const catalog = defineRpc({ name: "catalog", input: CatalogInput, output:
 export const setLanguage = defineRpc({ name: "set-language", input: SetLanguageInput, output: SetLanguageOutput });
 export const getRoleRouting = defineRpc({ name: "get-role-routing", input: GetRoleRoutingInput, output: GetRoleRoutingOutput });
 export const setRoleRouting = defineRpc({ name: "set-role-routing", input: SetRoleRoutingInput, output: SetRoleRoutingOutput });
+export const getPeerPool = defineRpc({ name: "get-peer-pool", input: GetPeerPoolInput, output: GetPeerPoolOutput });
+export const setPeerPool = defineRpc({ name: "set-peer-pool", input: SetPeerPoolInput, output: SetPeerPoolOutput });
+export const getJev = defineRpc({ name: "get-jev", input: GetJevInput, output: GetJevOutput });
+export const setJev = defineRpc({ name: "set-jev", input: SetJevInput, output: SetJevOutput });
+export const setJevKey = defineRpc({ name: "set-jev-key", input: SetJevKeyInput, output: SetJevKeyOutput });
+export const testJev = defineRpc({ name: "test-jev", input: TestJevInput, output: TestJevOutput });
 
 // ---------------------------------------------------------------------------
 // §7 receipt / operation-intent journal schemas (server-internal; the client
@@ -470,6 +711,23 @@ export type GetRoleRoutingRequest = z.infer<typeof GetRoleRoutingInput>;
 export type GetRoleRoutingResult = z.infer<typeof GetRoleRoutingOutput>;
 export type SetRoleRoutingRequest = z.infer<typeof SetRoleRoutingInput>;
 export type SetRoleRoutingResult = z.infer<typeof SetRoleRoutingOutput>;
+export type PeerPoolOptionValue = z.infer<typeof PeerPoolOption>;
+export type PeerPoolValue = z.infer<typeof PeerPool>;
+export type GetPeerPoolRequest = z.infer<typeof GetPeerPoolInput>;
+export type GetPeerPoolResult = z.infer<typeof GetPeerPoolOutput>;
+export type SetPeerPoolRequest = z.infer<typeof SetPeerPoolInput>;
+export type SetPeerPoolResult = z.infer<typeof SetPeerPoolOutput>;
+export type JevProviderValue = z.infer<typeof JevProvider>;
+export type JevConfigValue = z.infer<typeof JevConfig>;
+export type JevViewValue = z.infer<typeof JevView>;
+export type GetJevRequest = z.infer<typeof GetJevInput>;
+export type GetJevResult = z.infer<typeof GetJevOutput>;
+export type SetJevRequest = z.infer<typeof SetJevInput>;
+export type SetJevResult = z.infer<typeof SetJevOutput>;
+export type SetJevKeyRequest = z.infer<typeof SetJevKeyInput>;
+export type SetJevKeyResult = z.infer<typeof SetJevKeyOutput>;
+export type TestJevRequest = z.infer<typeof TestJevInput>;
+export type TestJevResult = z.infer<typeof TestJevOutput>;
 export type StartResult = z.infer<typeof StartOutput>;
 export type StatusResult = z.infer<typeof StatusOutput>;
 export type BindingViewValue = z.infer<typeof BindingView>;
@@ -674,16 +932,6 @@ export interface Manager {
   reconcile(input: ReconcileRequest, daemon: ConnectedDaemon): Promise<StartResult>;
   deactivate(input: DeactivateRequest, daemon: ConnectedDaemon): Promise<StartResult>;
   status(input: StatusRequest, daemon: ConnectedDaemon): Promise<StatusResult>;
-  /** Write or clear the plugin-owned communication-language file. No journal,
-   *  no mutex — it is one atomic file under slp-runtime/state that only the
-   *  role bundle reads, at session entry. */
-  setLanguage(input: SetLanguageRequest): Promise<SetLanguageResult>;
-  /** Read the plugin-owned role-routing file; null when unset or legacy. */
-  getRoleRouting(input: GetRoleRoutingRequest): Promise<GetRoleRoutingResult>;
-  /** Validate and atomically persist the role routing — one file under
-   *  slp-runtime/state that only the next activation consumes. No journal,
-   *  no mutex, no authority gate (same class of write as set-language). */
-  setRoleRouting(input: SetRoleRoutingRequest): Promise<SetRoleRoutingResult>;
   /** Stop accepting work and close owned resources. Does not deactivate SLP
    * or remove files; recovery stays journal-driven. */
   close(): void;

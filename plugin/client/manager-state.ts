@@ -1,8 +1,12 @@
 // Pure view-state helpers for the SLP manager surface (spec §3, §9–§11).
 // No react/host imports: this module is unit-tested directly under node, and
 // the client bundle check proves it pulls in no server-only or node code.
-import { AbsolutePath, Id } from "../shared/contracts.ts";
+import { AbsolutePath, Id, ROUTE_DECLINE_OPTION_ID } from "../shared/contracts.ts";
 import { OWNED_PROVIDER_ID_RE, ownedProviderId } from "../shared/families.ts";
+import { isStandardSeatId, seatTokenConflict } from "../shared/routing-vocabulary.ts";
+import type { SeatTokenConflict } from "../shared/routing-vocabulary.ts";
+import type { SeatArchetype } from "../shared/archetypes.ts";
+import type { RoleName } from "../shared/families.ts";
 import type {
   CatalogResult,
   CatalogSelectOptionValue,
@@ -10,6 +14,8 @@ import type {
   FamilyName,
   FamilyViewValue,
   OperationViewValue,
+  PeerPoolOptionValue,
+  PeerPoolValue,
   RoleChoiceValue,
   RoleRoutingValue,
   StartResult,
@@ -46,6 +52,12 @@ export function newOperationId(): string {
 // ---------------------------------------------------------------------------
 
 export const targetKey = (target: TargetValue): string => `${target.hostId} ${target.daemonHome}`;
+
+// Shell/card seam key formats (wave 11 S3): cards declare catalog scopes
+// and feature picks; the shell owns both caches keyed by these strings.
+export const catalogScope = (family: FamilyName, role: RoleName): string => `${family}|${role}`;
+export const featureKey = (family: FamilyName, role: RoleName, model: string, modeId: string): string =>
+  `${family}|${role}|${model}|${modeId}`;
 
 export interface TargetView {
   status: StatusResult | null;
@@ -480,7 +492,7 @@ export const routingChoiceDiffers = (
  *  pick; the pickers' "(stored)" escape hatches still cover stored values the
  *  catalog doesn't list. */
 export function applyFamilyChange(
-  form: RoutingRoleForm,
+  form: Pick<RoutingRoleForm, "model" | "modeId" | "thinkingOptionId">,
   family: FamilyName,
   catalog: CatalogResult | undefined,
 ): RoutingRoleForm {
@@ -493,6 +505,414 @@ export function applyFamilyChange(
       : "";
   return { family, model, modeId, thinkingOptionId, features: "", feature: {} };
 }
+
+/** A model or mode switch invalidates the feature form: feature defs are
+ *  keyed `family|model|modeId`, so values authored under the previous key
+ *  would persist silently and write to the pool for a setting that may not
+ *  declare them — the same rule applyFamilyChange applies on a family
+ *  switch. The role card and the seat editor share this path. A no-change
+ *  set returns the form untouched so a redundant pick never clears authored
+ *  values. On a model switch the current family's catalog (when known) also
+ *  decides the thinking option's fate (host parity): a resolved model that
+ *  declares ZERO options renders no thinking control at all, so a stored ID
+ *  would never be visible or correctable — it clears here instead of
+ *  surviving into Save. An unresolved model (catalog absent/errored/model
+ *  unlisted) keeps the ID for the free-text fallback, and a model declaring
+ *  a different option set keeps it under the picker's "(stored)" hatch. */
+export function applySettingChange<
+  F extends {
+    model: string;
+    modeId: string;
+    thinkingOptionId: string;
+    features: string;
+    feature: Record<string, string>;
+  },
+>(form: F, field: "model" | "modeId", value: string, catalog?: CatalogResult | null): F {
+  if (value === form[field]) return form;
+  const thinkingOptionId =
+    field === "model" && thinkingOptionsFor(catalog, value)?.options.length === 0
+      ? ""
+      : form.thinkingOptionId;
+  return { ...form, [field]: value, thinkingOptionId, features: "", feature: {} };
+}
+
+// ---------------------------------------------------------------------------
+// Peer pool — the user-scope catalog the plugin owns at slp-runtime/state/
+// peer-pool.json (readCatalog resolves it for every repository without its
+// own .paseo-slp/slp-routing.json; this card is its sole writer). The form
+// mirrors the role-routing form: one build path feeds the Save diff-gate and
+// savePeerPool so an enabled button can never write something the gate did
+// not compare.
+// ---------------------------------------------------------------------------
+
+export const PEER_SEAT_ID = /^[a-z][a-z0-9-]*$/;
+
+/** The pool card's editable copy of one pool option — same conventions as
+ *  RoutingRoleForm (`features` is the raw JSON base shown when the provider
+ *  declares no feature defs, `feature` the per-definition control values).
+ *  `family` mirrors `provider` ("" while the seat is parked); `suitableFor`
+ *  and `avoidFor` are one-entry-per-line text. `custom` is view state only —
+ *  it records that the row was created as a Custom seat so an id typed onto a
+ *  reserved standard name is a reserved-name error, not a silent flip to
+ *  Package-managed (§7.2: the id set decides management, and the form never
+ *  auto-converts a Custom row mid-edit). It is never written to the pool.
+ *  `storedId` is the id the row carried when the pool snapshot loaded — a
+ *  rename/convert changes `id` but keeps `storedId`, so buildPeerSeat still
+ *  spreads the stored option's passthrough fields the form does not model.
+ *  `uid` is draft-only identity: it keys the rendered row so editing `id`
+ *  never remounts the editor (the row is the same draft seat), and it is
+ *  never written to the pool or compared for dirt. */
+export interface PeerSeatForm {
+  uid: string;
+  id: string;
+  storedId?: string;
+  family: FamilyName | "";
+  model: string;
+  modeId: string;
+  thinkingOptionId: string;
+  enabled: boolean;
+  features: string;
+  feature: Record<string, string>;
+  suitableFor: string;
+  avoidFor: string;
+  notes: string;
+  custom: boolean;
+}
+
+export interface PeerPoolForm {
+  policy: string;
+  seats: PeerSeatForm[];
+  quotaFallbackEnabled: boolean;
+  /** The single designated fallback seat id — "" when unset. */
+  quotaFallbackId: string;
+}
+
+/** One-entry-per-line text → the option's string list: trimmed, blanks
+ *  dropped. Entries themselves may contain commas ("reads, triages"). */
+export const lineList = (text: string): string[] =>
+  text.split("\n").map(line => line.trim()).filter(line => line !== "");
+
+/** Draft-row identity — a module counter so every seat row gets a stable,
+ *  collision-free uid regardless of how its `id` is edited (spec §7.4 row
+ *  stability: typing a custom id must not remount the row). */
+let seatUidCounter = 0;
+const newSeatUid = (): string => `draft-seat-${++seatUidCounter}`;
+
+/** Stored option → form seat (the Load path). Stored `features` seed both
+ *  the raw-JSON base and the per-definition controls — same prefill the role
+ *  form gives stored featureValues. */
+export function peerSeatForm(option: PeerPoolOptionValue): PeerSeatForm {
+  const feature: Record<string, string> = {};
+  for (const [featureId, value] of Object.entries(option.features ?? {})) {
+    feature[featureId] = String(value ?? "");
+  }
+  return {
+    uid: newSeatUid(),
+    id: option.id,
+    family: option.provider === "" ? "" : option.provider,
+    model: option.model,
+    modeId: option.modeId ?? "",
+    thinkingOptionId: option.thinkingOptionId ?? "",
+    enabled: option.enabled,
+    features: option.features ? JSON.stringify(option.features) : "",
+    feature,
+    suitableFor: option.suitableFor.join("\n"),
+    avoidFor: option.avoidFor.join("\n"),
+    notes: option.notes,
+    // A stored seat on a reserved standard id is package-managed (possibly in
+    // Token conflict); every other stored id is a custom seat.
+    custom: !isStandardSeatId(option.id),
+    storedId: option.id,
+  };
+}
+
+/** Fresh-form defaults for an absent pool: the policy line carries the
+ *  retired template's wording, the seat list starts empty. */
+export function emptyPeerPoolForm(): PeerPoolForm {
+  return {
+    policy: "Human maintains model suitability and quota. Lead chooses within the current assignment budget.",
+    seats: [],
+    quotaFallbackEnabled: false,
+    quotaFallbackId: "",
+  };
+}
+
+/** Stored pool → form (the Load path); null seeds the empty defaults. */
+export function peerPoolForm(pool: PeerPoolValue | null): PeerPoolForm {
+  if (pool === null) return emptyPeerPoolForm();
+  return {
+    policy: pool.policy,
+    seats: pool.options.map(peerSeatForm),
+    quotaFallbackEnabled: pool.quotaFallback?.enabled === true,
+    quotaFallbackId: pool.quotaFallback?.optionId ?? "",
+  };
+}
+
+/** Archetype → form seat: parked (blank family/model, disabled) so the Human
+ *  picks real catalog values; prose carries the archetype's intent. The id
+ *  is the canonical reserved name — a standard seat is never suffixed. */
+export function peerSeatFromArchetype(archetype: SeatArchetype): PeerSeatForm {
+  return {
+    uid: newSeatUid(),
+    id: archetype.id,
+    family: "",
+    model: "",
+    modeId: "",
+    thinkingOptionId: "",
+    enabled: false,
+    features: "",
+    feature: {},
+    suitableFor: archetype.suitableFor.join("\n"),
+    avoidFor: archetype.avoidFor.join("\n"),
+    notes: archetype.notes,
+    custom: false,
+  };
+}
+
+/** Suggested unused custom id for a base name — `<base>-2`, `-3`… — that can
+ *  never land on a reserved standard id (§7.2). An empty or invalid base
+ *  falls back to "seat" so the suggestion is always a valid custom id. */
+export function suggestCustomSeatId(base: string, existing: readonly string[]): string {
+  const taken = new Set(existing);
+  const stem = PEER_SEAT_ID.test(base.trim()) ? base.trim() : "seat";
+  for (let n = 2; ; n++) {
+    const candidate = `${stem}-${n}`;
+    if (!taken.has(candidate) && !isStandardSeatId(candidate)) return candidate;
+  }
+}
+
+/** "Create a custom seat from template" (§7.4.C): the template's tokens/notes copied into a
+ *  new Custom seat — parked (blank binding, disabled) with a suggested
+ *  non-reserved id. Custom seats do not receive package token updates. */
+export function customSeatFromArchetype(archetype: SeatArchetype, existing: readonly string[]): PeerSeatForm {
+  return { ...peerSeatFromArchetype(archetype), id: suggestCustomSeatId(archetype.id, existing), custom: true };
+}
+
+/** "Create a custom copy" (§7.4.C): a full copy of the viewed seat — binding and
+ *  contents included — under a suggested custom id, disabled. The original
+ *  seat and its quotaFallback references stay untouched. */
+export function customSeatCopy(seat: PeerSeatForm, existing: readonly string[]): PeerSeatForm {
+  // Fresh uid — the copy is a distinct draft row, not a second handle on the
+  // original's identity.
+  return { ...seat, uid: newSeatUid(), id: suggestCustomSeatId(seat.id.trim() || "seat", existing), enabled: false, custom: true };
+}
+
+/** Custom-id validation for the seat id input and the convert-to-custom
+ *  dialog (§7.4.D): syntax, duplicates inside the pool and the reserved
+ *  standard names. `existing` is the pool's OTHER seat ids (the seat's own
+ *  current id is not a collision). */
+export function customSeatIdError(id: string, existing: readonly string[]): string | null {
+  const trimmed = id.trim();
+  if (!PEER_SEAT_ID.test(trimmed)) {
+    return `id must match ${PEER_SEAT_ID} (lowercase letters, digits, dashes)`;
+  }
+  if (trimmed === ROUTE_DECLINE_OPTION_ID) {
+    return `"${trimmed}" is reserved for the Jev decline sentinel — no seat may take it`;
+  }
+  if (isStandardSeatId(trimmed)) {
+    return `"${trimmed}" is a reserved standard-seat id — pick a custom id such as "${suggestCustomSeatId(trimmed, existing)}"`;
+  }
+  if (existing.includes(trimmed)) return `"${trimmed}" is already used by another seat`;
+  return null;
+}
+
+/** Management label per §7.2's exact id matching: a reserved id means
+ *  Package-managed — unless the row was created Custom and the reserved name
+ *  is only its (invalid, unsavable) edit text. */
+export const seatManagement = (seat: PeerSeatForm): "package-managed" | "custom" =>
+  seat.custom === true || !isStandardSeatId(seat.id.trim()) ? "custom" : "package-managed";
+
+/** Token conflict on a form seat (§7.4.D): the row carries a reserved
+ *  standard id and its draft tokens diverge from the package set. Compared
+ *  as unordered sets; a Custom row never conflicts — its reserved-name
+ *  problem is reported by customSeatIdError/build instead. */
+export const formSeatConflict = (seat: PeerSeatForm): SeatTokenConflict | null =>
+  seatManagement(seat) === "package-managed"
+    ? seatTokenConflict({ id: seat.id.trim(), suitableFor: lineList(seat.suitableFor), avoidFor: lineList(seat.avoidFor) })
+    : null;
+
+/** "Convert this seat to a custom seat" (§7.4.D): rename the seat to a custom id
+ *  and retarget the in-pool quotaFallback designation in the same draft edit —
+ *  one action, one Save, no dangling reference. The caller validates newId with
+ *  customSeatIdError first. */
+export function convertSeatToCustom(form: PeerPoolForm, index: number, newId: string): PeerPoolForm {
+  const oldId = form.seats[index]?.id;
+  const seats = form.seats.map((seat, i) =>
+    i === index ? { ...seat, id: newId.trim(), custom: true } : seat);
+  const quotaFallbackId = form.quotaFallbackId === oldId ? newId.trim() : form.quotaFallbackId;
+  return { ...form, seats, quotaFallbackId };
+}
+
+/** §7.4.C import gate: legacy data exists, the stored pool is absent AND the
+ *  draft is untouched — no seats and no policy/fallback edits. A failed pool
+ *  read (no snapshot) never opens the gate. */
+export const legacyImportAllowed = (
+  data: { legacy: PeerPoolValue | null; pool: PeerPoolValue | null } | null,
+  form: PeerPoolForm,
+  dirty: boolean,
+): boolean => data?.legacy != null && data.pool === null && form.seats.length === 0 && !dirty;
+
+export type PeerSeatBuild = { option: PeerPoolOptionValue } | { error: string };
+
+/** Form seat → storable pool option. `stored` spreads first so a field the
+ *  schema later adds passes through untouched (buildRoleChoice's convention);
+ *  `priority` is deliberately dropped — the field is retired, not merely
+ *  hidden. `roles` is always ["peer"] and `availability` always "ready" —
+ *  the one per-seat toggle writes both facts. An enabled seat with a blank
+ *  family or model is the combination validateCatalog would reject, so the
+ *  build errors it early rather than letting it reach the file. */
+export function buildPeerSeat(
+  form: PeerSeatForm,
+  stored: PeerPoolOptionValue | undefined,
+  defs: CatalogResult["features"],
+): PeerSeatBuild {
+  const id = form.id.trim();
+  if (!PEER_SEAT_ID.test(id)) {
+    return { error: `seat "${form.id.trim() || "?"}": id must match ${PEER_SEAT_ID} (lowercase letters, digits, dashes)` };
+  }
+  const label = `seat ${id}`;
+  // §7.2 semantic checks — the build is the real gate, not the input's
+  // disabled flag: a Custom row may never carry a reserved standard name, and
+  // a Package-managed row may never store tokens diverging from the package
+  // set (that state is a Token conflict to resolve, not valid content).
+  if (id === ROUTE_DECLINE_OPTION_ID) {
+    return { error: `${label}: "${id}" is reserved for the Jev decline sentinel — no seat may take it` };
+  }
+  if (isStandardSeatId(id) && form.custom === true) {
+    return { error: `${label}: "${id}" is a reserved standard-seat id — pick a custom id such as "${suggestCustomSeatId(id, [])}"` };
+  }
+  if (seatManagement(form) === "package-managed") {
+    const conflict = seatTokenConflict({ id, suitableFor: lineList(form.suitableFor), avoidFor: lineList(form.avoidFor) });
+    if (conflict) {
+      return { error: `${label}: Token conflict — the draft tokens differ from the package standard set; open the seat and use "Apply the standard set" or "Convert this seat to a custom seat"` };
+    }
+  }
+  if (form.enabled && form.family === "") return { error: `${label}: an enabled seat needs a provider family` };
+  if (form.enabled && form.model.trim() === "") return { error: `${label}: an enabled seat needs a model` };
+  const option: Record<string, unknown> = { ...(stored ?? {}) };
+  delete option.priority;
+  option.id = id;
+  option.provider = form.family;
+  option.roles = ["peer"];
+  option.model = form.model.trim();
+  option.enabled = form.enabled;
+  option.availability = "ready";
+  const modeId = form.modeId.trim();
+  if (modeId) option.modeId = modeId;
+  else delete option.modeId;
+  const thinkingOptionId = form.thinkingOptionId.trim();
+  if (thinkingOptionId) option.thinkingOptionId = thinkingOptionId;
+  else delete option.thinkingOptionId;
+  const featuresRaw = form.features.trim();
+  let featuresJson: Record<string, unknown> = {};
+  if (featuresRaw) {
+    try {
+      const parsed: unknown = JSON.parse(featuresRaw);
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return { error: `${label}: feature values must be a JSON object` };
+      }
+      featuresJson = parsed as Record<string, unknown>;
+    } catch {
+      return { error: `${label}: feature values are not valid JSON` };
+    }
+  }
+  if (defs.length > 0) {
+    const merged = mergeFeatureValues(defs, featuresJson, form.feature);
+    if (Object.keys(merged).length > 0) option.features = merged;
+    else delete option.features;
+  } else if (featuresRaw) {
+    option.features = featuresJson;
+  } else {
+    delete option.features;
+  }
+  option.suitableFor = lineList(form.suitableFor);
+  option.avoidFor = lineList(form.avoidFor);
+  const notes = form.notes.trim();
+  if (!notes) return { error: `${label}: notes are required (local only — Jev never sees them)` };
+  option.notes = notes;
+  return { option: option as PeerPoolOptionValue };
+}
+
+export type PeerPoolBuild = { pool: PeerPoolValue } | { error: string; seatIndex?: number };
+
+/** Form → storable PeerPool: seat ids unique, fallback ids unique and drawn
+ *  from this pool's seats, and an enabled fallback never empty — the same
+ *  constraints validateCatalog enforces on read, surfaced here so the Save
+ *  gate can name them before dispatch. Seat-level errors carry `seatIndex`
+ *  so the card can offer a button that opens the offending seat's editor. */
+export function buildPeerPool(
+  form: PeerPoolForm,
+  defsFor: (seat: PeerSeatForm) => CatalogResult["features"],
+  storedOptions?: ReadonlyMap<string, PeerPoolOptionValue>,
+): PeerPoolBuild {
+  const policy = form.policy.trim();
+  if (!policy) return { error: "pool policy is required" };
+  const ids = new Set<string>();
+  const options: PeerPoolOptionValue[] = [];
+  for (const [index, seat] of form.seats.entries()) {
+    // Look the stored option up by the id the row had at load (storedId),
+    // not the edited id — a rename/convert must keep passthrough fields the
+    // form does not model (§7.4.D).
+    const built = buildPeerSeat(seat, storedOptions?.get(seat.storedId ?? seat.id.trim()), defsFor(seat));
+    if ("error" in built) return { error: built.error, seatIndex: index };
+    if (ids.has(built.option.id)) return { error: `duplicate seat id "${built.option.id}"`, seatIndex: index };
+    ids.add(built.option.id);
+    options.push(built.option);
+  }
+  const fallbackId = form.quotaFallbackId.trim();
+  if (fallbackId !== "" && !ids.has(fallbackId)) {
+    return { error: `quotaFallback option "${fallbackId}" is not a pool seat` };
+  }
+  if (form.quotaFallbackEnabled && fallbackId === "") {
+    return { error: "an enabled quota fallback needs a designated seat" };
+  }
+  return {
+    pool: {
+      version: 1,
+      policy,
+      quotaFallback: { enabled: form.quotaFallbackEnabled, optionId: fallbackId === "" ? null : fallbackId },
+      options,
+    } as PeerPoolValue,
+  };
+}
+
+/** Order-stable key for whole-pool equality — file key order must never make
+ *  a byte-identical pool look dirty. Arrays stay ordered: option order is
+ *  meaningful. */
+const canonicalPoolKey = (value: unknown): string =>
+  JSON.stringify(value, (_key, v) =>
+    v !== null && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(Object.keys(v).sort().map(k => [k, (v as Record<string, unknown>)[k]]))
+      : v,
+  );
+
+export function peerPoolEquals(
+  a: PeerPoolValue | null | undefined,
+  b: PeerPoolValue | null | undefined,
+): boolean {
+  if (a == null || b == null) return a == b;
+  return canonicalPoolKey(a) === canonicalPoolKey(b);
+}
+
+/** One gate predicate for a built pool against the stored one — an error
+ *  build counts as differing so Save stays pressable and surfaces the build
+ *  error; an absent stored pool differs from any bound form (a save persists
+ *  a pool where none existed). */
+export const peerPoolDiffers = (
+  build: PeerPoolBuild,
+  stored: PeerPoolValue | null | undefined,
+): boolean => "error" in build || !peerPoolEquals(build.pool, stored);
+
+/** Structural form equality for the prefill effect — the same re-render
+ *  guard sameRoleForm gives the role form. `uid` is draft identity, not
+ *  content: a snapshot-prefill that differs only in fresh uids keeps the
+ *  current form so rendered rows keep their keys. */
+const withoutSeatUids = (form: PeerPoolForm): unknown => ({
+  ...form,
+  seats: form.seats.map(({ uid: _uid, ...seat }) => seat),
+});
+export const samePeerPoolForm = (a: PeerPoolForm, b: PeerPoolForm): boolean =>
+  JSON.stringify(withoutSeatUids(a)) === JSON.stringify(withoutSeatUids(b));
 
 // The view patch a start response produces. Conflicts are surfaced whenever
 // they are present — accepted or not (an accepted reconcile inspect can still

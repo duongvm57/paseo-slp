@@ -337,7 +337,7 @@ After this refactor the remaining steps are exactly three:
   editable before the first binding for the first time — the earlier
   trade-off note (features/thinking only editable post-binding via the
   profiles card) no longer applies. Feature defs are fetched per
-  routing-form `family|model|modeId` pick. **Corrected record
+  routing-form `family|role|model|modeId` pick. **Corrected record
   (2026-09-19, Run 8):** this bullet previously claimed "`CatalogOutput`
   exposes models/modes/features only — no thinking options — so thinking
   stays a free-text field." That was wrong about the host, not just the
@@ -355,11 +355,14 @@ After this refactor the remaining steps are exactly three:
   `Provider default (<id>)` when `defaultThinkingOptionId` is known,
   else `Provider default`), each declared option with `(default)`
   appended to its label, plus a `<id> (stored)` escape — same pattern as
-  the mode picker — when the stored value isn't in the list. A resolved
-  model declaring zero options shows the static hint "This model
-  declares no thinking options" instead of a free-text field (typing
-  would invite garbage), unless a stale stored value exists — then the
-  ChipSelect still renders so the leftover stays visible and clearable.
+  the mode picker — when the stored value isn't in the list.
+  **Corrected render contract (wave 9, host parity):** a resolved model
+  declaring zero options renders **no thinking control at all** — no
+  hint, no `(stored)` chip, matching the host where the control only
+  exists when `selectedModel.thinkingOptions.length > 0` — and picking
+  such a model clears a stored `thinkingOptionId` from the form via
+  `applySettingChange`, so nothing stale reaches Save. A model
+  declaring a *different* option set still shows the `(stored)` chip.
   No catalog, no picked model, or a model the catalog doesn't list keeps
   the free-text field — the established degradation path. Save maps
   empty fields to absent keys (`RoleChoice` unset semantics — the live
@@ -367,6 +370,33 @@ After this refactor the remaining steps are exactly three:
   and is never emitted), declared feature controls win over the raw JSON
   base, undeclared keys are preserved from the base, and an empty
   control drops the key.
+  **Corrected catalog source (wave 9b, host parity):** `loadCatalog`
+  previously made three legacy calls against the base family —
+  `listModels`/`listModes`/`listFeatures`. It now fetches provider data
+  the same way the host agent profile does: one
+  `paseo.providers.snapshot({cwd})` call, then the entry is picked by
+  the managed provider id for the request's role
+  (`slp-<family>-supervisor|lead|peer`), falling back to the base family
+  entry; neither resolves to an entry → the catalog reports an error
+  instead of re-asking legacy endpoints (the daemon just proved
+  snapshot-capable). Models filter `isSelectable !== false`; modes come
+  from the snapshot entry and ship only when `entry.status === "ready"`
+  — no `listModes` call happens on the snapshot path. Snapshot entries
+  carry no feature definitions, so features still go through
+  `listFeatures`, on the RESOLVED provider id
+  (`<resolvedProvider>/<model>`), not the bare family. `CatalogInput`
+  gains an optional `role`; `CatalogOutput` gains `resolvedProvider`
+  (absent on the legacy path). `PaseoApi` exposes no `serverInfo`
+  accessor, so capability detection is probe-and-latch: one
+  snapshot attempt, and a confirmed-absent RPC — the method missing or
+  the daemon's `unknown_schema` "Unknown request" reply — latches
+  `snapshotUnsupported` for the plugin process (the daemon version is
+  fixed for that lifetime) with a one-line warning; any other failure
+  degrades that call to legacy without latching, so the next read
+  retries the snapshot. Pre-snapshot daemons keep the legacy
+  `listModels`/`listModes`/`listFeatures` path verbatim. The
+  ManagerSurface cache keys follow the same scope: catalogs under
+  `family|role`, feature defs under `family|role|model|modeId`.
 - **Provider label unification** — generated provider entries now emit
   one label template for every transport: `SLP <Family> <Role>`
   (`SLP Codex Peer`, `SLP Pi Peer`, `SLP Claude Code Peer`,
@@ -456,8 +486,8 @@ After this refactor the remaining steps are exactly three:
   `setRoutingField`; a dedicated family-change handler applies
   `applyFamilyChange(form, family, catalog)`, which re-validates dependents
   against the NEW family's catalog under keep-if-present rules: `model`
-  keeps only if `catalogs[family].models` lists it, `modeId` only if
-  `catalogs[family].modes` lists it (pi declares zero modes, so switching to
+  keeps only if the `family|role` catalog's models list it, `modeId` only if
+  its modes list it (pi declares zero modes, so switching to
   pi always clears it; devin `bypass` is not a codex/claude mode), and
   `thinkingOptionId` only if the KEPT model still declares it via
   `thinkingOptionsFor` — the model resolves first, thinking second.

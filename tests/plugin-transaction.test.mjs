@@ -23,6 +23,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID, createHash } from 'node:crypto';
 import { createManager } from '../plugin/server/manager.ts';
+import { createStateStore } from '../plugin/server/state-store.ts';
 import {
   assertPersistedCompatible,
   patchForDirection,
@@ -404,6 +405,7 @@ test('set-language writes, reports and clears the plugin-owned language file', a
   const home = makeHome(t);
   const daemon = await makeDaemon(t, home);
   const manager = createManager(makeDeps());
+  const store = createStateStore();
   const file = join(home, 'slp-runtime', 'state', 'communication-language');
 
   // Unset → status reports null (seats keep the model default).
@@ -412,14 +414,14 @@ test('set-language writes, reports and clears the plugin-owned language file', a
   assert.equal(existsSync(file), false);
 
   // Set → the file lands verbatim; status reports it.
-  const set = await manager.setLanguage({ schemaVersion: 1, target: targetOf(home), value: 'Vietnamese' });
+  const set = await store.setLanguage({ schemaVersion: 1, target: targetOf(home), value: 'Vietnamese' });
   assert.deepEqual(set, { schemaVersion: 1, value: 'Vietnamese' });
   assert.equal(readFileSync(file, 'utf8'), 'Vietnamese\n');
   const during = await manager.status(statusInput(home), daemon);
   assert.equal(during.communicationLanguage, 'Vietnamese');
 
   // Clear → file removed, status null again.
-  const cleared = await manager.setLanguage({ schemaVersion: 1, target: targetOf(home), value: null });
+  const cleared = await store.setLanguage({ schemaVersion: 1, target: targetOf(home), value: null });
   assert.deepEqual(cleared, { schemaVersion: 1, value: null });
   assert.equal(existsSync(file), false);
   const after = await manager.status(statusInput(home), daemon);
@@ -427,7 +429,7 @@ test('set-language writes, reports and clears the plugin-owned language file', a
 
   // Schema guards the write: empty/whitespace values are refused.
   await assert.rejects(() =>
-    manager.setLanguage({ schemaVersion: 1, target: targetOf(home), value: '   ' }),
+    store.setLanguage({ schemaVersion: 1, target: targetOf(home), value: '   ' }),
     /invalid set-language input/);
 });
 

@@ -9,8 +9,10 @@ canonical procedure — this file is the same workflow in standalone form.
 - `.paseo-slp/workspace-protocol.md` — operating tactics for this repo's
   agent teams. Human-readable: risk levels, proof gates, budget, fallback
   authority, notebook location.
-- `.paseo-slp/slp-routing.json` — the Peer runtime pool. Machine-readable
-  catalog the Lead picks from per delegation.
+- `.paseo-slp/slp-routing.json` — optional, a deliberate repo pin of the Peer
+  runtime pool, created only by `init --routing-from`. The default pool is the
+  user-scope `slp-runtime/state/peer-pool.json` the Manager's Peer pool card
+  owns — the Lead picks from whichever scope applies, per delegation.
 - `.paseo-slp/notebook.md` — the Supervisor's durable notebook scaffold.
 
 Supervisor/Lead runtimes come from the saved Paseo profiles `slp-supervisor`
@@ -46,23 +48,30 @@ shapes.
 
 ### Routing
 
-1. Where the Peer model list lives — this repo's
-   `.paseo-slp/slp-routing.json` (init seeds it with disabled task-type seats
-   the Human fills and reshapes), or the shared user file
-   `$PASEO_HOME/slp-routing.json` (every repo without its own list falls back
-   to it; install seeds the same skeleton there when absent — check whether
-   it already holds real options before promising the fallback works). The
+1. Where the Peer model list lives — the shared user-scope pool
+   `$PASEO_HOME/slp-runtime/state/peer-pool.json`, authored in the SLP
+   Manager's Peer pool card (its model/mode values come from the live
+   provider catalog; every repo without its own catalog falls back to it —
+   check whether it already holds real options before promising the
+   fallback works), or a repo-pinned `.paseo-slp/slp-routing.json` that
+   exists only where `init --routing-from` imported an explicitly chosen
+   file — any repo catalog is authoritative and blocks the fallback. The
    Human may also keep this repo deliberately without a pool, which blocks
-   Peer delegation until filled.
-2. For a list meant to work: walk the seeded seats together — which
+   Peer delegation until the shared pool is filled.
+2. For a pool meant to work: walk the seats together in the Manager — which
    discovered `slp-*-peer` provider/model/settings fill each seat, which
-   seats to drop or add, their `priority`, and the `quotaFallback` policy.
+   seats to drop or add, and the `quotaFallback` policy.
 3. Communication language — used for everything a seat writes for other
    seats: prompts and inline fields in delegation requests, reports,
    assignments, briefs, handbacks and the causal notebook. Direct
    conversational replies to the Human mirror the Human's current language
    instead.
 4. Where the Supervisor notebook lives and how to retrieve it.
+5. Jev-assisted routing — optional and per-daemon, not a repo file: the SLP
+   Manager's Jev (OpenRouter) card holds the toggles and key. Default off;
+   when the Human arms it, Peer delegation requires a `route-decide` receipt
+   (see `src/references/provider-routing.md`). Onboarding does not create or
+   edit it.
 
 Present the options you actually discovered. Never invent model IDs,
 capability claims or suitability guarantees.
@@ -152,16 +161,22 @@ Preview with `node bin/slp.mjs init <absolute-repo>`, then rerun with
   disposition's intended skills in the protocol's skills notes so Lead can
   name them in the assignment. The table states defaults and triggers, not
   obligations; spawn-time dispositions stay free-form.
-- Human chose the shared list → delete the seeded `slp-routing.json` init
-  created; any repo catalog file is authoritative and blocks the fallback.
-  Then check `$PASEO_HOME/slp-routing.json`: if it still holds only the
-  seeded skeleton, ask whether to populate it with the same discovered
-  options — writing outside the repo needs an explicit grant.
-- Human chose a repo pool → fill the seeded seats per the schema in
-  `provider-routing.md`: `id`, `provider`, exact discovered `model`,
-  `enabled`, `availability`, `priority`, `suitableFor`/`avoidFor`, `notes`,
-  and `quotaFallback` only under Human fallback authority.
-- Human chose no pool → strip the seeded seats, leaving `options: []`.
+- Human chose the shared pool → fill the seats in the SLP Manager's Peer
+  pool card (a legacy `$PASEO_HOME/slp-routing.json` can be imported once
+  from there; the card writes `state/peer-pool.json` only). The plugin owns
+  that file — editing it by hand or through another tool bypasses the
+  catalog pickers.
+- Human chose a repo pool → build the catalog file per the schema in
+  `provider-routing.md` (`id`, `provider`, exact discovered `model`,
+  `enabled`, `availability`, `suitableFor`/`avoidFor` (the closed
+  `axis:value` vocabulary on the 12 reserved standard-seat ids, free-form on
+  custom seats — docs/spec/routing-criteria.md), `notes`, and
+  `quotaFallback` only under Human fallback authority), then
+  `slp init <repo> --routing-from <file> --apply`. The Manager's Copy pool
+  JSON button supplies the document shape; pasting it into a repo pins that
+  repo off the shared pool permanently.
+- Human chose no pool → nothing to write: init creates no catalog, and the
+  shared pool simply needs no seats for this repo's work.
 
 Write the protocol only through a confirmed diff: present the exact
 complete diff with material consequences, obtain direct Human
@@ -173,8 +188,8 @@ write. For a revision, bump the frontmatter version and refresh
 
 ## Step 4 — validate
 
-- `node bin/slp.mjs routes <absolute-repo>` → catalog hash + eligible
-  options.
+- `node bin/slp.mjs routes <absolute-repo>` → catalog hash + the raw catalog
+  (eligibility is judged per option against `enabled`/`availability`/`roles`).
 - For each intended option, run `prepare` with `role: "peer"`, the
   repository/workspace, a short assignment and
   `route: {optionId, catalogSha256}`; verify the emitted provider/model/

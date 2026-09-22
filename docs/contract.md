@@ -22,7 +22,10 @@ Local installation/transport checks do not constitute workflow acceptance.
 | src/references/anti-patterns.md | All 20 guide §9 hypotheses with evidence, questions and bounded responses; reached on audit/drift triggers. |
 | src/references/provider-routing.md | Supervisor/Lead profile selection, Peer pool selection, validation and handoff procedure. |
 | src/references/review-gates.md | Review gate structure: parallel axis-split seats (Spec vs Standards, optional cross-family), smell baseline, neutral briefs, non-merged aggregation. |
-| src/routing.mjs | Resolve the repository catalog, falling back to the user-scope catalog when absent; bind a Lead-selected option with fresh hash and availability checks. |
+| src/routing.mjs | Resolve the repository catalog, falling back to the plugin-owned user-scope pool at `<paseoHome>/slp-runtime/state/peer-pool.json` when absent; bind a Lead-selected option with fresh hash and availability checks. `optionExclusions` is the single eligibility predicate — closed-vocabulary tokens (`disabled`, `availability:<state>`, `role-not-listed`) shared by enforcement and Jev candidate generation. `validateCatalog` stays shape-only apart from normalizing the legacy `optionIds` quota-fallback list in place on read (≤1 → `optionId`, >1 fails closed — wave 6) and refusing the Jev decline sentinel as an option id — a shape-level collision; the semantic layer reports a reserved standard-seat id whose tokens diverge from the package set as a Token conflict on every read, and `catalogBinding` refuses to bind one. `catalogBinding` verifies a supplied Jev receipt offline — including the vocabulary version it was issued under — and requires one when the daemon arms `jev.capabilities.routing`. |
+| src/routing-vocabulary.mjs | Canonical routing-criteria vocabulary (docs/spec/routing-criteria.md): the four axes, the 16 standard `axis:value` tokens with definitions, the 12 reserved standard-seat ids with package token sets, the §4 reading helpers and the English Jev guidance — all versioned under `ROUTING_VOCABULARY_VERSION`. `plugin/shared/routing-vocabulary.ts` is its Manager-side mirror; neither side can import the other, so tests pin identical data. |
+| src/jev.mjs | Jev (TypeSafe System One) bounded-decision transport — never an ACP provider. Per-daemon config/key resolution (fail closed, all toggles default off) over two provider kinds: `openrouter` (Decisions API, pinned `typesafe/jev-1.13`, `provider.allow_fallbacks: false` on the wire) and `typesafe` (first-party `POST {baseUrl}/v1/systemone`, pinned `jev-1.13.0`, no provider field; baseUrl may be a custom https origin+path prefix) — each with its own model pin and baseUrl rule, calls with ~5s timeout and at most one bounded retry, typed-answer validation, credential-shaped-string redaction before send, and decision-receipt build/verify with the pin chosen by the receipt's provider kind. Receipts prove consistency, not authenticity; confidence is recorded, never a threshold. |
+| src/jev-routing.mjs | First Jev consumer: `route-decide` computes the deterministic eligible set from `optionExclusions`, drops Token-conflicted seats from candidates (reporting every catalog conflict on the receipt), sends the Lead-authored brief as state plus the versioned English suitability guidance and the compact per-token glossary (never raw assignmentFile bytes; catalog `notes` withheld) and emits the option id plus receipt. The per-option surface is fixed-shape — `id`, `provider`, `model`, `thinkingOptionId` (explicit `null` when absent), `suitableFor`, `avoidFor`. Decline exits nonzero; `jev-no-candidates` when no usable seat remains. Runs only on explicit invocation — no loops, schedules or prepare-time calls. |
 | skills/paseo-slp-onboarding/SKILL.md | Installable repo tactics and Peer pool setup, with Supervisor/Lead profile verification; project/global installation is independent from repo config initialization. |
 | src/templates/workspace-protocol.md | Repository tactics template with risk classes, routing, monitoring and proof gates; the `agent_mode` frontmatter field records the intended spawn mode for direct launches (empty falls back to the bundle's `modeId`, then asks); explicit init preserves existing files. |
 | src/binding.mjs | Every rule a Binding must satisfy: setting patterns, the route override deny-lists and the single provider-health check. Imports nothing from the package. |
@@ -34,8 +37,8 @@ Local installation/transport checks do not constitute workflow acceptance.
 | src/monitor.mjs | On-demand signal scan over daemon-owned agent state plus each declared worktree's git status; emits `{agentId, kind, evidence, observedAt}` candidates (attention, follow-up-round, idle-dirty, scope-drift, test-mirror, file-churn, tool-mix, correction-cadence) only for new fingerprints when a stateFile checkpoint is supplied — that checkpoint is the only write. Never a verdict, daemon or rendered-log parse; broken cwd becomes an evidence gap. An opt-in `devinSessionsDb` request field probes the devin CLI sessions.db read-only for devin-family agents (joined by `persistence.nativeHandle` = `sessions.id`; a missing or unmatched handle is a gap — never a cwd guess) to derive tool-mix and correction-cadence candidates; every failure is an evidence gap, not a crash. |
 | src/notebook.mjs | Read-only locator for a repository's active governance notebook: resolves the repository's git common dir — the property linking a worktree back to its repository — then lists Supervisor agents (provider containing `supervisor`, or a Supervisor-titled state file) whose `cwd` shares it. Output is candidates only, sorted by lastActivityAt, each with notebook path and `notebookExists`; broken agent cwds become gaps. Never copies or mutates notebook content, and picks no authoritative candidate — governance stays per-checkout. |
 | src/package.mjs | Package identity, exclusive staging, integrity checks and stable Git work snapshot; untracked nested Git work-tree roots are snapshotted recursively under `nested`, sub-repos can carry their own `nested`, and index gitlinks record `{path, kind:"gitlink", indexOid, headOid, state}` with non-clean states listed in top-level `incomplete`. |
-| src/runtime-state.mjs | Read-only plugin-state probes (H13 workaround): `localTarget` mirrors the plugin's daemon-home detection; `runtimeStatus` recomputes the file-derivable parts of the daemon `status` view — receipt, owned providers/profiles, runtime and launcher integrity, config-drift presence — and reports daemon-only views (live conflicts, family availability) as gaps, never guesses. Fails closed on corrupt plugin state. Mutation RPCs are Human-authority and are not exposed. Retire when the host ships `paseo plugin invoke` or MCP `invoke_plugin_rpc`. |
-| bin/slp.mjs | Install/upgrade/preview, verify/uninstall, init, materialize, routes, prepare/handoff, inventory, agents, monitor, notebook, identity, snapshot, instructions (raw session-entry bundle bytes on stdout, provenance on stderr), status and local-target (read-only plugin-state probes) entrypoints. |
+| src/runtime-state.mjs | Read-only plugin-state probes (H13 workaround): `localTarget` mirrors the plugin's daemon-home detection; `runtimeStatus` recomputes the file-derivable parts of the daemon `status` view — receipt, owned providers/profiles, runtime and launcher integrity, config-drift presence — and reports daemon-only views (live conflicts, family availability) as gaps, never guesses. The Jev probe reports `hasKey`/`keyPermissionsOk` only — key material never enters output. Fails closed on corrupt plugin state. Mutation RPCs are Human-authority and are not exposed. Retire when the host ships `paseo plugin invoke` or MCP `invoke_plugin_rpc`. |
+| bin/slp.mjs | Install/upgrade/preview, verify/uninstall, init, materialize, routes, prepare/handoff, inventory, agents, monitor, notebook, identity, snapshot, instructions (raw session-entry bundle bytes on stdout, provenance on stderr), route-decide (the only path that calls Jev — explicit invocation, network, emits a receipt; prepare and prepare --check stay offline), status and local-target (read-only plugin-state probes) entrypoints. |
 | skills/paseo-slp-e2e/SKILL.md | Single-session full-suite execution procedure; requires the source checkout and authorized Paseo actors. |
 | e2e/evidence.mjs | One contract per evidence kind: what may enter the ledger and what discharges the kind's requirement at seal. |
 | e2e/criteria.mjs | U1–U7 as code, each naming the evidence kinds that can support it; the mapping a reviewer previously held in their head. |
@@ -75,12 +78,16 @@ current profile preferences and unrelated config, adds new bundles and rebinds o
 providers to the new directory while retaining the old installation for active sessions.
 Owned slp-peer and legacy disposition profiles are removed from host profiles and archived exactly
 in paseo-binding.json retiredProfiles for review. Other profiles remain untouched.
-Standalone host install/upgrade creates an empty user routing-catalog scaffold
-at <paseo-home>/slp-routing.json only when absent. Uninstall removes that
-scaffold only while its bytes remain unchanged; existing or Human-edited
-catalogs are preserved. Plugin v1 activation/deactivation does not create,
-edit, or delete routing catalogs. Populating routing choices and migrating
-repository catalogs require explicit onboarding or migration authority.
+The user-scope Peer pool is plugin-owned mutable state at
+<paseo-home>/slp-runtime/state/peer-pool.json (mode 0600, atomic
+whole-file writes under a sha256 compare-and-swap; the manager surface is
+its sole writer). Standalone host install/upgrade/uninstall and plugin
+activation/deactivation create, edit, and delete no routing catalogs —
+a repository catalog exists only where `init --routing-from` imported an
+explicitly chosen file. A legacy <paseo-home>/slp-routing.json is read for
+a one-time import into the pool and is never deleted automatically.
+Populating routing choices and migrating repository catalogs require
+explicit onboarding or migration authority.
 The old retained binding
 no longer owns current host entries and cannot uninstall those entries. Runtime cutover
 still requires task authority; neither install nor upgrade creates replacement sessions.
@@ -170,10 +177,16 @@ spawns, then the bundle's own — rather than verbatim copy. Missing or
 incompatible settings require Human configuration before the dependent launch.
 
 Peer delegation resolves the assigned repository's .paseo-slp/slp-routing.json
-first; when the repository has no catalog, the user-scope catalog
-($PASEO_HOME/slp-routing.json, default ~/.paseo) is the declared fallback.
-Onboarding prepares a pool of complete provider/model/settings options with
-suitableFor, avoidFor, notes, priority and explicit eligibility. Lead reads the pool,
+first; when the repository has no catalog, the plugin-owned user-scope pool
+($PASEO_HOME/slp-runtime/state/peer-pool.json, default ~/.paseo) is the
+declared fallback. Onboarding prepares a pool of complete provider/model/settings
+options with suitableFor, avoidFor, notes and explicit eligibility — authored in
+the manager surface, where model/mode values come from the live provider
+catalog. The 12 standard archetype ids are reserved: on them the package owns
+the closed `axis:value` suitability vocabulary (docs/spec/routing-criteria.md)
+and the fields are read-only; any other id is a custom seat with free strings,
+and a reserved id carrying divergent tokens is a Token conflict that cannot be
+saved or routed until resolved. Lead reads the pool,
 selects an option per task/budget, explains why it fits and validates its fresh hash
 with prepare. Provider pi/codex/devin/claude maps to the matching installed Peer wrapper; policy
 and disposition stay separate from runtime choice. Neither the Lead's family nor
@@ -181,6 +194,36 @@ a saved slp-peer limits the pool. No catalog in either scope, or an
 empty/no-eligible pool, blocks Peer creation until setup is completed — never a
 saved profile, another repository's catalog or inherited Lead settings. An empty
 repository catalog remains authoritative and disables the fallback.
+
+Jev-assisted routing is an opt-in per-daemon capability, configured under
+<daemonHome>/slp-runtime/state/jev.json with the provider key beside it in
+jev-<kind>.key (write-only, 0600; status surfaces hasKey only). Jev is a
+bounded decision primitive over either the OpenRouter Decisions API (pinned
+typesafe/jev-1.13) or the first-party TypeSafe System One API (pinned
+jev-1.13.0, custom https baseUrl allowed), never
+an ACP provider or agent seat, and runs only through the explicit
+route-decide helper — no loops, schedules or prepare-time calls; prepare and
+prepare --check remain offline and merely verify the supplied receipt. Two
+modes: shadow (enabled without capabilities.routing — route-decide emits a
+receipt, the Lead still chooses, the plan records both picks for agreement
+measurement) and armed (capabilities.routing=true — the receipt is required
+and binding, including optionId matching the recorded choice); when supplied
+a receipt is always verified, toggles apply at preparation time and never
+mutate running seats. Shadow evaluation precedes arming: the Human
+pre-registers exit criteria (agreement rate and the asymmetric error class)
+and arms only once the recorded pairs satisfy them. In armed mode the
+suitability reason trail is the receipt's recorded distribution, not Lead
+prose. Eligibility stays deterministic and precomputed (the same
+optionExclusions tokens enforcement uses), Jev may only pick inside the
+eligible set plus the explicit no-suitable-option sentinel, and every
+configuration, transport, validation or receipt error fails closed. An
+OpenRouter/TypeSafe outage therefore blocks only the dependent Peer
+delegation while armed — controlled degradation is the Human disabling the
+capability and Lead judgment resuming; disabling keeps the stored key.
+Confidence lands on the receipt as evidence, never as a routing threshold,
+and receipts prove consistency, not cryptographic authenticity. Accepted
+risk (recorded): the key file is 0600 inside the daemon home, yet any
+same-user process can read it — daemon-home integrity is the boundary.
 
 prepare accepts repository, workspaceId, assignment and role. Supervisor/Lead use
 fresh profiles/providers; Peer uses providers and route.optionId/catalogSha256.
@@ -209,11 +252,11 @@ workspace unless a declared worktree, repository or lane-isolation reason is
 recorded with its paths — a second workspace on the same checkout is not
 isolation. Source selection is shared by prepare-handoff.
 
-init creates missing protocol, empty pool scaffold and Supervisor notebook file
-without overwriting existing files. Onboarding completes the project pool; empty init output is not ready for
-Peer delegation and shadows the user-scope catalog until removed.
---routing-from imports only an explicitly chosen catalog into a
-missing repo file. Host upgrade archives retired Peer profiles but neither creates
+init creates missing protocol and Supervisor notebook files
+without overwriting existing files, and writes .paseo-slp/slp-routing.json only
+when --routing-from names an explicitly chosen catalog — a repository without
+its own catalog resolves the user-scope pool. Host upgrade archives retired Peer
+profiles but neither creates
 nor edits project catalogs, so setup never silently imports host choices.
 
 New basic manifests use runtimeSource=profiles-and-peer-pool. Supervisor/Lead
@@ -262,8 +305,9 @@ record it as an evidence gap instead of claiming full-candidate coverage.
 Listed directories that are not repositories remain unsupported. Before/after
 snapshots detect drift while Peer is paused, not transient or malicious writes.
 
-Peer quota fallback is configured by catalog quotaFallback.enabled and optionIds.
-Missing/disabled means stop; targets must be existing eligible pool bundles.
+Peer quota fallback is configured by catalog quotaFallback.enabled and optionId —
+one designated option, not an ordered list. Missing/disabled means stop; the
+target must be an existing eligible pool bundle.
 prepare validates route.quotaFallbackFrom against this authorization and fresh hash.
 Raw Paseo create/update calls remain host capabilities: the package supplies policy
 and validation, not a host security boundary. Evidence must verify actual settings

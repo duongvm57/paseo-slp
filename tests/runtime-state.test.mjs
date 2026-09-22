@@ -4,8 +4,20 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from 'nod
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { install, json, identity, hash, readJson } from '../src/package.mjs';
 import { localTarget, runtimeStatus } from '../src/runtime-state.mjs';
+import { readJevConfig, readJevKey, resolveJev } from '../src/jev.mjs';
+import { readCatalog } from '../src/routing.mjs';
+import { roleBundle } from '../src/role-bundle.mjs';
+import { createJev } from '../plugin/server/jev.ts';
+import { createManager } from '../plugin/server/manager.ts';
+import { createStateStore } from '../plugin/server/state-store.ts';
+import { fakeOrKey } from './fake-secrets.mjs';
+import {
+  activateInput, makeBinaries, makeDaemon, makeDeps, makeHome,
+  statusInput, targetOf, waitTerminal,
+} from './helpers/plugin-doubles.mjs';
 import { readFileSync } from 'node:fs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -165,4 +177,162 @@ test('CLI status and local-target are read-only and fail closed', t => {
   // Flags these commands do not own are rejected rather than ignored.
   assert.throws(() => execFileSync(process.execPath, [cli, 'status', '--apply'], { env }));
   assert.throws(() => execFileSync(process.execPath, [cli, 'status', 'extra'], { env }));
+});
+
+// ---------------------------------------------------------------------------
+// Writer→reader integration: the plugin's server RPCs own every write under
+// <daemonHome>/slp-runtime/state; the package readers (runtimeStatus, jev
+// config/key, readCatalog, role-bundle) must resolve the same state back.
+// Pins observable reader behavior, never file layout — the upcoming
+// state-store extraction must be able to move storage without these tests
+// changing.
+// ---------------------------------------------------------------------------
+
+test('plugin-written jev config and key read back through the package readers', async t => {
+  const home = makeHome(t);
+  const jev = createJev();
+  const key = fakeOrKey('e2-rtstate');
+  await jev.setJev({
+    schemaVersion: 1, target: targetOf(home),
+    jev: {
+      schemaVersion: 1, enabled: true, capabilities: { routing: true },
+      provider: { kind: 'openrouter', baseUrl: 'https://openrouter.ai', model: 'typesafe/jev-1.13' },
+    },
+  });
+  await jev.setJevKey({ schemaVersion: 1, target: targetOf(home), key });
+
+  // The config view resolves the same document the writer stored.
+  const config = readJevConfig(home);
+  assert.equal(config.enabled, true);
+  assert.deepEqual(config.capabilities, { routing: true });
+  assert.deepEqual(config.provider, {
+    kind: 'openrouter', baseUrl: 'https://openrouter.ai', model: 'typesafe/jev-1.13',
+  });
+  // The key written by set-jev-key is what readJevKey hands a capability call.
+  assert.equal(readJevKey(home, 'openrouter'), key);
+  // Full resolution arms the capability and derives the transport endpoint.
+  const resolved = resolveJev(home, 'routing');
+  assert.equal(resolved.armed, true);
+  assert.equal(resolved.key, key);
+  assert.equal(resolved.provider.endpoint, 'https://openrouter.ai/api/alpha/decisions');
+
+  // The status probe reports presence + permissions — never key material.
+  const status = runtimeStatus(home);
+  assert.deepEqual(status.jev, {
+    configured: true, enabled: true, capabilities: { routing: true },
+    provider: { kind: 'openrouter', baseUrl: 'https://openrouter.ai', model: 'typesafe/jev-1.13' },
+    hasKey: true, keyPermissionsOk: true,
+  });
+  assert.equal(JSON.stringify(status).includes(key), false);
+});
+
+test('manager-written language, routing and pool state read back through the package probes', async t => {
+  const home = makeHome(t);
+  const manager = createManager(makeDeps());
+  const store = createStateStore();
+  const managedEnv = {
+    SLP_MANAGED_RUNTIME: '1', SLP_NODE_BIN: process.execPath,
+    SLP_RUNTIME_ROOT: root, SLP_DAEMON_HOME: realpathSync(home),
+  };
+
+  // communication-language: written by set-language, consumed by the status
+  // probe and by role-bundle at managed-session entry.
+  assert.equal(runtimeStatus(home).communicationLanguage, null);
+  assert.equal(roleBundle(root, 'peer', managedEnv).instructions.includes('Communication language:'), false);
+  await store.setLanguage({ schemaVersion: 1, target: targetOf(home), value: 'Vietnamese' });
+  // Observed asymmetry: the status probe surfaces the stored bytes verbatim
+  // (the writer terminates the file with a newline) while the bundle render
+  // and the plugin's own status reader trim at consume time.
+  assert.equal(runtimeStatus(home).communicationLanguage, 'Vietnamese\n');
+  assert.ok(roleBundle(root, 'peer', managedEnv).instructions.includes('Communication language: Vietnamese'));
+  await store.setLanguage({ schemaVersion: 1, target: targetOf(home), value: null });
+  assert.equal(runtimeStatus(home).communicationLanguage, null);
+  assert.equal(roleBundle(root, 'peer', managedEnv).instructions.includes('Communication language:'), false);
+
+  // role-routing.json: set-role-routing writes; the status probe and the
+  // plugin's own get-role-routing read the same document back.
+  const routing = {
+    schemaVersion: 1,
+    supervisor: { family: 'devin', model: 'swe-2-max' },
+    lead: { family: 'codex', model: 'gpt-5-codex' },
+  };
+  await store.setRoleRouting({ schemaVersion: 1, target: targetOf(home), routing });
+  assert.deepEqual(runtimeStatus(home).roleRouting, routing);
+  assert.deepEqual((await store.getRoleRouting({ schemaVersion: 1, target: targetOf(home) })).routing, routing);
+
+  // peer-pool.json: set-peer-pool writes under sha256 CAS; readCatalog
+  // resolves it as the user-scope catalog for a repository without its own
+  // .paseo-slp/slp-routing.json.
+  const repo = join(fixture(t), 'repo');
+  mkdirSync(repo, { recursive: true });
+  const pool = {
+    version: 1,
+    policy: 'Peers pick the cheapest live seat that fits the work.',
+    quotaFallback: { enabled: true, optionId: 'peer-eng' },
+    options: [{
+      id: 'peer-eng', provider: 'codex', roles: ['peer'], model: 'gpt-5-codex',
+      enabled: true, availability: 'ready', modeId: 'fast',
+      suitableFor: ['bounded coding tasks'], avoidFor: ['open-ended research'],
+      notes: 'Local-only annotation — never sent to Jev.',
+    }],
+  };
+  const written = await store.setPeerPool({ schemaVersion: 1, target: targetOf(home), pool, expectedSha256: null });
+  const catalog = readCatalog(repo, home);
+  assert.equal(catalog.scope, 'user');
+  assert.equal(catalog.sha256, written.sha256, 'the CAS token the writer returned is the file hash the reader recomputes');
+  assert.deepEqual(catalog.options, pool.options);
+  assert.deepEqual(catalog.quotaFallback, pool.quotaFallback);
+  assert.deepEqual(catalog.tokenConflicts, []);
+});
+
+test('an activated binding reads back through both the plugin status RPC and the local status probe', async t => {
+  const home = makeHome(t);
+  const binaries = makeBinaries(t);
+  const daemon = await makeDaemon(t, home);
+  const deps = makeDeps({ execOpts: { binaries } });
+  const manager = createManager(deps);
+  const store = createStateStore();
+  await store.setLanguage({ schemaVersion: 1, target: targetOf(home), value: 'Vietnamese' });
+
+  const opId = randomUUID();
+  const start = await manager.activate(activateInput(home, deps.payload, opId), daemon);
+  assert.equal(start.accepted, true);
+  const done = await waitTerminal(manager, home, opId, daemon);
+  assert.equal(done.operation.outcome, 'succeeded');
+  assert.equal(done.state, 'ACTIVE');
+
+  // The journal the activation committed is the same receipt both readers
+  // report: the plugin's own status RPC and the package-side local probe.
+  const status = runtimeStatus(home);
+  assert.equal(status.state, 'ACTIVE');
+  assert.equal(status.checks.targetMatch, true);
+  assert.equal(status.receipt.binding.candidateSha256, deps.payload.candidate.sha256);
+  assert.equal(status.receipt.binding.launcherCount, 12);
+  assert.ok(status.checks.launchers.every(file => file.ok), 'recorded launcher bytes re-hash from disk');
+  assert.deepEqual(status.checks.configDrift.missingProviders, []);
+  assert.deepEqual(status.checks.configDrift.missingProfiles, []);
+  assert.equal(status.receipt.binding.binaries.devin.exists, true);
+  assert.equal(status.receipt.operations.length, 1);
+  const [op] = status.receipt.operations;
+  assert.equal(op.operationId, opId);
+  assert.equal(op.kind, 'activate');
+  assert.equal(op.phase, 'terminal');
+  assert.equal(op.outcome, 'succeeded');
+  assert.equal(op.conflicts, 0);
+  assert.ok(op.acceptedAt && op.completedAt);
+  // Both readers agree on state and binding identity.
+  const daemonView = await manager.status(statusInput(home), daemon);
+  assert.equal(daemonView.state, status.state);
+  assert.equal(daemonView.binding.candidateSha256, status.receipt.binding.candidateSha256);
+  // The trim asymmetry across the two readers on the same written file.
+  assert.equal(status.communicationLanguage, 'Vietnamese\n');
+  assert.equal(daemonView.communicationLanguage, 'Vietnamese');
+  // Observed double-fidelity gap: the test materializer records the
+  // simplified plugin-side installed.json (its own verifyPublished accepts
+  // it), while the package verifyInstall recomputes the §5 candidate
+  // identity recipe — so this check reports not-ok under doubles even though
+  // real installs verify. Pinned explicitly so a double upgrade surfaces
+  // here rather than silently changing coverage.
+  assert.equal(status.checks.runtime.ok, false);
+  assert.equal(typeof status.checks.runtime.detail, 'string');
 });

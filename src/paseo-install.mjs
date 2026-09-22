@@ -24,18 +24,6 @@ function defaultFamily(config) {
   return families.find(family => provs[family]?.enabled === true) ?? 'codex';
 }
 
-// User-scope catalog scaffold beside the host config: the task-type skeleton
-// gives the Human seats to fill; nothing is launchable until they do.
-// Ownership is recorded in the binding so an unmodified scaffold is
-// removed on uninstall while a Human-edited catalog is preserved.
-function scaffoldUserCatalog(home, installDir) {
-  const path = join(home, 'slp-routing.json');
-  if (existsSync(path)) return null;
-  const bytes = json(validateCatalog(readJson(join(installDir, 'src/templates/slp-routing.json'))));
-  writeFileSync(path, bytes, { flag: 'wx', mode: 0o600 });
-  return { path, sha256: hash(bytes) };
-}
-
 export function configurationPlan(destination, config) {
   const providers = {}, profiles = [];
   const existing = hostAgentProfiles(config);
@@ -87,22 +75,19 @@ export function installPaseo(source, destination, home, apply = false) {
   next.daemon.agentProfiles = [...(next.daemon.agentProfiles ?? []), ...proposal.profiles];
   const mcpBefore = Object.fromEntries(mcpFlags.map(key => [key, next.daemon.mcp?.[key] ?? null]));
   next.daemon.mcp = { ...next.daemon.mcp, ...Object.fromEntries(mcpFlags.map(key => [key, true])) };
-  let userCatalog = null;
   try {
     // Only owned entries and two shared MCP flags are recorded, never credentials.
     mkdirSync(home, { recursive: true });
-    userCatalog = scaffoldUserCatalog(home, destination);
-    const binding = json({ configPath: file.path, ...proposal, mcpBefore, userCatalog });
+    const binding = json({ configPath: file.path, ...proposal, mcpBefore });
     writeFileSync(join(destination, 'paseo-binding.json'), binding, { flag: 'wx', mode: 0o600 });
     const manifest = readJson(join(destination, 'installed.json'));
     writeFileSync(join(destination, 'installed.json'), json({ ...manifest, paseoBindingSha256: hash(binding) }));
     writeConfig(file, next);
   } catch (error) {
-    if (userCatalog) rmSync(userCatalog.path, { force: true });
     rmSync(destination, { recursive: true, force: true });
     throw error;
   }
-  return { ...result, candidate, userCatalog: userCatalog?.path ?? null };
+  return { ...result, candidate };
 }
 
 // In-place update of an intact installation: provider commands keep pointing
@@ -125,7 +110,7 @@ function updatePaseo(source, destination, file, prior, saved, apply) {
   const { staging, candidate } = stageInstall(source, destination);
   try {
     const binding = json({ configPath: file.path, ...proposal, mcpBefore: prior.mcpBefore,
-      retiredProfiles: [...(prior.retiredProfiles ?? []), ...retiredProfiles], userCatalog: prior.userCatalog ?? null });
+      retiredProfiles: [...(prior.retiredProfiles ?? []), ...retiredProfiles] });
     writeFileSync(join(staging, 'paseo-binding.json'), binding, { flag: 'wx', mode: 0o600 });
     const staged = readJson(join(staging, 'installed.json'));
     writeFileSync(join(staging, 'installed.json'), json({ ...staged, paseoBindingSha256: hash(binding) }));
@@ -165,16 +150,11 @@ export function uninstallPaseo(destination, apply = false) {
   const candidate = verifyInstall(destination).candidate;
   const expectedPaths = [...candidate.files.map(f => f.path), 'installed.json', 'paseo-binding.json'].sort();
   if (!isDeepStrictEqual(files(destination).sort(), expectedPaths)) throw new Error('Extra files: preserve directory for manual review');
-  // An unmodified scaffold is install-owned and removed; a Human-edited catalog is preserved.
-  const userCatalog = binding.userCatalog ?? null;
-  const catalogRemovable = userCatalog && existsSync(userCatalog.path) && hash(readFileSync(userCatalog.path)) === userCatalog.sha256;
   if (apply) {
     writeConfig(file, next);
-    if (catalogRemovable) rmSync(userCatalog.path);
     rmSync(destination, { recursive: true });
   }
-  return { destination, configPath: file.path, applied: apply, reloadRequired: true,
-    userCatalog: userCatalog ? { path: userCatalog.path, preserved: !catalogRemovable } : null };
+  return { destination, configPath: file.path, applied: apply, reloadRequired: true };
 }
 
 // Explicit side-by-side cutover: keep the old bytes for sessions already using them.
@@ -204,21 +184,18 @@ export function upgradePaseo(source, destination, previous, apply = false) {
     retiredProfiles: retiredProfiles.map(profile => profile.id), reloadRequired: true };
   if (!apply) return result;
   const candidate = install(source, destination).candidate;
-  let userCatalog = null;
   try {
     const next = structuredClone(base);
     next.agents.providers = { ...next.agents.providers, ...proposal.providers };
     next.daemon.agentProfiles = [...next.daemon.agentProfiles, ...proposal.profiles];
-    userCatalog = scaffoldUserCatalog(home, destination);
     const binding = json({ configPath: file.path, ...proposal, mcpBefore: prior.mcpBefore,
-      retiredProfiles: [...(prior.retiredProfiles ?? []), ...retiredProfiles], userCatalog });
+      retiredProfiles: [...(prior.retiredProfiles ?? []), ...retiredProfiles] });
     requireMcp(next);
     writeFileSync(join(destination, 'paseo-binding.json'), binding, { flag: 'wx', mode: 0o600 });
     const manifest = readJson(join(destination, 'installed.json'));
     writeFileSync(join(destination, 'installed.json'), json({ ...manifest, paseoBindingSha256: hash(binding) }));
     writeConfig(file, next);
   } catch (error) {
-    if (userCatalog) rmSync(userCatalog.path, { force: true });
     rmSync(destination, { recursive: true, force: true });
     throw error;
   }
@@ -255,12 +232,13 @@ export function initWorkspace(source, repository, apply = false, routingFrom) {
   repository = resolve(catalogPath, '../..');
   // Validate an explicit import before writing any repo files. Never consult host defaults.
   if (routingFrom != null && !isAbsolute(routingFrom)) throw new Error('Absolute --routing-from path required');
-  const catalog = routingFrom == null
-    ? validateCatalog(readJson(join(source, 'src/templates/slp-routing.json')))
-    : validateCatalog(readJson(routingFrom));
+  // A repository catalog is a deliberate opt-in: init writes it only for an
+  // explicit --routing-from import. With no repo file the runtime resolves the
+  // plugin-owned user-scope pool instead.
+  const catalog = routingFrom == null ? null : validateCatalog(readJson(routingFrom));
   const entries = [
     { path: join(repository, '.paseo-slp/workspace-protocol.md'), bytes: readFileSync(join(source, 'src/templates/workspace-protocol.md')) },
-    { path: catalogPath, bytes: json(catalog) },
+    ...(catalog === null ? [] : [{ path: catalogPath, bytes: json(catalog) }]),
     { path: join(repository, '.paseo-slp/notebook.md'), bytes: '# Supervisor notebook\n\nPurpose and owner are recorded in .paseo-slp/workspace-protocol.md.\n' },
   ];
   const result = stageEntries(entries, repository, apply);
@@ -295,16 +273,20 @@ export function materializeWorkspace(from, repository, apply = false) {
     if (!lstat(path)?.isFile()) throw new Error(`Source checkout lacks .paseo-slp/${name}`);
     return path;
   };
-  // Read the catalog once and validate those exact bytes: the target keeps
-  // them verbatim so a route.catalogSha256 pinned against the source stays
-  // valid after materialize — reserializing the parsed object would drift
-  // formatting and hash.
-  const catalogBytes = readFileSync(sourceFile('slp-routing.json'));
-  validateCatalog(JSON.parse(catalogBytes.toString('utf8')));
+  // The catalog is a deliberate repo pin, not an init default — a source that
+  // never created one materializes the protocol alone and the target resolves
+  // the user-scope pool exactly like the source does. When the source does
+  // pin a catalog, read it once and validate those exact bytes: the target
+  // keeps them verbatim so a route.catalogSha256 pinned against the source
+  // stays valid after materialize — reserializing the parsed object would
+  // drift formatting and hash.
+  const catalogSource = join(source, '.paseo-slp', 'slp-routing.json');
+  const catalogBytes = lstat(catalogSource)?.isFile() ? readFileSync(catalogSource) : null;
+  if (catalogBytes !== null) validateCatalog(JSON.parse(catalogBytes.toString('utf8')));
   const protocol = rebaseFrontmatter(readFileSync(sourceFile('workspace-protocol.md'), 'utf8'), source, repository);
   const entries = [
     { path: join(repository, '.paseo-slp/workspace-protocol.md'), bytes: protocol.text },
-    { path: join(repository, '.paseo-slp/slp-routing.json'), bytes: catalogBytes },
+    ...(catalogBytes !== null ? [{ path: join(repository, '.paseo-slp/slp-routing.json'), bytes: catalogBytes }] : []),
   ];
   const result = stageEntries(entries, repository, apply);
   const protocolFile = result.find(file => file.path.endsWith('workspace-protocol.md'));
