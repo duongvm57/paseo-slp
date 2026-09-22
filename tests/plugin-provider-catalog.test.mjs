@@ -1,0 +1,156 @@
+// Behavioral coverage for plugin/server/provider-catalog.ts — the snapshot
+// path, the probe-and-latch downgrade, and the verbatim legacy fallback.
+// snapshotUnsupported is module-global on purpose (process-lifetime latch),
+// so every scenario imports a FRESH module via a cache-busting query.
+import test, { after } from 'node:test';
+import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+
+const root = fileURLToPath(new URL('..', import.meta.url));
+const MODULE = join(root, 'plugin/server/provider-catalog.ts');
+let scenario = 0;
+const freshCatalog = async () => (await import(`${MODULE}?case=${++scenario}`)).loadCatalog;
+
+// Silence the latch warning but keep it observable.
+const warnings = [];
+const realWarn = console.warn;
+console.warn = message => warnings.push(String(message));
+after(() => { console.warn = realWarn; });
+
+const baseInput = { schemaVersion: 1, family: 'devin', role: 'peer' };
+
+const fakePaseo = (over = {}) => {
+  const calls = { snapshot: 0, listModels: 0, listModes: 0, listFeatures: [] };
+  const paseo = {
+    providers: {
+      listModels: async provider => { calls.listModels++; return { models: [{ id: `${provider}-m1` }], error: null }; },
+      listModes: async provider => { calls.listModes++; return { modes: [{ id: `${provider}-mode` }], error: null }; },
+      listFeatures: async draft => { calls.listFeatures.push(draft); return { features: [], error: null }; },
+      ...over,
+    },
+  };
+  return { paseo, calls };
+};
+
+const snapshotEntries = entries => async () => { return { entries, error: null }; };
+
+test('snapshot path: managed-id entry wins, resolvedProvider recorded, models filtered', async () => {
+  const loadCatalog = await freshCatalog();
+  const { paseo, calls } = fakePaseo({
+    snapshot: async options => {
+      assert.deepEqual(options, { cwd: '/daemon' });
+      return {
+        entries: [
+          { provider: 'devin', status: 'ready', models: [{ id: 'base-model' }], modes: [{ id: 'base-mode' }] },
+          {
+            provider: 'slp-devin-peer', status: 'ready',
+            models: [{ id: 'swe-2-max' }, { id: 'hidden', isSelectable: false }],
+            modes: [{ id: 'bypass' }],
+          },
+        ],
+        error: null,
+      };
+    },
+  });
+  const out = await loadCatalog({ ...baseInput, cwd: '/daemon' }, paseo);
+  assert.equal(out.resolvedProvider, 'slp-devin-peer');
+  assert.deepEqual(out.models.map(m => m.id), ['swe-2-max']);
+  assert.deepEqual(out.modes.map(m => m.id), ['bypass']);
+  assert.equal(out.error, null);
+  // Snapshot path makes no legacy list calls.
+  assert.equal(calls.listModels, 0);
+  assert.equal(calls.listModes, 0);
+});
+
+test('snapshot path: base family entry is the fallback when the managed id is absent', async () => {
+  const loadCatalog = await freshCatalog();
+  const { paseo } = fakePaseo({
+    snapshot: snapshotEntries([
+      { provider: 'devin', status: 'ready', models: [{ id: 'base-model' }], modes: [{ id: 'm' }] },
+    ]),
+  });
+  const out = await loadCatalog(baseInput, paseo);
+  assert.equal(out.resolvedProvider, 'devin');
+  assert.deepEqual(out.models.map(m => m.id), ['base-model']);
+});
+
+test('snapshot path: no matching entry reports an error and never falls to legacy', async () => {
+  const loadCatalog = await freshCatalog();
+  const { paseo, calls } = fakePaseo({
+    snapshot: snapshotEntries([{ provider: 'codex', status: 'ready' }]),
+  });
+  const out = await loadCatalog(baseInput, paseo);
+  assert.match(out.error, /slp-devin-peer not found in providers\.snapshot/);
+  assert.deepEqual(out.models, []);
+  assert.equal(calls.listModels, 0);
+  assert.equal(calls.listModes, 0);
+});
+
+test('snapshot path: features resolve on the resolved provider id only when a model is given', async () => {
+  const loadCatalog = await freshCatalog();
+  const { paseo, calls } = fakePaseo({
+    snapshot: snapshotEntries([
+      { provider: 'slp-devin-peer', status: 'ready', models: [{ id: 'swe-2-max' }], modes: [] },
+    ]),
+  });
+  const out = await loadCatalog({ ...baseInput, model: 'swe-2-max', modeId: 'bypass' }, paseo);
+  assert.deepEqual(calls.listFeatures, [
+    { provider: 'slp-devin-peer/swe-2-max', cwd: '/', modeId: 'bypass' },
+  ]);
+  assert.equal(out.error, null);
+  const outNoModel = await loadCatalog(baseInput, paseo);
+  assert.equal(calls.listFeatures.length, 1, 'no model → no feature call');
+  assert.equal(outNoModel.features.length, 0);
+});
+
+test('capability latch: unknown_schema latches and later calls go straight to legacy', async () => {
+  const loadCatalog = await freshCatalog();
+  const marker = Object.assign(new Error('Unknown request, try upgrading the daemon'), { code: 'unknown_schema' });
+  const { paseo, calls } = fakePaseo({ snapshot: async () => { calls.snapshot++; throw marker; } });
+  const first = await loadCatalog(baseInput, paseo);
+  assert.deepEqual(first.models.map(m => m.id), ['devin-m1']);
+  assert.equal(first.resolvedProvider, undefined, 'legacy path emits no resolvedProvider');
+  const second = await loadCatalog(baseInput, paseo);
+  assert.equal(calls.snapshot, 1, 'latched: no second snapshot attempt');
+  assert.equal(calls.listModels, 2);
+  assert.deepEqual(second.models.map(m => m.id), ['devin-m1']);
+  assert.equal(warnings.length >= 1, true, 'latch must not be silent');
+});
+
+test('capability latch: a missing snapshot method latches the same way', async () => {
+  const loadCatalog = await freshCatalog();
+  const { paseo, calls } = fakePaseo(); // no snapshot method at all
+  await loadCatalog(baseInput, paseo);
+  await loadCatalog(baseInput, paseo);
+  assert.equal(calls.listModels, 2);
+  assert.equal(calls.listModes, 2);
+});
+
+test('transient snapshot failures do not latch — the next call retries', async () => {
+  const loadCatalog = await freshCatalog();
+  let attempts = 0;
+  const { paseo, calls } = fakePaseo({
+    snapshot: async () => {
+      attempts++;
+      if (attempts === 1) throw new Error('socket hangup');
+      return { entries: [{ provider: 'slp-devin-peer', status: 'ready', models: [{ id: 'swe-2-max' }], modes: [] }], error: null };
+    },
+  });
+  const first = await loadCatalog(baseInput, paseo);
+  assert.equal(calls.listModels, 1, 'transient throw degrades this call to legacy');
+  assert.equal(first.resolvedProvider, undefined);
+  const second = await loadCatalog(baseInput, paseo);
+  assert.equal(attempts, 2, 'no latch — snapshot retried');
+  assert.equal(second.resolvedProvider, 'slp-devin-peer');
+  assert.equal(calls.listModels, 1, 'second call stayed on the snapshot path');
+});
+
+test('role-less input resolves the base family entry directly', async () => {
+  const loadCatalog = await freshCatalog();
+  const { paseo } = fakePaseo({
+    snapshot: snapshotEntries([{ provider: 'devin', status: 'ready', models: [{ id: 'm' }], modes: [] }]),
+  });
+  const out = await loadCatalog({ schemaVersion: 1, family: 'devin' }, paseo);
+  assert.equal(out.resolvedProvider, 'devin');
+});

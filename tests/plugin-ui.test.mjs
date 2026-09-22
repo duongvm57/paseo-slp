@@ -1576,7 +1576,12 @@ test('snapshotEntryCatalog surfaces entry errors instead of swallowing', () => {
 });
 
 test('the catalog RPC rides providers.snapshot with legacy list calls kept', () => {
-  const source = readFileSync(join(root, 'plugin/index.server.ts'), 'utf8');
+  const wiring = readFileSync(join(root, 'plugin/index.server.ts'), 'utf8');
+  // The catalog implementation lives in plugin/server/provider-catalog.ts;
+  // the entry only wires it.
+  assert.ok(wiring.includes('import { loadCatalog } from "./server/provider-catalog.ts"'),
+    'index.server.ts must wire loadCatalog from the catalog module');
+  const source = readFileSync(join(root, 'plugin/server/provider-catalog.ts'), 'utf8');
   assert.ok(source.includes('providers.snapshot'), 'snapshot RPC missing');
   assert.ok(source.includes('paseo.providers.snapshot('), 'snapshot call missing');
   // Legacy endpoints stay verbatim for pre-snapshot daemons.
