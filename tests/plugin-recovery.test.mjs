@@ -2,18 +2,9 @@
 // fixtures, journal write failure after patch success, explicit
 // complete/restore-before, no blind rollback, idempotent recovery retries.
 //
-// Crash fixtures are deterministic: the injected uuid() is a counter, and each
-// journal transition consumes exactly one uuid for its temp-file name. The
-// per-activate call order is fixed — u1 bootId, u2 acceptance write, u3
-// 'materialized', u4 'prepared', u5 patch requestId, u6 'patch-dispatched',
-// u7 settle, u8 'verified', u9 commit. deactivate (after n consumed):
-// n+1 acceptance, n+2 prepared, n+3 requestId, n+4 dispatched, n+5 settle,
-// n+6 verified, n+7 commit. Poisoning a uuid index + pre-creating a blocker at
-// the poisoned temp path fails exactly the writes we target:
-//   - a FILE blocker → EEXIST once, then the failed write's cleanup removes it
-//   - a DIR blocker  → EEXIST every time (rmSync cannot drop a non-empty dir)
-// A worker whose recordFailure write also dies lands in deadOps → the op stays
-// pending in the journal — an in-process simulation of a mid-flight crash.
+// Crash points are named at the operation boundary by armRecoveryFault.
+// The helper owns UUID sequencing; assertions below prove the intended durable
+// phase and external patch state. File/dir blockers remain real filesystem faults.
 //
 // Doubles and fixtures live in tests/helpers/plugin-doubles.mjs (S3 dedup);
 // host-module resolution order and the loud MiniStore-fallback warning are
@@ -28,6 +19,7 @@ import { randomUUID } from 'node:crypto';
 import { createManager } from '../plugin/server/manager.ts';
 import {
   activateInput,
+  armRecoveryFault,
   deactivateInput,
   dirBlocker,
   fileBlocker,
@@ -61,7 +53,7 @@ import {
 test('crash before any plan (accepted phase) → foreign pending; inspect marks failed; new activate proceeds', async t => {
   const { home, binaries, daemon, deps } = await makePluginFixture(t);
   dirBlocker(home); // every poisoned write fails EEXIST
-  deps.uuidBox.state.poisonFrom = 3; // 'materialized' write onward
+  armRecoveryFault(deps, 'activate', 'materialized'); // 'materialized' write onward
   const managerA = createManager(deps);
   const opId = randomUUID();
   const start = await managerA.activate(activateInput(home, deps.payload, opId), daemon);
@@ -96,7 +88,7 @@ test('crash before any plan (accepted phase) → foreign pending; inspect marks 
 test('crash at prepared (plan durable, patch never dispatched) → complete redispatches the forward patch exactly once', async t => {
   const { home, binaries, daemon, deps } = await makePluginFixture(t);
   dirBlocker(home);
-  deps.uuidBox.state.poisonFrom = 6; // 'patch-dispatched' write onward
+  armRecoveryFault(deps, 'activate', 'patch-dispatched'); // 'patch-dispatched' write onward
   const managerA = createManager(deps);
   const opId = randomUUID();
   const start = await managerA.activate(activateInput(home, deps.payload, opId), daemon);
@@ -125,7 +117,7 @@ test('crash at prepared (plan durable, patch never dispatched) → complete redi
 test('patch applied then settle-write killed → foreign pending at patch-dispatched → complete finalizes with zero extra patches', async t => {
   const { home, binaries, daemon, deps } = await makePluginFixture(t);
   dirBlocker(home);
-  deps.uuidBox.state.poisonFrom = 7; // settle write onward
+  armRecoveryFault(deps, 'activate', 'settled'); // settle write onward
   const managerA = createManager(deps);
   const opId = randomUUID();
   const start = await managerA.activate(activateInput(home, deps.payload, opId), daemon);
@@ -156,7 +148,7 @@ test('patch applied then settle-write killed → foreign pending at patch-dispat
 test('crash after verified (attempt returned, commit never wrote) → complete finalizes', async t => {
   const { home, binaries, daemon, deps } = await makePluginFixture(t);
   dirBlocker(home);
-  deps.uuidBox.state.poisonFrom = 9; // commit write
+  armRecoveryFault(deps, 'activate', 'committed'); // commit write
   const managerA = createManager(deps);
   const opId = randomUUID();
   const start = await managerA.activate(activateInput(home, deps.payload, opId), daemon);
@@ -181,7 +173,7 @@ test('crash after verified (attempt returned, commit never wrote) → complete f
 test('restore-before on an applied activation → inverse patch once, providers removed, runtime retained', async t => {
   const { home, binaries, daemon, deps } = await makePluginFixture(t);
   dirBlocker(home);
-  deps.uuidBox.state.poisonFrom = 7;
+  armRecoveryFault(deps, 'activate', 'settled');
   const managerA = createManager(deps);
   const opId = randomUUID();
   await managerA.activate(activateInput(home, deps.payload, opId), daemon);
@@ -244,7 +236,7 @@ test('patch rejection (never applied) → outcome-unknown; no blind rollback; sa
 test('journal write failure after a successful patch → op lands recovery-required; complete finishes it', async t => {
   const { home, binaries, daemon, deps } = await makePluginFixture(t);
   fileBlocker(home); // single EEXIST — cleanup removes it
-  deps.uuidBox.state.poisonOnly = 7; // only the settle write fails
+  armRecoveryFault(deps, 'activate', 'settled', { once: true }); // only the settle write fails
   const managerA = createManager(deps);
   const opId = randomUUID();
   const start = await managerA.activate(activateInput(home, deps.payload, opId), daemon);
@@ -273,7 +265,7 @@ test('journal write failure after a successful patch → op lands recovery-requi
 test('single journal failure at materialized write → clean terminal failure, not stuck pending', async t => {
   const { home, binaries, daemon, deps } = await makePluginFixture(t);
   fileBlocker(home);
-  deps.uuidBox.state.poisonOnly = 3; // only the 'materialized' write fails
+  armRecoveryFault(deps, 'activate', 'materialized', { once: true }); // only the 'materialized' write fails
   const managerA = createManager(deps);
   const opId = randomUUID();
   await managerA.activate(activateInput(home, deps.payload, opId), daemon);
@@ -287,7 +279,7 @@ test('single journal failure at materialized write → clean terminal failure, n
 test('acceptance write failure → activate rejected IO_FAILURE, no receipt left', async t => {
   const { home, binaries, daemon, deps } = await makePluginFixture(t);
   fileBlocker(home);
-  deps.uuidBox.state.poisonOnly = 2; // the acceptance write itself
+  armRecoveryFault(deps, 'activate', 'accepted', { once: true }); // the acceptance write itself
   const manager = createManager(deps);
   const out = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   assert.equal(out.accepted, false);
@@ -303,10 +295,8 @@ test('deactivate crash after its patch applied → restore-before reinstates the
   const doneAct = await waitTerminal(managerA, home, act.operation.operationId, daemon);
   const bindingSha = doneAct.binding.bindingSha256;
 
-  // After a full activate the uuid counter is at 9; deactivate writes:
-  // u10 acceptance, u11 prepared, u12 requestId, u13 dispatched, u14 settle…
   dirBlocker(home);
-  deps.uuidBox.state.poisonFrom = deps.uuidBox.state.n + 5; // settle write onward
+  armRecoveryFault(deps, 'deactivate', 'settled'); // settle write onward
   const deact = await managerA.deactivate(deactivateInput(home, randomUUID(), bindingSha), daemon);
   const deactId = deact.operation.operationId;
   await waitRecovery(managerA, home, daemon);
@@ -337,7 +327,7 @@ test('deactivate crash after its patch applied → complete finishes the removal
   const bindingSha = doneAct.binding.bindingSha256;
 
   dirBlocker(home);
-  deps.uuidBox.state.poisonFrom = deps.uuidBox.state.n + 5;
+  armRecoveryFault(deps, 'deactivate', 'settled');
   const deact = await managerA.deactivate(deactivateInput(home, randomUUID(), bindingSha), daemon);
   const deactId = deact.operation.operationId;
   await waitRecovery(managerA, home, daemon);
@@ -361,7 +351,7 @@ test('deactivate crash before dispatch (entries intact) → complete redispatche
   const doneAct = await waitTerminal(managerA, home, act.operation.operationId, daemon);
 
   dirBlocker(home);
-  deps.uuidBox.state.poisonFrom = deps.uuidBox.state.n + 4; // the dispatch write
+  armRecoveryFault(deps, 'deactivate', 'patch-dispatched'); // the dispatch write
   const deact = await managerA.deactivate(deactivateInput(home, randomUUID(), doneAct.binding.bindingSha256), daemon);
   const deactId = deact.operation.operationId;
   await waitRecovery(managerA, home, daemon);
@@ -384,7 +374,7 @@ test('deactivate crash before dispatch (entries intact) → complete redispatche
 test('divergent disk/live state → reconcile refuses to patch and stays RECOVERY_REQUIRED', async t => {
   const { home, binaries, daemon, deps } = await makePluginFixture(t);
   dirBlocker(home);
-  deps.uuidBox.state.poisonFrom = 7;
+  armRecoveryFault(deps, 'activate', 'settled');
   const managerA = createManager(deps);
   const opId = randomUUID();
   await managerA.activate(activateInput(home, deps.payload, opId), daemon);
@@ -453,7 +443,7 @@ test('reconcile during an in-flight worker → BUSY', async t => {
 test('reconcile retry with same id + payload returns the existing recovery operation', async t => {
   const { home, binaries, daemon, deps } = await makePluginFixture(t);
   dirBlocker(home);
-  deps.uuidBox.state.poisonFrom = 7;
+  armRecoveryFault(deps, 'activate', 'settled');
   const managerA = createManager(deps);
   const opId = randomUUID();
   await managerA.activate(activateInput(home, deps.payload, opId), daemon);
@@ -578,7 +568,7 @@ test('reconcile-of-reconcile: a dead complete-of-activate still finalizes the ac
   const daemon = await makeDaemon(t, home);
   const depsA = makeDeps({ execOpts: { binaries } });
   dirBlocker(home);
-  depsA.uuidBox.state.poisonFrom = 7; // settle write onward — patch applied, op stuck pending
+  armRecoveryFault(depsA, 'activate', 'settled'); // settle write onward — patch applied, op stuck pending
   const managerA = createManager(depsA);
   const opId = randomUUID();
   await managerA.activate(activateInput(home, depsA.payload, opId), daemon);
@@ -586,9 +576,8 @@ test('reconcile-of-reconcile: a dead complete-of-activate still finalizes the ac
   assert.ok(Object.keys(slpProvidersOf(readConfigJson(home))).length > 0, 'activation patch applied');
 
   // R1(complete) is journaled, then dies before its finalizing write.
-  // uuid calls: 1=bootId, 2=acceptance write, 3=finalize transition onward.
   const depsB = makeDeps({ payload: depsA.payload, execOpts: { binaries } });
-  depsB.uuidBox.state.poisonFrom = 3;
+  armRecoveryFault(depsB, 'complete-after', 'finalized');
   const managerB = createManager(depsB);
   const r1 = randomUUID();
   const first = await managerB.reconcile(reconcileInput(home, r1, 'complete', opId), daemon);
@@ -625,16 +614,15 @@ test('reconcile-of-reconcile: a dead restore-before still drives the chain to th
 
   // Deactivate applies its removal patch, then dies before settling.
   dirBlocker(home);
-  depsA.uuidBox.state.poisonFrom = depsA.uuidBox.state.n + 5;
+  armRecoveryFault(depsA, 'deactivate', 'settled');
   const deactId = randomUUID();
   await managerA.deactivate(deactivateInput(home, deactId, doneAct.binding.bindingSha256), daemon);
   await waitRecovery(managerA, home, daemon);
   assert.equal(Object.keys(slpProvidersOf(readConfigJson(home))).length, 0, 'removal patch applied');
 
   // R1(restore-before) is journaled, then dies before its inverse dispatch.
-  // uuid calls: 1=bootId, 2=acceptance write, 3=dispatched-record onward.
   const depsB = makeDeps({ payload: depsA.payload, execOpts: { binaries } });
-  depsB.uuidBox.state.poisonFrom = 3;
+  armRecoveryFault(depsB, 'restore-before', 'patch-dispatched');
   const managerB = createManager(depsB);
   const r1 = randomUUID();
   await managerB.reconcile(reconcileInput(home, r1, 'restore-before', deactId), daemon);
@@ -812,7 +800,7 @@ test('reconcile throwing pre-dispatch keeps RECOVERY_REQUIRED — never restores
   // Deactivate dies after its patch applied: pending patch-dispatched op,
   // binding still recorded, providers already gone.
   dirBlocker(home);
-  deps.uuidBox.state.poisonFrom = deps.uuidBox.state.n + 5;
+  armRecoveryFault(deps, 'deactivate', 'settled');
   const deact = await managerA.deactivate(deactivateInput(home, randomUUID(), doneAct.binding.bindingSha256), daemon);
   const deactId = deact.operation.operationId;
   await waitRecovery(managerA, home, daemon);
@@ -838,7 +826,7 @@ test('reconcile throwing pre-dispatch keeps RECOVERY_REQUIRED — never restores
 test('inspect with a recovery subject that throws unexpectedly keeps RECOVERY_REQUIRED', async t => {
   const { home, binaries, daemon, deps } = await makePluginFixture(t);
   dirBlocker(home);
-  deps.uuidBox.state.poisonFrom = 7; // settle write onward — patch applied, op stuck pending
+  armRecoveryFault(deps, 'activate', 'settled'); // settle write onward — patch applied, op stuck pending
   const managerA = createManager(deps);
   const act = await managerA.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   const actId = act.operation.operationId;
@@ -870,7 +858,7 @@ test('deactivate failing before its plan journals restores ACTIVE priorState', a
   const doneAct = await waitTerminal(manager, home, act.operation.operationId, daemon);
 
   fileBlocker(home);
-  deps.uuidBox.state.poisonOnly = deps.uuidBox.state.n + 2; // the 'prepared' write only
+  armRecoveryFault(deps, 'deactivate', 'prepared', { once: true }); // the 'prepared' write only
   const deact = await manager.deactivate(deactivateInput(home, randomUUID(), doneAct.binding.bindingSha256), daemon);
   const done = await waitTerminal(manager, home, deact.operation.operationId, daemon);
   assert.equal(done.operation.outcome, 'failed');
@@ -882,7 +870,7 @@ test('deactivate failing before its plan journals restores ACTIVE priorState', a
 test('journaled reconcile intent lacking priorState (legacy) falls back to RECOVERY_REQUIRED', async t => {
   const { home, binaries, daemon, deps } = await makePluginFixture(t);
   dirBlocker(home);
-  deps.uuidBox.state.poisonFrom = 7;
+  armRecoveryFault(deps, 'activate', 'settled');
   const managerA = createManager(deps);
   const act = await managerA.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   const actId = act.operation.operationId;
@@ -969,7 +957,7 @@ test('an interrupted inspect restores its own priorState — never erases recove
   // A rebind dies at its materialized write: pending pre-plan op, healthy
   // binding still recorded.
   dirBlocker(home);
-  deps.uuidBox.state.poisonFrom = deps.uuidBox.state.n + 2; // 'materialized' write onward
+  armRecoveryFault(deps, 'activate', 'materialized'); // 'materialized' write onward
   const rebind = await managerA.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   const rebindId = rebind.operation.operationId;
   await waitRecovery(managerA, home, daemon);
@@ -979,7 +967,7 @@ test('an interrupted inspect restores its own priorState — never erases recove
   // + pending inspect + recovery-required rebind.
   const depsB = makeDeps({ payload: deps.payload, execOpts: { binaries } });
   dirBlocker(home);
-  depsB.uuidBox.state.poisonFrom = 3; // interrupted-op mark + inspect settle writes
+  armRecoveryFault(depsB, 'inspect', 'subject-marked'); // interrupted-op mark + inspect settle writes
   const managerB = createManager(depsB);
   const inspect1 = randomUUID();
   await managerB.reconcile(reconcileInput(home, inspect1, 'inspect'), daemon);
@@ -1059,7 +1047,7 @@ test('equal plan endpoints (identical-config adoption) finalize without a redund
   rmSync(receiptPath(home), { force: true });
   const depsB = makeDeps({ payload: deps.payload, execOpts: { binaries } });
   dirBlocker(home);
-  depsB.uuidBox.state.poisonFrom = 5; // 'verified' write onward — plan journaled, no patch
+  armRecoveryFault(depsB, 'adopt-identical', 'verified'); // 'verified' write onward — plan journaled, no patch
   const managerB = createManager(depsB);
   const adopt = await managerB.activate(
     activateInput(home, deps.payload, randomUUID(), { adoptIdentical: true }),
@@ -1199,7 +1187,7 @@ test('interrupted pre-plan op with a binding: inspect still enforces the mcp.ena
   // The deactivate dies before its 'prepared' write — pending, no plan. The
   // dir blocker fails every poisoned write (the file blocker fails only the
   // first), so the recordFailure write dies too and the op stays pending.
-  depsA.uuidBox.state.poisonFrom = depsA.uuidBox.state.n + 2;
+  armRecoveryFault(depsA, 'deactivate', 'prepared');
   dirBlocker(home);
   const deactId = randomUUID();
   await managerA.deactivate(deactivateInput(home, deactId, doneAct.binding.bindingSha256), daemon);
@@ -1234,7 +1222,7 @@ test('a recovery-required planless root stays resolvable: a later inspect select
 
   // Activation dies pre-plan (its 'materialized' write is poisoned).
   const depsA = makeDeps({ execOpts: { binaries } });
-  depsA.uuidBox.state.poisonFrom = 3;
+  armRecoveryFault(depsA, 'activate', 'materialized');
   dirBlocker(home);
   const managerA = createManager(depsA);
   const opId = randomUUID();
@@ -1247,7 +1235,7 @@ test('a recovery-required planless root stays resolvable: a later inspect select
   // planless: unreachable for complete/restore-before, invisible to the old
   // pending-only subject selection.
   const depsB = makeDeps({ payload: depsA.payload, execOpts: { binaries } });
-  depsB.uuidBox.state.poisonFrom = 3;
+  armRecoveryFault(depsB, 'inspect', 'subject-marked');
   const managerB = createManager(depsB);
   const i1 = randomUUID();
   await managerB.reconcile(reconcileInput(home, i1, 'inspect'), daemon);
@@ -1293,7 +1281,7 @@ test('recovery removal refuses when live metadataGeneration references owned pro
   // The deactivate dies after 'prepared': plan journaled, no patch
   // dispatched (dir blocker — every poisoned write fails, including the
   // recordFailure write, so the op stays pending).
-  depsA.uuidBox.state.poisonFrom = depsA.uuidBox.state.n + 3;
+  armRecoveryFault(depsA, 'deactivate', 'request-id');
   dirBlocker(home);
   const deactId = randomUUID();
   await managerA.deactivate(deactivateInput(home, deactId, doneAct.binding.bindingSha256), daemon);
@@ -1481,7 +1469,7 @@ test('V1: interrupted pre-plan op without a binding runs persisted/live checks b
   // Fresh activation dies before 'materialized': pending, plan null, no
   // binding anywhere — a second boot's inspect owns the verdict.
   dirBlocker(home);
-  depsA.uuidBox.state.poisonFrom = 3;
+  armRecoveryFault(depsA, 'activate', 'materialized');
   const opId = randomUUID();
   await managerA.activate(activateInput(home, depsA.payload, opId), daemon);
   await waitRecovery(managerA, home, daemon);
@@ -1526,7 +1514,7 @@ test('V1: interrupted pre-plan op verifies retained assets before the verdict', 
 
   // A deactivate then dies before its 'prepared' write: pending, no plan,
   // binding still pointing at candidate 2.
-  depsB.uuidBox.state.poisonFrom = depsB.uuidBox.state.n + 2;
+  armRecoveryFault(depsB, 'deactivate', 'prepared');
   dirBlocker(home);
   const deactId = randomUUID();
   await managerB.deactivate(deactivateInput(home, deactId, doneAct2.binding.bindingSha256), daemon);
@@ -1557,7 +1545,7 @@ test('V2: deactivation recovery revalidates the endpoint runtime before dispatch
   assert.equal(doneAct.state, 'ACTIVE');
 
   // Deactivate dies at 'prepared': plan durable, no patch dispatched.
-  depsA.uuidBox.state.poisonFrom = depsA.uuidBox.state.n + 3;
+  armRecoveryFault(depsA, 'deactivate', 'request-id');
   dirBlocker(home);
   const deactId = randomUUID();
   await managerA.deactivate(deactivateInput(home, deactId, doneAct.binding.bindingSha256), daemon);
@@ -1586,7 +1574,7 @@ test('V2: activation recovery re-verifies the runtime after the patch before pub
   const daemon = await makeDaemon(t, home);
   const depsA = makeDeps({ execOpts: { binaries } });
   dirBlocker(home);
-  depsA.uuidBox.state.poisonFrom = 6; // 'patch-dispatched' write onward: pending at prepared
+  armRecoveryFault(depsA, 'activate', 'patch-dispatched'); // 'patch-dispatched' write onward: pending at prepared
   const managerA = createManager(depsA);
   const opId = randomUUID();
   await managerA.activate(activateInput(home, depsA.payload, opId), daemon);
@@ -1731,7 +1719,7 @@ test('W1: deactivation recovery does not require the external provider binary', 
   assert.equal(doneAct.state, 'ACTIVE');
 
   // Deactivate dies at 'prepared': plan durable, no patch dispatched.
-  depsA.uuidBox.state.poisonFrom = depsA.uuidBox.state.n + 3;
+  armRecoveryFault(depsA, 'deactivate', 'request-id');
   dirBlocker(home);
   const deactId = randomUUID();
   await managerA.deactivate(deactivateInput(home, deactId, doneAct.binding.bindingSha256), daemon);

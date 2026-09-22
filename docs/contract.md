@@ -49,7 +49,7 @@ Local installation/transport checks do not constitute workflow acceptance.
 | e2e/collector.mjs | Frozen evidence ledger and review history; verify assessment byte identities and original-review links before summaries, addenda or review-dependent launch gates. |
 | e2e/ledger.mjs, e2e/report.mjs | The ledger owns evidence storage, byte verification and per-kind discharge inspection, including the run context and capture provenance; reports consume that inspection to render attempt status, run summaries and the cross-run index without opening evidence records. |
 | e2e/ | Development-only scenario manifest, fixture, external outcome check, evidence collector and repository E2E protocol. Collector commands do not create agents or judge behavioral evidence. |
-| tests/*.test.mjs, tests/helpers/plugin-doubles.mjs | Local installer, rollback, transport, envelope, snapshot and plugin checks; the shared plugin doubles own temporary daemon/binary fixtures and their matching dependency wiring, while tests own manager creation, fault injection and assertions. |
+| tests/*.test.mjs, tests/helpers/plugin-doubles.mjs | Local installer, rollback, transport, envelope, snapshot and plugin checks; the shared plugin doubles own temporary daemon/binary fixtures and their matching dependency wiring, including named recovery fault points that concentrate characterized UUID sequencing; tests own manager creation, explicit filesystem blocker choice and durable-phase assertions. |
 
 The install unit is package.json, install.sh, bin/, skills/ and src/. installed.json binds their
 exact bytes. The standalone Paseo installer also binds paseo-binding.json, containing
