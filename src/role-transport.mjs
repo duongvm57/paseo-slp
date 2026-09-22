@@ -48,10 +48,10 @@ export function claudeRolePrompt(message, instruction) {
   return result;
 }
 
-// Generic ACP has no system-instruction channel; the role policy leads the
-// first session/prompt of each session as a text block. `seen` tracks injected
-// sessionIds; loading/resuming/forking a session re-arms its next prompt.
-export function acpRolePrompt(message, instruction, seen) {
+// Generic ACP carries policy in conversation history. Every prompt gets core;
+// first/re-armed prompts also get entry helpers and the measured carrier.
+// This requires no host compaction event; `seen` only controls carrier delivery.
+export function acpRolePrompt(message, delivery, seen) {
   const sessionId = message?.params?.sessionId;
   if (['session/load', 'session/resume', 'session/fork'].includes(message?.method)) {
     if (typeof sessionId === 'string') seen.delete(sessionId);
@@ -59,9 +59,9 @@ export function acpRolePrompt(message, instruction, seen) {
   }
   if (message?.method !== 'session/prompt') return message;
   if (typeof sessionId !== 'string' || !Array.isArray(message.params.prompt)) throw new Error('Malformed session/prompt');
-  if (seen.has(sessionId)) return message;
-  seen.add(sessionId);
+  const instruction = seen.has(sessionId) ? delivery.anchor() : delivery.entry({ explicitLanguageState: true });
   const result = structuredClone(message);
   result.params.prompt = [{ type: 'text', text: instruction }, ...result.params.prompt];
+  seen.add(sessionId);
   return result;
 }

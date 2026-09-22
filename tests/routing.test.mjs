@@ -8,7 +8,7 @@ import { identity, install, readJson, json, hash, verifyInstall } from '../src/p
 import { installPaseo, upgradePaseo, initWorkspace } from '../src/paseo-install.mjs';
 import { resolveProfile } from '../src/profiles.mjs';
 import { launchPlan, handoffPlan } from '../src/launch.mjs';
-import { roleInstructions, roleBundle } from '../src/role-bundle.mjs';
+import { roleInstructions, roleBundle, roleDelivery } from '../src/role-bundle.mjs';
 
 import { piRoleArgs, acpRolePrompt, claudeRolePrompt } from '../src/role-transport.mjs';
 import { readCatalog, emptyCatalog, validateCatalog } from '../src/routing.mjs';
@@ -269,7 +269,7 @@ test('Pi wrapper appends role while preserving RPC bytes, resume, model, thinkin
   assert.deepEqual(piRoleArgs(['--', '--version'], 'policy'), ['--append-system-prompt', 'policy', '--', '--version']);
 });
 
-test('Devin wrapper prepends role policy to the first session prompt of each session', t => {
+test('Devin wrapper reasserts role core on follow-ups and restores the carrier after reload', t => {
   const { dir, installed } = fixture(t); install(root, installed);
   const fake = join(dir, 'fake-devin');
   writeFileSync(fake, `#!${process.execPath}\nimport fs from 'node:fs'; fs.writeFileSync(process.env.SLP_TEST_RECEIPT, JSON.stringify(process.argv.slice(2))); process.stdin.pipe(process.stdout);\n`);
@@ -291,7 +291,11 @@ test('Devin wrapper prepends role policy to the first session prompt of each ses
   assert.equal(blocks(1)[0].type, 'text');
   assert.equal(blocks(1)[0].text, instruction);
   assert.equal(blocks(1)[1].text, 'first task');
-  assert.equal(blocks(2).length, 1);
+  assert.equal(blocks(2).length, 2);
+  assert.equal(blocks(2)[0].text, roleDelivery(installed, 'peer').anchor());
+  assert.equal(blocks(2)[1].text, 'follow up');
+  assert.ok(!blocks(2)[0].text.includes('Spawn kit —'));
+  assert.ok(!blocks(2)[0].text.includes('Policy locators —'));
   assert.equal(blocks(3)[0].text, instruction);
   assert.equal(lines.find(m => m.id === 4).method, 'session/load');
   assert.equal(blocks(5)[0].text, instruction);

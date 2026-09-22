@@ -463,3 +463,57 @@ test('unmanaged inventory keeps its existing shape — no provenance markers', t
   assert.equal(observed.id, 'slp-codex-lead');
   assert.equal(out.profiles[0].id, 'slp-supervisor');
 });
+
+test('ACP delivery keeps verified core while refreshing language and restoring carriers', async t => {
+  const { roleDelivery } = await import('../src/role-bundle.mjs');
+  const { acpRolePrompt } = await import('../src/role-transport.mjs');
+  const dir = fixture(t), installed = join(dir, 'release'), home = join(dir, 'daemon');
+  install(root, installed);
+  const state = join(home, 'slp-runtime/state/communication-language');
+  mkdirSync(join(home, 'slp-runtime/state'), { recursive: true });
+  const env = { SLP_MANAGED_RUNTIME: '1', SLP_NODE_BIN: process.execPath, SLP_RUNTIME_ROOT: installed, SLP_DAEMON_HOME: home };
+  for (const role of ['peer', 'lead', 'supervisor']) {
+    const delivery = roleDelivery(installed, role, env), seen = new Set();
+    const prompt = sessionId => ({ method: 'session/prompt', params: { sessionId, prompt: [{ type: 'text', text: 'bounded task' }] } });
+    const send = sessionId => acpRolePrompt(prompt(sessionId), delivery, seen).params.prompt;
+    writeFileSync(state, 'Vietnamese\n');
+    const first = send('a');
+    assert.match(first[0].text, /Communication language: Vietnamese/);
+    assert.match(first[0].text, /Spawn kit —/);
+    assert.equal(first[0].text.split(`SLP role=${role}`).length, 2, 'one core per prompt');
+    assert.equal(first[1].text, 'bounded task');
+    writeFileSync(state, 'Japanese\n');
+    const next = send('a')[0].text;
+    assert.match(next, /Communication language: Japanese/);
+    assert.ok(!next.includes('Communication language: Vietnamese'));
+    assert.ok(!next.includes('Spawn kit —') && !next.includes('Policy locators —'));
+    assert.match(next, /Policy recovery command: .* instructions /);
+    assert.match(next, /Human stop/);
+    assert.match(next, /missing evidence is a gap/);
+    if (role !== 'peer') assert.match(next, /does not license merging/);
+    assert.match(send('b')[0].text, /Spawn kit —/, 'new session gets its own carrier');
+    for (const method of ['session/load', 'session/resume', 'session/fork']) {
+      const lifecycle = { method, params: { sessionId: 'a' } };
+      assert.equal(acpRolePrompt(lifecycle, delivery, seen), lifecycle);
+      assert.match(send('a')[0].text, /Spawn kit —/);
+    }
+    for (const value of ['', null]) {
+      if (value === null) rmSync(state); else writeFileSync(state, value);
+      assert.match(send('a')[0].text, /not set — this replaces earlier runtime language settings/);
+    }
+    mkdirSync(state);
+    assert.throws(() => send('a'), /EISDIR/);
+    rmSync(state, { recursive: true });
+    const unrelated = { method: 'session/cancel', params: { sessionId: 'a' } };
+    assert.equal(acpRolePrompt(unrelated, delivery, seen), unrelated);
+    const bad = { method: 'session/prompt', params: { sessionId: 'broken', prompt: null } };
+    assert.throws(() => acpRolePrompt(bad, delivery, seen), /Malformed/);
+    assert.equal(seen.has('broken'), false);
+  }
+  const frozen = roleDelivery(installed, 'peer', env);
+  const core = frozen.anchor();
+  writeFileSync(join(installed, 'src/roles/peer.md'), 'changed after verification');
+  assert.equal(frozen.anchor(), core, 'running delivery does not mix candidate policy versions');
+  const unmanaged = roleDelivery(root, 'peer', { SLP_DAEMON_HOME: home });
+  assert.ok(!unmanaged.anchor().includes('Communication language:'));
+});

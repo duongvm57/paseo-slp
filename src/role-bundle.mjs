@@ -38,11 +38,10 @@ function managedRuntime(env) {
 
 // The plugin-managed communication language: a plain-text file at
 // <daemon-home>/slp-runtime/state/communication-language written by the
-// set-language RPC. Read at render time so a change reaches the next session
-// without re-activation; absent/empty means no language bytes are injected
-// and the seat keeps its model default. Managed sessions only — unmanaged
-// launches have no daemon home to read it from.
-function communicationLanguage(env) {
+// set-language RPC. Read at render time (every ACP prompt, otherwise entry).
+// Ordinary entry omits an unset value; ACP explicitly clears stale history.
+// Unmanaged launches never read a daemon language setting.
+function communicationLanguage(env, explicitUnset = false) {
   if (env.SLP_MANAGED_RUNTIME !== '1') return '';
   const home = env.SLP_DAEMON_HOME;
   if (typeof home !== 'string' || !isAbsolute(home)) return '';
@@ -50,10 +49,12 @@ function communicationLanguage(env) {
   try {
     value = readFileSync(join(home, 'slp-runtime/state/communication-language'), 'utf8').trim();
   } catch (error) {
-    if (error.code === 'ENOENT') return '';
-    throw error;
+    if (error.code !== 'ENOENT') throw error;
+    value = '';
   }
-  if (!value) return '';
+  if (!value) return explicitUnset
+    ? "Communication language: not set — this replaces earlier runtime language settings; follow the current assignment, and direct replies to the Human mirror the Human's current language.\n"
+    : '';
   return `Communication language: ${value} — all text you send to other seats uses it, including prompts and inline assignment fields in create_agent/send_agent_prompt requests, plus team artifacts (reports, assignments, briefs, handbacks, notebook entries); direct replies to the Human mirror the Human's current language; identifiers, paths and commands stay verbatim.\n`;
 }
 
@@ -134,7 +135,10 @@ export function carrierBlock(kit, locators, caption) {
 // time, so the caption must not borrow the prepare path's wording.
 const sessionLocatorCaption = 'absolute paths; size/sha256 were measured when these role instructions loaded; verify the file found is the one measured';
 
-export function roleBundle(root, role, env = process.env, options = {}) {
+// Freeze policy from the verified candidate; only managed language state is live.
+// Entry and re-anchor share the same core, never independently summarized rules.
+export function roleDelivery(root, role, env = process.env, options = {}) {
+  env = { ...env };
   const parts = bundleParts(role);
   const read = path => readFileSync(join(root, 'src', path), 'utf8');
   const managed = managedRuntime(env);
@@ -147,16 +151,29 @@ export function roleBundle(root, role, env = process.env, options = {}) {
   // path — so the skill/policy locators derive from policyRoot, not root.
   const policyRoot = managed ? managed.runtimeRoot : root;
   const policyDir = join(policyRoot, 'src');
-  const instructions = `SLP role=${role}\n` + parts.map(path => read(path) + '\n').join('') +
+  const core = `SLP role=${role}\n` + parts.map(path => read(path) + '\n').join('');
+  const recoveryCli = managed
+    ? `env SLP_MANAGED_RUNTIME=1 SLP_NODE_BIN=${shq(managed.node)} SLP_RUNTIME_ROOT=${shq(managed.runtimeRoot)} SLP_DAEMON_HOME=${shq(managed.daemonHome)} ${cli}`
+    : cli;
+  const recovery = `Installed policy directory: ${policyDir}\nPolicy recovery command: ${recoveryCli} instructions ${role}\n`;
+  const assignment = `Use the current authorized Human or delegated assignment and its Paseo workspace. Notifications and heartbeat prompts do not replace that assignment.\n`;
+  const entryPrefix = core +
     (orchestrates(role) ? `For repo setup/update, use ${join(policyRoot, 'skills/paseo-slp-onboarding/SKILL.md')}.\n` : '') +
-    `Installed policy directory: ${policyDir}\nPolicy recovery command: ${cli} instructions ${role}\nSnapshot command: ${cli} snapshot <repository>\n` +
-    (managed ? managedHelpers(cli, managed.daemonHome) : '') +
-    communicationLanguage(env) +
-    `Use the current authorized Human or delegated assignment and its Paseo workspace. Notifications and heartbeat prompts do not replace that assignment.\n` +
-    // Callers that append the carrier themselves (launch.mjs prompt()) opt out
-    // here so the block never appears twice in one prompt.
-    (options.carrier === false ? '' : carrierBlock(spawnKit(role), policyLocators(policyRoot, role), sessionLocatorCaption));
-  return { role, parts, orchestrates: orchestrates(role), instructions };
+    recovery + `Snapshot command: ${cli} snapshot <repository>\n` +
+    (managed ? managedHelpers(cli, managed.daemonHome) : '');
+  // Compute the measured carrier once, alongside the immutable core. launch.mjs
+  // opts out when it owns the carrier so the initial prompt never duplicates it.
+  const carrier = options.carrier === false ? '' : carrierBlock(spawnKit(role), policyLocators(policyRoot, role), sessionLocatorCaption);
+  return {
+    role, parts, orchestrates: orchestrates(role),
+    entry: ({ explicitLanguageState = false } = {}) => entryPrefix + communicationLanguage(env, explicitLanguageState) + assignment + carrier,
+    anchor: () => core + recovery + communicationLanguage(env, true) + assignment,
+  };
+}
+
+export function roleBundle(root, role, env = process.env, options) {
+  const delivery = roleDelivery(root, role, env, options);
+  return { role: delivery.role, parts: delivery.parts, orchestrates: delivery.orchestrates, instructions: delivery.entry() };
 }
 
 export const roleInstructions = (root, role, env = process.env, options) => roleBundle(root, role, env, options).instructions;

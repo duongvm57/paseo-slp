@@ -13,7 +13,7 @@ Local installation/transport checks do not constitute workflow acceptance.
 | src/role-process.mjs | Shared child-process lifecycle, signal/exit propagation, NDJSON framing and backpressure; adapters select protocol mode, instruction transforms and unchanged-frame serialization. |
 | bin/codex-role.mjs, src/role-transport.mjs | Transparent Codex stdio adapter; append installed role instructions at start/resume and existing turn overrides. |
 | bin/pi-role.mjs, src/role-transport.mjs | Pi native append-system-prompt adapter; preserve RPC bytes, host extensions and session/model/thinking arguments. |
-| bin/devin-role.mjs, src/role-transport.mjs | Generic ACP adapter; prepend installed role instructions to the first session prompt of each session; re-arm on load/resume/fork. |
+| bin/devin-role.mjs, src/role-transport.mjs | Generic ACP adapter; prepend role core, recovery pointer and current managed communication-language state on every session prompt. First prompts and prompts re-armed by load/resume/fork also carry session-entry helpers and the full measured carrier; no compaction event is required. |
 | bin/claude-role.mjs, src/role-transport.mjs | Claude Agent SDK stream-json adapter; append installed role instructions to the initialize control request's system-prompt append field; all other frames pass through. |
 | src/common.md, src/roles/*.md | Authority, role behavior and context-recovery rules; no repository tactics or model IDs. |
 | src/delegation.md | Always-loaded Supervisor/Lead delegation core: required review-gate, parentage/placement and ambiguous-create invariants, with conditional pointers to formation and execution procedures. |
@@ -32,7 +32,7 @@ Local installation/transport checks do not constitute workflow acceptance.
 | skills/paseo-slp-onboarding/SKILL.md | Installable repo tactics and Peer pool setup, with Supervisor/Lead profile verification; project/global installation is independent from repo config initialization. |
 | src/templates/workspace-protocol.md | Repository tactics template with context recovery, risk classes, routing, monitoring and proof gates; the `agent_mode` frontmatter field records the intended spawn mode for direct launches (empty falls back to the bundle's `modeId`, then asks); explicit init preserves existing files. |
 | src/binding.mjs | Every rule a Binding must satisfy: setting patterns, the route override deny-lists and the single provider-health check. Imports nothing from the package. |
-| src/role-bundle.mjs | Which policy bytes each role receives at session entry, and their order; the load-path contract traced in reports/guide-coverage.md. Session-entry instructions also carry the carrier block (spawn kit plus policy-byte locators) so profile/provider launches receive the same payload prepare places in initialPrompt. Managed sessions also inject the plugin-set communication language (slp-runtime/state/communication-language) when present — one line, nothing when unset. |
+| src/role-bundle.mjs | Which policy bytes each role receives at session entry, and their order; the load-path contract traced in reports/guide-coverage.md. Session-entry instructions also carry the carrier block (spawn kit plus policy-byte locators) so profile/provider launches receive the same payload prepare places in initialPrompt. Managed session entry injects the plugin-set communication language (slp-runtime/state/communication-language) when present. ACP delivery freezes the verified candidate core and carrier at adapter startup, reads language per prompt, and explicitly clears earlier runtime language instructions when unset; other transports retain entry-time language semantics. |
 | src/launch.mjs, src/profiles.mjs | Select one Binding source (saved profiles, catalog routing or an explicit binding), then compose the create_agent argument record. launchPlan and handoffPlan share one builder; nothing edits that record afterwards. Handoff adds explicit authority, old-owner evidence, resources and current work snapshot; no lifecycle mutations. request.inventoryFile fills providers/profiles the request did not inline; request.assignmentFile appends a read-first pointer to the emitted prompt without inlining file bytes. The plan also surfaces the intended `modeId` (with a warning when the binding lacks one), a `spawnKit` of role-appropriate MCP tool signatures, and an `orientation` manifest of policy-byte locators (path/bytes/sha256, `missing` for receipt-declared files absent on disk; the set derives from the install receipt, so source-only documents are never declared) — locators only, never interpretation; the same payload is carried inside `create.initialPrompt`, the only field create_agent transmits, so the spawned seat actually receives it. The prompt-side carrier is omitted only when the binding targets the canonical `slp-<family>-<role>` wrapper and the request's live provider inventory observed it — the wrapper injects the carrier at session entry; unverified targets keep the prompt fallback. |
 | src/inventory.mjs | Provider/profile inventory in the exact shapes prepare consumes: `paseo provider ls --json` only when the requested home's paseo.pid names a live process, else that home's own config.json `agents.providers` — never another daemon's providers, no directory materialization; provider `enabled` may be null for unrecognized states; profiles always from `daemon.agentProfiles`. Read-only; on multi-daemon hosts the live listing reflects whichever daemon the paseo CLI reaches. |
 | src/agent-state.mjs | Shared read-only discovery of daemon persistence (`<paseoHome>/agents/*/<id>.json`) for agent listing and monitoring. A missing root yields no records; other root errors propagate; broken groups and records are skipped. Preserves filesystem read order and duplicate IDs, leaving projection and duplicate resolution to callers. |
@@ -318,3 +318,17 @@ prepare validates route.quotaFallbackFrom against this authorization and fresh h
 Raw Paseo create/update calls remain host capabilities: the package supplies policy
 and validation, not a host security boundary. Evidence must verify actual settings
 on start/resume/update; availability flags alone do not prove quota recovery.
+
+### ACP context recovery
+
+ACP role delivery is conversation text, not a persistent system-instruction channel.
+The adapter reasserts the same role core on every session/prompt; it does not infer
+compaction from a timeline record or invent a session/compact event. Entry/re-arm
+also supplies helpers and full SHA-256 policy locators. Recurring anchors omit the
+carrier but retain the verified runtime recovery command. Core bytes stay tied to
+the adapter's verified startup candidate; managed language is read at each prompt.
+An unset language state supersedes earlier runtime language settings without
+replacing the current assignment. Non-ENOENT language read errors propagate.
+Task context must be recovered from evidence: role recovery never guesses an
+assignment or restores missing ownership. Transport tests prove delivered bytes;
+actual compaction resilience requires separate live provider evidence.
