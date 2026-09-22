@@ -10,6 +10,7 @@ Local installation/transport checks do not constitute workflow acceptance.
 | install.sh | One-command local install into the selected destination and Paseo home; reload configuration. |
 | src/paseo-install.mjs | Merge owned provider/profile entries, preserve existing preferences, record rollback binding, initialize repository protocol and Supervisor notebook scaffold; materialize clones a source checkout's protocol and catalog into a target checkout with frontmatter paths rebased (Supervisor notebook excluded). |
 | src/host-config.mjs | Sole reader/writer of the Paseo host configuration; one rule each for owned provider and owned profile verification and the two MCP flags. |
+| src/role-process.mjs | Shared child-process lifecycle, signal/exit propagation, NDJSON framing and backpressure; adapters select protocol mode, instruction transforms and unchanged-frame serialization. |
 | bin/codex-role.mjs, src/role-transport.mjs | Transparent Codex stdio adapter; append installed role instructions at start/resume and existing turn overrides. |
 | bin/pi-role.mjs, src/role-transport.mjs | Pi native append-system-prompt adapter; preserve RPC bytes, host extensions and session/model/thinking arguments. |
 | bin/devin-role.mjs, src/role-transport.mjs | Generic ACP adapter; prepend installed role instructions to the first session prompt of each session; re-arm on load/resume/fork. |
