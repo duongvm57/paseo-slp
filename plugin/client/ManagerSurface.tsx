@@ -1748,13 +1748,11 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   // every seated family's peer scope are the only ones the form needs.
   // Cached per family|role scope; a failure caches an error result so the
   // picker degrades to free text instead of retrying forever.
-  const neededScopes: { family: FamilyName; role: RoleName }[] = [
-    { family: routingForm.supervisor.family, role: "supervisor" },
-    { family: routingForm.lead.family, role: "lead" },
-    ...poolForm.seats
-      .filter((seat): seat is PeerSeatForm & { family: FamilyName } => seat.family !== "")
-      .map(seat => ({ family: seat.family, role: "peer" as const })),
-  ];
+  const neededScopes = [
+    { family: routingForm.supervisor.family, role: "supervisor" as const },
+    { family: routingForm.lead.family, role: "lead" as const },
+    ...poolForm.seats.map(seat => ({ family: seat.family, role: "peer" as const })),
+  ].filter((scope): scope is { family: FamilyName; role: RoleName } => scope.family !== "");
   const neededKey = [...new Set(neededScopes.map(scope => catalogScope(scope.family, scope.role)))].join(",");
   useEffect(() => {
     const missing = neededKey.split(",").filter(k => k !== "" && catalogs[k] === undefined);

@@ -1609,4 +1609,8 @@ test('catalog input accepts a role and the client caches by family|role', () => 
   // No bare-family catalog lookups remain.
   assert.ok(!/catalogs\[form\.family\]/.test(source), 'bare-family role-card lookup remains');
   assert.ok(!/catalogs\[seat\.family\]/.test(source), 'bare-family seat lookup remains');
+  // An Unset role has family "" — the scope list must drop it before keys
+  // are built, or "|role" scopes would fire catalog RPCs zod rejects.
+  assert.ok(/neededScopes[\s\S]*?\.filter\([\s\S]*?scope\.family !== ""\)/.test(source),
+    'empty-family scopes must be filtered before scope keys are built');
 });
