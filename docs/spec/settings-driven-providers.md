@@ -388,13 +388,15 @@ After this refactor the remaining steps are exactly three:
   gains an optional `role`; `CatalogOutput` gains `resolvedProvider`
   (absent on the legacy path). `PaseoApi` exposes no `serverInfo`
   accessor, so capability detection is probe-and-latch: one
-  snapshot attempt, and an absent/throwing RPC latches
-  `snapshotUnsupported` for the plugin process — the daemon version is
-  fixed for that lifetime — after which the legacy
-  `listModels`/`listModes`/`listFeatures` path runs verbatim for
-  pre-snapshot daemons. The ManagerSurface cache keys follow the same
-  scope: catalogs under `family|role`, feature defs under
-  `family|role|model|modeId`.
+  snapshot attempt, and a confirmed-absent RPC — the method missing or
+  the daemon's `unknown_schema` "Unknown request" reply — latches
+  `snapshotUnsupported` for the plugin process (the daemon version is
+  fixed for that lifetime) with a one-line warning; any other failure
+  degrades that call to legacy without latching, so the next read
+  retries the snapshot. Pre-snapshot daemons keep the legacy
+  `listModels`/`listModes`/`listFeatures` path verbatim. The
+  ManagerSurface cache keys follow the same scope: catalogs under
+  `family|role`, feature defs under `family|role|model|modeId`.
 - **Provider label unification** — generated provider entries now emit
   one label template for every transport: `SLP <Family> <Role>`
   (`SLP Codex Peer`, `SLP Pi Peer`, `SLP Claude Code Peer`,
@@ -484,8 +486,8 @@ After this refactor the remaining steps are exactly three:
   `setRoutingField`; a dedicated family-change handler applies
   `applyFamilyChange(form, family, catalog)`, which re-validates dependents
   against the NEW family's catalog under keep-if-present rules: `model`
-  keeps only if `catalogs[family].models` lists it, `modeId` only if
-  `catalogs[family].modes` lists it (pi declares zero modes, so switching to
+  keeps only if the `family|role` catalog's models list it, `modeId` only if
+  its modes list it (pi declares zero modes, so switching to
   pi always clears it; devin `bypass` is not a codex/claude mode), and
   `thinkingOptionId` only if the KEPT model still declares it via
   `thinkingOptionsFor` — the model resolves first, thinking second.

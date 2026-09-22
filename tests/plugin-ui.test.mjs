@@ -1586,6 +1586,13 @@ test('the catalog RPC rides providers.snapshot with legacy list calls kept', () 
   // must be the documented latch — and the comment must record why.
   assert.ok(source.includes('snapshotUnsupported'), 'capability latch missing');
   assert.match(source, /serverInfo/, 'the missing serverInfo capability must be recorded in a comment');
+  // The latch fires only on identifiable capability absence — the daemon's
+  // unknown_schema "Unknown request" reply or a missing method — never on a
+  // transient transport failure, and never silently.
+  assert.match(source, /unknown_schema\|unknown request/i, 'latch must key on the unknown-request marker');
+  assert.ok(!/catch\s*\{\s*snapshotUnsupported\s*=\s*true/.test(source),
+    'a blanket catch-all latch hides transient failures');
+  assert.ok(source.includes('console.warn'), 'the downgrade must not be silent');
   // Features resolve against the SNAPSHOT-selected entry, not the base family.
   assert.ok(source.includes('`${entry.provider}/${input.model}`'), 'features must query the resolved provider id');
   // Snapshot path emits provenance; legacy path does not.

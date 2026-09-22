@@ -143,8 +143,11 @@ interface ProviderCatalogApi {
 }
 
 // Probe-and-latch capability flag: the daemon version is fixed for the life
-// of the plugin process, so one failed/absent snapshot call can never flip
+// of the plugin process, so a confirmed-absent snapshot RPC can never come
 // back — latching avoids paying an RPC rejection on every catalog read.
+// Latch ONLY on identifiable capability absence (missing method or the
+// daemon's unknown_schema "Unknown request" reply); transient transport
+// failures degrade that one call to legacy without latching.
 let snapshotUnsupported = false;
 
 // The catalog is read-only and advisory — queried on the role's managed
@@ -198,11 +201,25 @@ async function loadCatalog(input: CatalogRequest, paseo: ProviderCatalogApi) {
           features,
           error: errors.length > 0 ? errors.join("; ") : null,
         };
-      } catch {
-        snapshotUnsupported = true;
+      } catch (error) {
+        // Capability absence is the only latch condition: the daemon
+        // answers unrecognized RPCs with code "unknown_schema" and an
+        // "Unknown request, try upgrading the daemon" message
+        // (websocket-server.ts). Any other throw — daemon restart
+        // mid-call, malformed payload — falls through to the legacy path
+        // for THIS call and the next read retries the snapshot.
+        const code = typeof error === "object" && error !== null && "code" in error
+          ? String((error as { code?: unknown }).code)
+          : "";
+        const message = error instanceof Error ? error.message : String(error);
+        if (/unknown_schema|unknown request/i.test(`${code} ${message}`)) {
+          snapshotUnsupported = true;
+          console.warn(`slp: providers.snapshot unavailable (${message || code}); using legacy provider listings`);
+        }
       }
     } else {
       snapshotUnsupported = true;
+      console.warn("slp: providers.snapshot not implemented by this daemon; using legacy provider listings");
     }
   }
   // Legacy path (pre-snapshot daemons) — unchanged.
