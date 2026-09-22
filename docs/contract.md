@@ -43,6 +43,7 @@ Local installation/transport checks do not constitute workflow acceptance.
 | e2e/evidence.mjs | One contract per evidence kind: what may enter the ledger and what discharges the kind's requirement at seal. |
 | e2e/criteria.mjs | U1–U7 as code, each naming the evidence kinds that can support it; the mapping a reviewer previously held in their head. |
 | e2e/collector.mjs | Frozen evidence ledger and review history; verify assessment byte identities and original-review links before summaries, addenda or review-dependent launch gates. |
+| e2e/ledger.mjs, e2e/report.mjs | The ledger owns evidence storage, byte verification and per-kind discharge inspection, including the run context and capture provenance; reports consume that inspection to render attempt status, run summaries and the cross-run index without opening evidence records. |
 | e2e/ | Development-only scenario manifest, fixture, external outcome check, evidence collector and repository E2E protocol. Collector commands do not create agents or judge behavioral evidence. |
 | tests/*.test.mjs, tests/helpers/plugin-doubles.mjs | Local installer, rollback, transport, envelope, snapshot and plugin checks; the shared plugin doubles own temporary daemon/binary fixtures and their matching dependency wiring, while tests own manager creation, fault injection and assertions. |
 

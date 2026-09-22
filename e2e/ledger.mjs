@@ -48,7 +48,7 @@ export function evidenceIndex(attempt) {
     return { path, kind: record.kind, sha256: hash(bytes) };
   });
 }
-export const evidenceContext = loaded => ({ operatorId: loaded.data.config.operatorId, runDirectory: loaded.directory });
+const evidenceContext = loaded => ({ operatorId: loaded.data.config.operatorId, runDirectory: loaded.directory });
 export function missingEvidence(loaded, evidence) {
   const context = evidenceContext(loaded);
   return loaded.frozen.evidenceKinds.filter(kind => !evidence.some(item => {
@@ -56,4 +56,14 @@ export function missingEvidence(loaded, evidence) {
     const record = readJson(join(loaded.attempt, item.path));
     return dischargesEvidence(kind, record, context);
   }));
+}
+
+// Reporting consumes the ledger's inspection result, not its storage layout
+// or the context/provenance rules needed to discharge an evidence kind.
+export function evidenceStatus(loaded) {
+  const context = evidenceContext(loaded);
+  const evidence = evidenceIndex(loaded.attempt).map(item => ({
+    ...item, discharges: dischargesEvidence(item.kind, readJson(join(loaded.attempt, item.path)), context),
+  }));
+  return { evidence, missing: missingEvidence(loaded, evidence) };
 }
