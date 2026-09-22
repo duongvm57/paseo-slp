@@ -48,20 +48,7 @@ correctness. Multi-agent coding commonly fails in the same few ways:
 SLP answers by separating *kinds of judgment* rather than building a
 rigid `Supervisor > Lead > Peer` hierarchy:
 
-```
-                         Human
-                           │
-              ┌────────────┴────────────┐
-              │                         │
-        Supervisor                    Lead
-   process observation          project coordination
-              │                         │
-              └──── observes ───────────┤
-                                        │
-                                    Peer(s)
-                        Engineer / Architect /
-                          Reviewer / Scout
-```
+![Paseo SLP role model: Human owns intent, boundaries and final acceptance; a Supervisor observes the Lead's workflow without joining execution; the Lead coordinates the project and delegates bounded outcomes to independent Engineer, Architect, Reviewer and Scout Peers, which return evidence, challenges, dependency requests or blocked work.](docs/images/slp-role-model.png)
 
 - **Human** keeps owner authority: intent, important trade-offs,
   exceptional grants, protocol changes and final acceptance.
@@ -101,7 +88,7 @@ work:
 # From the repo — the plugin lives in the repo's plugin/ subdirectory:
 paseo plugin install duongvm57/paseo-slp-plugin:plugin
 
-# Pinned to a specific release — e.g. to install an older version:
+# Pin to a specific release:
 paseo plugin install duongvm57/paseo-slp-plugin:plugin --ref v0.2.0
 
 # From a local checkout (development):
@@ -123,9 +110,7 @@ loading it. Verify with `paseo plugin ls` — the plugin should reach
 
 Installing registers the plugin; it does not change your agent
 configuration yet. Activation is a separate, explicit step (below). The
-pre-plugin standalone installer is documented in
-[docs/reports/legacy-install.md](docs/reports/legacy-install.md) — do not run it alongside
-the plugin.
+plugin manages the runtime installation and host configuration.
 
 ## Activation
 
@@ -177,12 +162,11 @@ Git-managed installs update through Paseo:
 paseo plugin update paseo-slp
 ```
 
-The daemon fetches the source, builds the new checkout and reloads the
-plugin. Reactivating afterwards rebinds to the new candidate: the new
-runtime materializes beside the old one under `slp-runtime/`, launchers are
-rebuilt, and running sessions keep their old provider process until they
-finish — launch shim paths stay stable across candidates. Rebinding is
-idempotent: activating the same candidate twice is a `no-op`.
+The daemon fetches the source, builds the checkout and reloads the plugin.
+Reactivating rebinds the current candidate and rebuilds its launchers. Running
+sessions keep their provider process until they finish; launch shim paths stay
+stable across candidates. Rebinding is idempotent: activating the same
+candidate twice is a `no-op`.
 
 Directory installs are reloaded instead:
 
@@ -349,18 +333,6 @@ archetype list and taking model/mode values from the live provider catalog.
 A repository catalog is a deliberate pin, created only by
 `init --routing-from` (below).
 
-A legacy `$PASEO_HOME/slp-routing.json` from an earlier version is never
-deleted automatically: the Peer pool card offers a one-time import of it
-into `peer-pool.json`.
-
-Compatibility note: the new pool is one-way. `peer-pool.json` sits at a path
-older runtimes never read, and its content fails their `validateCatalog` —
-parked seats carry a blank `provider`, and `priority` is no longer written.
-Downgrading the runtime or pointing an older retained installation at the
-same `$PASEO_HOME` makes every unpinned repository fail closed with
-`Missing Peer pool`/validation errors until the pool is removed or re-authored
-in the old format.
-
 ### Onboarding
 
 The onboarding skill is installed separately so agents can auto-trigger it.
@@ -390,26 +362,20 @@ installer also links them into each agent's own skills directory (e.g.
 ask to onboard/set up SLP for the repo; the skill description triggers the
 workflow. See the [source skill](skills/paseo-slp-onboarding/SKILL.md).
 
-Protocol and catalog are two separate files: the protocol is operating
-guidance, the JSON is machine-checkable data that changes often. The protocol
-lives in the repo's `.paseo-slp/`; the Peer pool lives in the user-scope
-`peer-pool.json` by default and lands in the repo only as a deliberate pin —
-a repo catalog means the repo ignores the shared pool permanently, even after
-the file is emptied. Do not embed JSON inside Markdown. The Lead reads the
-protocol and pool before every Peer delegation, picks an option by
-task/budget, then passes the relevant constraints into the assignment. A new
-worktree needs the protocol present in the base candidate or an authorized
-copy (`materialize` carries the catalog only when the source pinned one);
-each worktree reads its own configuration.
+Protocol and catalog are separate files: the protocol is operating guidance
+and the JSON is machine-checkable routing data. Do not embed JSON inside
+Markdown. The Lead reads both before every Peer delegation, chooses an option
+by task and budget, then passes the relevant constraints into the assignment.
+Each worktree reads its own configuration.
 
-### Importing an existing catalog
+### Creating a repo-pinned catalog
 
-If you already have a global table from an earlier version — or want a repo
-pinned off the shared pool — import a catalog file once into the repo:
+To give a repository its own catalog instead of the shared pool, import a
+catalog file once:
 
 ```bash
 node "$SLP_RT/bin/slp.mjs" init /absolute/job-repo \
-  --routing-from /absolute/previous/slp-routing.json --apply
+  --routing-from /absolute/path/to/catalog.json --apply
 ```
 
 Import only creates a catalog when none exists; it does not overwrite, merge
@@ -877,11 +843,8 @@ and option/hash for the Peer. `mixed-peer` checks a pool containing both
 Codex/Pi — no extra saved profile needed and no forcing the Lead's family per
 Peer. Scenarios outside the scope stay NOT_RUN.
 
-The offline CLI path remains: `prepare <request.json>` (from a source
-checkout's `bin/slp.mjs`) emits create_agent arguments with a role envelope,
-and `install <dir> --apply` stages the package — see
-[docs/reports/legacy-install.md](docs/reports/legacy-install.md). This path registers no
-profile and creates no agent itself.
+The offline CLI's `prepare <request.json>` emits `create_agent` arguments with
+a role envelope. It registers no profile and creates no agent itself.
 
 ## Documentation
 
@@ -898,12 +861,11 @@ Implementation specification:
 - [Plugin implementation spec](docs/spec/paseo-plugin-implementation.md)
 - [Plugin feasibility audit](docs/spec/paseo-plugin-feasibility.md)
 - [Settings-driven providers + hook injection](docs/spec/settings-driven-providers.md) —
-  post-v1 direction sketch
+  design exploration
 
 Reports and investigations:
 
 - [Guide → policy, procedure and protocol trace](docs/reports/guide-coverage.md)
-- [Legacy standalone installer](docs/reports/legacy-install.md)
 
 Referenced host mechanisms:
 [custom providers](https://paseo.sh/docs/custom-providers.md),

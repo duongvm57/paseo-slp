@@ -45,11 +45,7 @@ test('coordinator CLI freezes transcript bytes independently of the source file'
   assert.equal(payload.transcriptSha256, hash(Buffer.from(transcript)));
   assert.equal(payload.operatorId, config.operatorId);
   assert.equal(payload.sessionId, 'synthetic-session');
-  const other = join(data.dir, 'other.txt');
-  for (const kind of evidenceKinds.filter(kind => !['coordinator', 'resources'].includes(kind))) {
-    writeFileSync(other, kindPayload(kind));
-    collect(data.attempt, kind, other);
-  }
+  collectAll(data, { except: ['coordinator', 'resources'] });
   collectResources(data.attempt, resourceSettlement(data));
   for (const changed of [{ operatorId: 'wrong-operator' }, { transcriptSha256: 'wrong-hash' }, { transcript: '[]', transcriptSha256: hash(Buffer.from('[]')) }]) {
     // An invalid earlier capture stays visible and cannot satisfy the gate.
@@ -66,11 +62,7 @@ test('seal rejects resource settlement with unresolved actor lifecycle state', t
   const data = setup(t), sessionId = 'synthetic-session';
   const coordinator = join(data.dir, `rollout-${sessionId}.jsonl`);
   writeFileSync(coordinator, `${JSON.stringify({ type: 'session_meta', payload: { id: sessionId } })}\n`);
-  const receipt = join(data.dir, 'receipt.txt');
-  for (const kind of evidenceKinds.filter(kind => !['coordinator', 'resources'].includes(kind))) {
-    writeFileSync(receipt, kindPayload(kind));
-    collect(data.attempt, kind, receipt);
-  }
+  collectAll(data, { except: ['coordinator', 'resources'] });
   collectCoordinator(data.attempt, coordinator, sessionId);
   const resources = join(data.dir, 'resources.json');
   writeFileSync(resources, JSON.stringify({
@@ -98,10 +90,7 @@ test('seal rejects an empty report without freezing the attempt', t => {
 test('seal requires coordinator evidence even when all other evidence kinds exist', t => {
   const data = setup(t);
   const path = join(data.dir, 'receipt.txt');
-  for (const kind of evidenceKinds.filter(kind => !['coordinator', 'resources'].includes(kind))) {
-    writeFileSync(path, kindPayload(kind));
-    collect(data.attempt, kind, path);
-  }
+  collectAll(data, { except: ['coordinator', 'resources'] });
   collectResources(data.attempt, resourceSettlement(data));
   assert.throws(() => seal(data.attempt), /Missing required evidence: coordinator/);
   assert.equal(existsSync(join(data.attempt, 'report.json')), false);
@@ -113,12 +102,7 @@ test('seal requires coordinator evidence even when all other evidence kinds exis
 });
 test('a coordinator envelope only discharges the kind through verified capture', t => {
   const data = setup(t);
-  for (const kind of evidenceKinds.filter(kind => kind !== 'coordinator')) {
-    if (kind === 'resources') { collectResources(data.attempt, resourceSettlement(data)); continue; }
-    const path = join(data.dir, `${kind}.txt`);
-    writeFileSync(path, kindPayload(kind));
-    collect(data.attempt, kind, path);
-  }
+  collectAll(data, { except: ['coordinator'] });
   const transcript = `${JSON.stringify({ type: 'session_meta', payload: { id: 'synthetic-session' } })}\n`;
   const outside = join(data.dir, 'rollout-synthetic-session.jsonl');
   writeFileSync(outside, transcript);
@@ -146,12 +130,7 @@ test('resource settlement needs declared terminal states, not merely absent live
     assert.equal(satisfiesEvidence('resources', settlement(status)), true, status);
   }
   const data = setup(t);
-  for (const kind of evidenceKinds.filter(kind => kind !== 'resources')) {
-    const path = join(data.dir, `${kind}.txt`);
-    writeFileSync(path, kindPayload(kind));
-    if (kind === 'coordinator') collectCoordinator(data.attempt, coordinatorTranscript(data), 'synthetic-session');
-    else collect(data.attempt, kind, path);
-  }
+  collectAll(data, { except: ['resources'] });
   const pending = join(data.dir, 'resources-pending.json');
   writeFileSync(pending, settlement('awaiting-input'));
   collectResources(data.attempt, pending);
@@ -197,11 +176,7 @@ test('checks evidence needs a structured receipt carrying each command exit stat
   const freeform = join(data.dir, 'checks.txt');
   writeFileSync(freeform, 'Synthetic freeform receipt; no exit status.\n');
   collect(data.attempt, 'checks', freeform);
-  for (const kind of evidenceKinds.filter(kind => !['checks', 'coordinator', 'resources'].includes(kind))) {
-    const other = join(data.dir, `${kind}.txt`);
-    writeFileSync(other, kindPayload(kind));
-    collect(data.attempt, kind, other);
-  }
+  collectAll(data, { except: ['checks', 'coordinator', 'resources'] });
   collectCoordinator(data.attempt, coordinatorTranscript(data), 'synthetic-session');
   collectResources(data.attempt, resourceSettlement(data));
   assert.throws(() => seal(data.attempt), /Missing required evidence: checks/);
@@ -231,11 +206,7 @@ test('interventions evidence needs the explicit ledger receipt, including declar
   const freeform = join(data.dir, 'interventions.txt');
   writeFileSync(freeform, 'No interventions during the attempt.\n');
   collect(data.attempt, 'interventions', freeform);
-  for (const kind of evidenceKinds.filter(kind => !['interventions', 'coordinator', 'resources'].includes(kind))) {
-    const other = join(data.dir, `${kind}.txt`);
-    writeFileSync(other, kindPayload(kind));
-    collect(data.attempt, kind, other);
-  }
+  collectAll(data, { except: ['interventions', 'coordinator', 'resources'] });
   collectCoordinator(data.attempt, coordinatorTranscript(data), 'synthetic-session');
   collectResources(data.attempt, resourceSettlement(data));
   assert.throws(() => seal(data.attempt), /Missing required evidence: interventions/);

@@ -1,6 +1,7 @@
 # Provider/model routing and quota handoff
 
-Supervisor/Lead read before every delegation or quota fallback. Supervisor and
+Supervisor/Lead consult before delegation or quota fallback under the common
+core's policy-text freshness rule. Supervisor and
 Lead have saved Paseo profiles; Peer has a project runtime pool. The three roles
 are behavior contracts, not a requirement for three saved profiles.
 
@@ -195,7 +196,7 @@ launch. A missing inventory is a request
 construction error: supply the discovery already obtained and rerun preparation;
 it is not a reason to change the selected model or read package implementation.
 Use taskLabel for a short Human-readable work label and disposition for the Peer
-seat. prepare renders the naming convention from delegation.md; omitted taskLabel
+seat. prepare renders the naming convention from delegation-execution.md; omitted taskLabel
 uses the repository directory name, and omitted Peer disposition displays General.
 Catalog hash validation is not atomic with host creation; record actual launches.
 
@@ -203,8 +204,10 @@ Installed providers are slp-codex-{role}, slp-pi-{role}, slp-devin-{role} and
 slp-claude-{role}.
 Every Peer wrapper loads the same policy. Codex receives developer instructions;
 Pi uses --append-system-prompt while preserving host extensions/MCP arguments;
-Devin runs a generic ACP adapter, so its wrapper prepends the role policy to the
-first session prompt of each session; Claude runs the Agent SDK stream-json
+Devin runs a generic ACP adapter, so its wrapper prepends the role core,
+recovery pointer and current managed communication language to every session
+prompt — the first prompt and prompts re-armed by load/resume/fork also carry
+the session-entry helpers and measured carrier; Claude runs the Agent SDK stream-json
 transport, so its wrapper appends the role policy to the appendSystemPrompt
 field of the initialize control request (SDK 0.3.246 hoists a preset
 systemPrompt's append there; the wrapper also covers a verbatim preset object).

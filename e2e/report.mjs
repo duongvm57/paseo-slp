@@ -3,9 +3,8 @@
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { readJson } from '../src/package.mjs';
-import { dischargesEvidence } from './evidence.mjs';
 import { loadAttempt, loadRun } from './runs.mjs';
-import { evidenceContext, evidenceIndex, missingEvidence } from './ledger.mjs';
+import { evidenceStatus } from './ledger.mjs';
 import { reviewHistory, verifiedReport } from './integrity.mjs';
 
 export function summary(directory) {
@@ -54,11 +53,7 @@ export function summary(directory) {
 // pre-seal counterpart of seal()'s gate; it writes nothing.
 export function attemptStatus(attempt) {
   const loaded = loadAttempt(attempt);
-  const context = evidenceContext(loaded);
-  const evidence = evidenceIndex(loaded.attempt).map(item => ({
-    ...item, discharges: dischargesEvidence(item.kind, readJson(join(loaded.attempt, item.path)), context),
-  }));
-  const missing = missingEvidence(loaded, evidence);
+  const { evidence, missing } = evidenceStatus(loaded);
   const history = reviewHistory(attempt);
   const result = {
     attempt: loaded.attempt, scenarioId: loaded.scenario.id, createdAt: loaded.data.createdAt,

@@ -63,9 +63,9 @@ export const interventionsReceipt = (interventions = []) => JSON.stringify({ int
 export const kindPayload = kind => kind === 'checks' ? checksReceipt()
   : kind === 'interventions' ? interventionsReceipt()
     : 'Synthetic collector test payload; not live evidence.\n';
-export function collectAll(data) {
+export function collectAll(data, { except = [] } = {}) {
   const paths = [];
-  for (const kind of evidenceKinds) {
+  for (const kind of evidenceKinds.filter(kind => !except.includes(kind))) {
     const path = join(data.dir, `${kind}.txt`);
     writeFileSync(path, kindPayload(kind));
     const result = kind === 'coordinator'

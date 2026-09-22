@@ -26,7 +26,9 @@ agent compliance or E2E success.
 |---|---|---|
 | [Common](../../src/common.md) | [roleBundle](../../src/role-bundle.mjs) for all three roles | Session entry; adapter injects assembled instructions on supported start/resume/override messages. |
 | [Supervisor](../../src/roles/supervisor.md), [Lead](../../src/roles/lead.md), [Peer](../../src/roles/peer.md) | roleBundle selects exactly one | Always for that role. |
-| [Delegation](../../src/delegation.md) | roleBundle for orchestrating roles only (bundleParts) | Always for orchestrating roles; Peer excluded. Carries the required review-gate invariant and the agent-scoped create_agent rule inline. |
+| [Delegation](../../src/delegation.md) | roleBundle for orchestrating roles only (bundleParts) | Always for orchestrating roles; Peer excluded. Always-loaded core: carries the required review-gate invariant, the agent-scoped create_agent rule and the ambiguous-create/workspace invariants inline, with pointers to the two conditional procedure references below. |
+| [Delegation formation](../../src/references/delegation-formation.md) | Delegation core pointer | Before choosing the operation — new team, continuation or observe-existing — and recording the formation record. |
+| [Delegation execution](../../src/references/delegation-execution.md) | Delegation core pointer | Before preparing or issuing a delegation, verifying creation, recovering an ambiguous create or retrieving a child report. |
 | [Orchestration](../../src/references/orchestration.md) | Lead pointer; delegation points to isolation branch | Before topology selection, independent review, design dispute or dependency splitting; Lead re-reads it with review-gates.md before reviewer selection, re-review reuse and acceptance, including after resume/compaction. |
 | [Review gates](../../src/references/review-gates.md) | Orchestration pointer; Lead re-read trigger | Before choosing reviewer seats, before re-review reuse and before acceptance — re-read from the installed candidate, including after resume/compaction. |
 | [Monitoring](../../src/references/monitoring.md) | Supervisor/Lead and delegation pointers | Before observation/wait and at settlement. |
@@ -37,7 +39,7 @@ agent compliance or E2E success.
 | [Protocol template](../../src/templates/workspace-protocol.md) | Explicit init creates repository .paseo-slp/workspace-protocol.md | Supervisor and Lead read the repository file when the assignment lands — before tactic-dependent replies or decisions, not only before delegation; Supervisor also reads it for an assigned protocol audit. Peer receives only relevant constraints. |
 
 [Package identity/install](../../src/package.mjs) recursively includes `src/`, so all
-six references are in the install unit without adding them to every prompt.
+eight references are in the install unit without adding them to every prompt.
 Common resolves `references/` relative to the installed policy directory supplied by
 the loader. The full guide and this matrix remain source documentation under docs/.
 No deployed instance is updated merely by editing this checkout.
@@ -179,7 +181,7 @@ confirmed Codex/Pi availability and model options, not successful SLP launches o
 
 | Scenario | Trace result |
 |---|---|
-| Direct Lead, tiny task | Lead reads protocol; direct work only if permitted; focused proof. Owner questions go directly to Human without inventing a Supervisor. |
+| Direct Lead, tiny task | Lead reads protocol; a tiny class follows the protocol's tiny procedure — one Peer Engineer, focused proof and Lead verdict. Owner questions go directly to Human without inventing a Supervisor. |
 | Bounded Engineer | Delegation assigns one scope; notifications wake Lead; paused candidate, diff and proof precede verdict. No heartbeat unless observation needs it. |
 | Architecture-sensitive work | Protocol gate → Orchestration → read-only Architect → Lead decision → Engineer → fresh Reviewer on stable result → Lead verdict. |
 | Sealed council | Distinct neutral briefs → reports before cross-view → material propositions → bounded challenge → binding decision/counterargument/reversal conditions. |
@@ -244,3 +246,13 @@ input), the caller executes the agent-scoped create as the recorded parent,
 and the caller verifies the returned child's actual parent, workspace and
 report route against host evidence — a title, sent prompt or label is not
 proof of parentage.
+
+Module follow-up (2026-09-22): delegation split into an always-loaded core
+(delegation.md — required review gate, agent-scoped creation, ambiguous-create
+and workspace invariants) plus two conditional references,
+delegation-formation.md and delegation-execution.md, reached through the core's
+pointers; the reference count is now eight. The ACP adapter re-anchors the role
+core on every session prompt — first and re-armed (load/resume/fork) prompts
+also carry session-entry helpers and the measured carrier — and the protocol
+template owns a four-step tiny procedure (one Peer Engineer, inline
+brief/formation, in-session proof, Lead verdict).

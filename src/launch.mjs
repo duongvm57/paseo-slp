@@ -183,16 +183,41 @@ function agentTitle(role, disposition, request, packet) {
     label.trim(), ...(packet ? ['Handoff'] : [])].join(' — ');
 }
 
+// One owner for preparation state and validation operations. Diagnostics retain
+// their historical inventory-first order and continue after individual failures;
+// planning checks request shape first and throws immediately. Nothing is cached
+// across calls: launchCheck's final plan must read the live inputs again.
+function prepareInputs(request, inspect) {
+  const role = request.role ?? 'supervisor';
+  const disposition = request.disposition ?? request.route?.disposition;
+  let merged = request, file, resolved;
+  const operations = {
+    request: () => requestShape(request, role, disposition),
+    inventoryFile: () => { merged = mergeInventory(request); },
+    assignmentFile: () => { file = assignmentFile(merged.assignmentFile); },
+    binding: () => {
+      const result = resolveBinding(role, merged, disposition);
+      roleProvider(role, result.binding?.provider);
+      resolved = result;
+      return result;
+    },
+  };
+  const order = inspect
+    ? ['inventoryFile', 'assignmentFile', 'request', 'binding']
+    : ['request', 'inventoryFile', 'assignmentFile', 'binding'];
+  for (const name of order) {
+    if (inspect) inspect(name, operations[name]);
+    else operations[name]();
+  }
+  return { request: merged, role, disposition, file, ...resolved };
+}
+
 // The single owner of the create_agent argument record. Nothing edits it afterwards.
 function plan(root, request, packet) {
   verifyInstall(root);
-  const role = request.role ?? 'supervisor';
-  const disposition = request.disposition ?? request.route?.disposition;
-  requestShape(request, role, disposition);
-  request = mergeInventory(request);
-  const file = assignmentFile(request.assignmentFile);
-  const { binding, routing } = resolveBinding(role, request, disposition);
-  roleProvider(role, binding?.provider);
+  const prepared = prepareInputs(request);
+  const { role, disposition, file, binding, routing } = prepared;
+  request = prepared.request;
   const assignment = `Repository: ${request.repository}\nWorkspace ID: ${request.workspaceId}\n${disposition ? `Disposition: ${disposition}\n` : ''}${request.assignment}`
     + (file ? `\nAssignment file: ${file} — read it first; it is authoritative for scope details.` : '');
   // Surface the intended mode once, at plan level: a binding without modeId
@@ -270,18 +295,7 @@ export function launchCheck(root, request, { handoff = false } = {}) {
     }
   };
   step('install', () => { verifyInstall(root); });
-  let merged = request;
-  step('inventoryFile', () => { merged = mergeInventory(request); });
-  step('assignmentFile', () => { assignmentFile(merged.assignmentFile); });
-  const role = request.role ?? 'supervisor';
-  const disposition = request.disposition ?? request.route?.disposition;
-  step('request', () => requestShape(request, role, disposition));
-  const resolved = step('binding', () => {
-    const result = resolveBinding(role, merged, disposition);
-    roleProvider(role, result.binding.provider); // plan()'s own post-resolution check
-    return result;
-  });
-  const binding = resolved?.binding;
+  const { request: merged, role, binding } = prepareInputs(request, step);
   const provider = binding?.provider ?? providerGuess(role, merged);
   // Live verification is mandatory for profile/catalog resolutions (their
   // resolvers embed verifyProvider); for a pure explicit binding the planner

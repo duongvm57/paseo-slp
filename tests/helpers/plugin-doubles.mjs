@@ -615,6 +615,29 @@ export function makeUuid() {
   };
   return { uuid, state };
 }
+// Offsets from the operation boundary, after the manager's bootId. These are
+// characterization of UUID consumption, not production fault hooks. Recovery
+// tests must still prove the durable phase/patch state so mapping drift is loud.
+const recoveryFaultPoints = {
+  activate: { accepted: 1, materialized: 2, prepared: 3, 'request-id': 4, 'patch-dispatched': 5, settled: 6, verified: 7, committed: 8 },
+  deactivate: { accepted: 1, prepared: 2, 'request-id': 3, 'patch-dispatched': 4, settled: 5, verified: 6, committed: 7 },
+  'adopt-identical': { verified: 4 },
+  'complete-after': { finalized: 2 },
+  'restore-before': { 'patch-dispatched': 2 },
+  inspect: { 'subject-marked': 2 },
+};
+
+// Arm before creating the manager or immediately before its next operation.
+// Blockers stay explicit: FILE fails once (cleanup removes it); DIR keeps
+// failing, including recordFailure, leaving an interrupted pending operation.
+export function armRecoveryFault(deps, operation, point, { once = false } = {}) {
+  const offset = recoveryFaultPoints[operation]?.[point];
+  if (!Number.isInteger(offset)) throw new Error(`Unknown recovery fault point: ${operation}/${point}`);
+  const state = deps.uuidBox.state;
+  const boundary = state.n || 1; // a not-yet-created manager still needs its bootId
+  state[once ? 'poisonOnly' : 'poisonFrom'] = boundary + offset;
+}
+
 export function seqNow() {
   let t = Date.parse('2026-09-18T00:00:00.000Z');
   return () => new Date((t += 1000));
@@ -633,6 +656,17 @@ export function makeDeps(opts = {}) {
     uuidBox,
     platform: opts.platform,
   };
+}
+
+// A fresh daemon and its matching filesystem/dependency fixtures. Leave
+// manager creation and operation starts to the test: crash cases must be able
+// to install journal blockers before the manager consumes its first UUID.
+export async function makePluginFixture(t, config) {
+  const home = makeHome(t, config);
+  const binaries = makeBinaries(t);
+  const daemon = await makeDaemon(t, home);
+  const deps = makeDeps({ execOpts: { binaries } });
+  return { home, binaries, daemon, deps };
 }
 
 export const authority = { exclusiveAdministrativeWindow: true, verifiedHostHomeMapping: true };

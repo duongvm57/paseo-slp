@@ -1,8 +1,9 @@
-import { readdirSync, readFileSync, lstatSync, mkdirSync, writeFileSync, renameSync } from 'node:fs';
+import { lstatSync, mkdirSync, writeFileSync, renameSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { isAbsolute, join, resolve, basename } from 'node:path';
 import { resolveHome } from './managed-home.mjs';
+import { readAgentStates } from './agent-state.mjs';
 import { devinProviderPattern } from './binding.mjs';
 import { json, readJson } from './package.mjs';
 
@@ -26,32 +27,6 @@ const record = value => value !== null && typeof value === 'object' && !Array.is
 const text = value => typeof value === 'string' && value ? value : null;
 const millis = value => { const ms = typeof value === 'number' ? value : Date.parse(value); return Number.isFinite(ms) ? ms : null; };
 const kinds = ['attention', 'follow-up-round', 'idle-dirty', 'scope-drift', 'test-mirror', 'file-churn', 'tool-mix', 'correction-cadence'];
-
-// Agent state lives under <paseoHome>/agents/<group>/<id>.json; monitor needs
-// fields agents.mjs does not expose, so it keeps its own minimal reader.
-function readAgentStates(home) {
-  const dir = join(home, 'agents');
-  let groups;
-  try { groups = readdirSync(dir); } catch (error) {
-    if (error.code === 'ENOENT') return new Map();
-    throw error;
-  }
-  const states = new Map();
-  for (const group of groups) {
-    let names;
-    try {
-      if (!lstatSync(join(dir, group)).isDirectory()) continue;
-      names = readdirSync(join(dir, group));
-    } catch { continue; }
-    for (const name of names) {
-      if (!name.endsWith('.json')) continue;
-      let state;
-      try { state = JSON.parse(readFileSync(join(dir, group, name), 'utf8')); } catch { continue; }
-      if (record(state) && typeof state.id === 'string') states.set(state.id, state);
-    }
-  }
-  return states;
-}
 
 // A missing, non-repo or failing cwd is an evidence gap, never a crash. HEAD
 // doubles as the commit marker for follow-up tracking; %ct records the last
@@ -161,7 +136,7 @@ export function monitor(request) {
     catch (error) { if (error.code !== 'ENOENT') throw new Error(`stateFile unreadable: ${error.message}`); }
     if (!record(prior)) throw new Error('stateFile must be a JSON object');
   }
-  const states = readAgentStates(home);
+  const states = new Map(readAgentStates(home).map(state => [state.id, state]));
   const observedAt = new Date().toISOString();
   const now = Date.now();
   const signals = [], gaps = [], next = {};

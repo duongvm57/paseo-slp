@@ -152,13 +152,14 @@ test('orientation carries mechanical locators only', t => {
   // the locator set derives from the install receipt and never declares it.
   assert.equal(byPath[join(installed, 'docs/contract.md')], undefined);
   for (const rel of ['src/common.md', 'src/roles/lead.md', 'src/delegation.md',
+    'src/references/delegation-formation.md', 'src/references/delegation-execution.md',
     'src/references/anti-patterns.md', 'src/references/governance.md', 'src/references/monitoring.md',
     'src/references/orchestration.md', 'src/references/provider-routing.md', 'src/references/review-gates.md']) {
     const entry = byPath[join(installed, rel)];
     const bytes = readFileSync(join(installed, rel));
     assert.deepEqual(entry, { path: join(installed, rel), bytes: bytes.length, sha256: hash(bytes) });
   }
-  assert.equal(lead.orientation.policyBytes.length, 9);
+  assert.equal(lead.orientation.policyBytes.length, 11);
   // Carrier: locators must survive into initialPrompt on the fallback path
   // (stock piBinding is not an injecting wrapper, so the carrier stays).
   assert.ok(lead.create.initialPrompt.includes(`- ${join(installed, 'src/common.md')} — `));
@@ -171,7 +172,7 @@ test('orientation carries mechanical locators only', t => {
   const peerPaths = peer.orientation.policyBytes.map(entry => entry.path);
   assert.ok(peerPaths.includes(join(installed, 'src/roles/peer.md')));
   assert.ok(!peerPaths.includes(join(installed, 'src/delegation.md')));
-  assert.equal(peer.orientation.policyBytes.length, 8);
+  assert.equal(peer.orientation.policyBytes.length, 10);
 });
 
 test('launchCheck names every failing stage and separates profile completeness from live provider verification', t => {
@@ -368,4 +369,17 @@ test('handoff packet keeps the full ancestor prefix for depth-3 submodule gaps',
   const plan = handoffPlan(installed, { ...request, repository: repo, role: 'lead', binding: piBinding, handoff });
   assert.deepEqual(plan.handoff.candidate.nestedIncomplete, ['inner/deep/sub']);
   assert.match(plan.create.initialPrompt, /Snapshot evidence gap: inner\/deep\/sub is unproven submodule scope/);
+});
+
+test('preparation preserves fail-fast request precedence and diagnostic stage ordering', t => {
+  const { dir, installed } = fixture(t);
+  const bad = { ...request, repository: dir, role: 'unknown', inventoryFile: 'relative', assignmentFile: 'also-relative' };
+  assert.throws(() => launchPlan(installed, bad), /Unknown role/);
+  const result = launchCheck(installed, bad);
+  assert.deepEqual(result.checks.map(check => check.name), ['install', 'inventoryFile', 'assignmentFile', 'request', 'binding', 'provider', 'settings', 'plan']);
+  const errors = Object.fromEntries(result.checks.map(check => [check.name, check.error]));
+  assert.equal(errors.inventoryFile, 'Absolute inventoryFile required');
+  assert.equal(errors.assignmentFile, 'Absolute assignmentFile required');
+  assert.equal(errors.request, 'Unknown role');
+  assert.equal(errors.plan, 'Unknown role');
 });

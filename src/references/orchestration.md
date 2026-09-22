@@ -33,7 +33,7 @@ Use the smallest topology that supplies the required independent judgment:
 
 | Task need | Execution and handback |
 |---|---|
-| Tiny, tightly coupled | Lead directly if protocol/authority permit, otherwise one Engineer; focused artifact inspection. |
+| Tiny, tightly coupled | One Peer Engineer under Lead; use the repository protocol's tiny procedure, focused proof and Lead artifact inspection. |
 | Bounded implementation | Engineer owns writes and proof; Lead inspects; independent review gate if risk/protocol requires. |
 | Cross-module ownership or lifecycle | Read-only Architect reconstructs boundaries; Lead records design decision; Engineer implements; independent review gate falsifies the stable result when required. |
 | Multiple plausible foundations or costly lock-in | Independent design lenses or sealed council; Lead reconciles material propositions before implementation. |

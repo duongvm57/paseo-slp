@@ -26,7 +26,7 @@ import { basename, delimiter, join } from 'node:path';
 import { createExecutableResolver, RUNTIME_CONTROL_ENV_KEYS } from '../plugin/server/executables.ts';
 import { createLauncherBuilder } from '../plugin/server/launchers.ts';
 import { identity, install } from '../src/package.mjs';
-import { roleInstructions } from '../src/role-bundle.mjs';
+import { roleInstructions, roleDelivery } from '../src/role-bundle.mjs';
 import { acpRolePrompt, claudeRolePrompt, injectRole, piRoleArgs } from '../src/role-transport.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -882,12 +882,13 @@ test('shim: pi role args are inserted before -- with byte-exact instruction', as
 
 test('shim: devin acp session/prompt carries the role text block first', async t => {
   const f = await fixtureRuntime(t);
-  const instruction = managedInstruction(f, 'lead');
+  const delivery = roleDelivery(f.candidate, 'lead', { SLP_MANAGED_RUNTIME: '1', SLP_NODE_BIN: f.node.path, SLP_RUNTIME_ROOT: f.candidate, SLP_DAEMON_HOME: f.home });
+  const instruction = delivery.entry({ explicitLanguageState: true });
   const message = { method: 'session/prompt', params: { sessionId: 's1', prompt: [{ type: 'text', text: 'do work' }] } };
   const { done } = runShim(f, 'devin', 'lead', [], { input: JSON.stringify(message) + '\n' });
   const result = await done;
   assert.equal(result.code, 0, result.stderr);
-  const expected = acpRolePrompt(message, instruction, new Set());
+  const expected = acpRolePrompt(message, delivery, new Set());
   assert.deepEqual(JSON.parse(result.stdout), expected);
   assert.equal(expected.params.prompt[0].text, instruction);
   assert.deepEqual(readArgv(join(f.dir, 'devin.argv')), ['acp'], 'empty args default to acp');
