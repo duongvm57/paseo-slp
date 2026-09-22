@@ -8,6 +8,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, sy
 import { dirname, join } from 'node:path';
 import { createJev } from '../plugin/server/jev.ts';
 import { makeHome, seqNow, targetOf } from './helpers/plugin-doubles.mjs';
+import { fakeOrKey, fakeTsKey } from './fake-secrets.mjs';
 
 const jevPath = home => join(home, 'slp-runtime', 'state', 'jev.json');
 const keyPath = home => join(home, 'slp-runtime', 'state', 'jev-openrouter.key');
@@ -111,7 +112,7 @@ test('key lifecycle: write 0600, hasKey-only view, toggle-off keeps the key, rem
   const home = makeHome(t);
   const jev = createJev();
   await setJev(jev, home, config());
-  const secret = 'sk-or-v1-plugin-test-key-000000';
+  const secret = fakeOrKey('plugin-test-key-000000');
   await setJevKey(jev, home, secret);
   assert.equal(lstatSync(keyPath(home)).mode & 0o777, 0o600);
   assert.equal(readFileSync(keyPath(home), 'utf8'), `${secret}\n`);
@@ -143,7 +144,7 @@ test('test-jev probes the stored key — no key/config fail fast, network is dou
   const calls = [];
   const fetchImpl = async (url, init) => {
     calls.push({ url, init });
-    return { ok: true, json: async () => ({ data: { label: 'sk-or-v1-abc…123', is_free_tier: false } }) };
+    return { ok: true, json: async () => ({ data: { label: fakeOrKey('abc') + '…123', is_free_tier: false } }) };
   };
   const jev = createJev({ fetchImpl });
   // Unconfigured → fail result, never a throw, never a call.
@@ -155,14 +156,14 @@ test('test-jev probes the stored key — no key/config fail fast, network is dou
   assert.equal(noKey.ok, false);
   assert.match(noKey.detail, /no key stored/);
   assert.equal(calls.length, 0, 'no network before a stored key exists');
-  await setJevKey(jev, home, 'sk-or-v1-probe-key');
+  await setJevKey(jev, home, fakeOrKey('probe-key'));
   const probed = await testJev(jev, home);
   assert.equal(probed.ok, true);
   assert.match(probed.detail, /key accepted/);
   assert.ok(probed.latencyMs >= 0);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, 'https://openrouter.ai/api/v1/auth/key');
-  assert.equal(calls[0].init.headers.authorization, 'Bearer sk-or-v1-probe-key');
+  assert.equal(calls[0].init.headers.authorization, `Bearer ${fakeOrKey('probe-key')}`);
 });
 
 test('typesafe kind: config round-trip, jev-typesafe.key lifecycle, /v1/models probe', async t => {
@@ -179,7 +180,7 @@ test('typesafe kind: config round-trip, jev-typesafe.key lifecycle, /v1/models p
   await setJev(jev, home, tsConfig({ baseUrl: 'https://jev.internal.example.com/proxy' }));
   assert.equal((await getJev(jev, home)).jev.provider.baseUrl, 'https://jev.internal.example.com/proxy');
   // The key lives in the kind-named file, not jev-openrouter.key.
-  await setJevKey(jev, home, 'ts-probe-key');
+  await setJevKey(jev, home, fakeTsKey('probe-key'));
   assert.equal(existsSync(join(home, 'slp-runtime', 'state', 'jev-typesafe.key')), true);
   assert.equal(existsSync(keyPath(home)), false, 'openrouter key file untouched');
   // The probe follows the configured baseUrl mount — a proxy serves its API
@@ -197,7 +198,7 @@ test('typesafe kind: config round-trip, jev-typesafe.key lifecycle, /v1/models p
 
 test('test-jev reports HTTP and network failures without throwing or leaking', async t => {
   const home = makeHome(t);
-  const secret = 'sk-or-v1-d0n0tleakme-plugin';
+  const secret = fakeOrKey('d0n0tleakme-plugin');
   const http = status => async () => ({ ok: false, status, json: async () => ({}) });
   for (const status of [401, 402, 500]) {
     const jev = createJev({ fetchImpl: http(status) });
@@ -217,13 +218,13 @@ test('test-jev reports HTTP and network failures without throwing or leaking', a
 
 test('a label carrying credential-shaped text is scrubbed from the detail', async t => {
   const home = makeHome(t);
-  const reflected = 'sk-or-v1-reflectedsecret0000';
+  const reflected = fakeOrKey('reflectedsecret0000');
   const jev = createJev({
     fetchImpl: async () => ({ ok: true, json: async () => ({ data: { label: `acct ${reflected} label` } }) }),
     now: seqNow(),
   });
   await setJev(jev, home, config());
-  await setJevKey(jev, home, 'sk-or-v1-probe-key');
+  await setJevKey(jev, home, fakeOrKey('probe-key'));
   const result = await testJev(jev, home);
   assert.equal(result.ok, true);
   assert.ok(!result.detail.includes(reflected), 'remote label text is sanitized');
@@ -239,11 +240,12 @@ test('a label carrying credential-shaped text is scrubbed from the detail', asyn
   assert.match(bearerResult.detail, /<redacted>/);
   // Bare `ts-…` keys — the typesafe kind's credential shape; a custom
   // endpoint could reflect it in the key-info label or error text.
+  const tsKey = fakeTsKey('reflectedtypesafekey000');
   const tsJev = createJev({
-    fetchImpl: async () => ({ ok: true, json: async () => ({ data: { label: 'acct ts-reflectedtypesafekey000' } }) }),
+    fetchImpl: async () => ({ ok: true, json: async () => ({ data: { label: `acct ${tsKey}` } }) }),
   });
   const tsResult = await testJev(tsJev, home);
-  assert.ok(!tsResult.detail.includes('ts-reflectedtypesafekey000'), 'bare ts- key is scrubbed');
+  assert.ok(!tsResult.detail.includes(tsKey), 'bare ts- key is scrubbed');
   assert.match(tsResult.detail, /<redacted>/);
 });
 

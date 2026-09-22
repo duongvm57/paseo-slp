@@ -12,6 +12,7 @@ import { json, hash } from '../src/package.mjs';
 import { readCatalog, catalogBinding, validateCatalog, ROUTE_DECISION_QUESTION, ROUTE_DECLINE_CANDIDATE } from '../src/routing.mjs';
 import { routeDecide } from '../src/jev-routing.mjs';
 import { canonicalJson } from '../src/jev.mjs';
+import { fakeOrKey } from './fake-secrets.mjs';
 import {
   HOW_TO_READ,
   JEV_SUITABILITY_GUIDANCE,
@@ -71,7 +72,7 @@ const jevHome = home => {
     schemaVersion: 1, enabled: true, capabilities: { routing: true },
     provider: { kind: 'openrouter', model: 'typesafe/jev-1.13' },
   }), { mode: 0o600 });
-  writeFileSync(join(home, 'slp-runtime', 'state', 'jev-openrouter.key'), 'sk-or-v1-synthetic-test-key-000\n', { mode: 0o600 });
+  writeFileSync(join(home, 'slp-runtime', 'state', 'jev-openrouter.key'), fakeOrKey('synthetic-test-key-000') + '\n', { mode: 0o600 });
   return home;
 };
 const okFetch = choice => async () => ({

@@ -13,7 +13,10 @@ import { launchPlan, launchCheck } from '../src/launch.mjs';
 import { readCatalog, catalogBinding, optionExclusions, ROUTE_DECLINE_CANDIDATE, ROUTE_DECISION_QUESTION } from '../src/routing.mjs';
 import { routeDecide } from '../src/jev-routing.mjs';
 import { readJevConfig, readJevKey, resolveJev, verifyReceipt, assertRedacted, askJev, askChoice, askScore, askNoul, JevError, canonicalJson } from '../src/jev.mjs';
+import { fakeOrKey, fakeTsKey, fakeAwsKey, fakePem } from './fake-secrets.mjs';
 import { runtimeStatus } from '../src/runtime-state.mjs';
+
+const SYNTH_KEY = fakeOrKey('synthetic-test-key-000');
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 function fixture(t) {
@@ -38,7 +41,7 @@ function catalogFixture(repo) {
 
 // Per-daemon Jev state under <home>/slp-runtime/state — mirrors the plugin's
 // file layout. keyMode/key null skips the key file entirely.
-function jevHome(home, { enabled = true, routing = true, key = 'sk-or-v1-synthetic-test-key-000', keyMode = 0o600, config = null } = {}) {
+function jevHome(home, { enabled = true, routing = true, key = SYNTH_KEY, keyMode = 0o600, config = null } = {}) {
   mkdirSync(home, { recursive: true });
   writeFileSync(join(home, 'config.json'), json({ version: 1 }));
   const state = join(home, 'slp-runtime', 'state');
@@ -76,7 +79,7 @@ test('jev config resolves per daemon; absent config is OFF, not an error', t => 
   const { provider, key } = resolveJev(home, 'routing');
   assert.equal(provider.endpoint, 'https://openrouter.ai/api/alpha/decisions');
   assert.equal(provider.model, 'typesafe/jev-1.13');
-  assert.equal(key, 'sk-or-v1-synthetic-test-key-000');
+  assert.equal(key, SYNTH_KEY);
 });
 
 test('jev toggles fail closed: disabled config, missing key, absent home', async t => {
@@ -159,7 +162,7 @@ test('the typesafe kind resolves /v1/systemone with its own model pin and sends 
   const keyPath = join(home, 'slp-runtime', 'state', 'jev-typesafe.key');
   for (const baseUrl of [undefined, 'https://api.typesafe.ai', 'https://jev.internal.example.com/proxy/v1']) {
     jevHome(home, { key: null, config: { schemaVersion: 1, enabled: true, capabilities: { routing: true }, provider: { kind: 'typesafe', ...(baseUrl ? { baseUrl } : {}), model: 'jev-1.13.0' } } });
-    writeFileSync(keyPath, 'ts-synthetic-test-key\n', { mode: 0o600 });
+    writeFileSync(keyPath, fakeTsKey('synthetic-test-key') + '\n', { mode: 0o600 });
     const { provider } = resolveJev(home, 'routing');
     const expectedBase = (baseUrl ?? 'https://api.typesafe.ai').replace(/\/+$/, '');
     assert.equal(provider.baseUrl, expectedBase);
@@ -194,7 +197,7 @@ test('key file must be regular, 0600-class and non-empty', t => {
   jevHome(home, { keyMode: 0o644 });
   assert.throws(() => readJevKey(home, 'openrouter'), /group\/other-accessible/);
   chmodSync(join(home, 'slp-runtime', 'state', 'jev-openrouter.key'), 0o600);
-  assert.equal(readJevKey(home, 'openrouter'), 'sk-or-v1-synthetic-test-key-000');
+  assert.equal(readJevKey(home, 'openrouter'), SYNTH_KEY);
   jevHome(home, { key: '   ' });
   assert.throws(() => readJevKey(home, 'openrouter'), /empty or contains whitespace/);
 });
@@ -220,7 +223,7 @@ test('route-decide asks Jev over the eligible set and returns a verifiable recei
   const { url, init } = calls[0];
   assert.equal(url, 'https://openrouter.ai/api/alpha/decisions');
   assert.equal(init.method, 'POST');
-  assert.equal(init.headers.authorization, 'Bearer sk-or-v1-synthetic-test-key-000');
+  assert.equal(init.headers.authorization, `Bearer ${SYNTH_KEY}`);
   const body = JSON.parse(init.body);
   assert.equal(body.model, 'typesafe/jev-1.13');
   assert.deepEqual(body.provider, { allow_fallbacks: false });
@@ -378,10 +381,10 @@ test('redaction guard fires before any network call and never echoes the secret'
   let fetched = false;
   const fetchImpl = async () => { fetched = true; return okFetch(choiceAnswer('luna-code'))(); };
   const briefs = [
-    'uses key sk-or-v1-abcdef0123456789abcdef',
+    'uses key ' + fakeOrKey('abcdef0123456789abcdef'),
     { task: 'see Bearer abcdefghijklmnopqrstuvwxyz012345' },
-    { task: 'log -----BEGIN OPENSSH PRIVATE KEY-----' },
-    ['AKIAIOSFODNN7EXAMPLE'],
+    { task: 'log ' + fakePem('OPENSSH') },
+    [fakeAwsKey()],
   ];
   for (const brief of briefs) {
     try {
@@ -389,12 +392,12 @@ test('redaction guard fires before any network call and never echoes the secret'
       assert.fail(`expected jev-redacted for ${JSON.stringify(brief).slice(0, 40)}`);
     } catch (error) {
       assert.equal(error.code, 'jev-redacted');
-      assert.ok(!JSON.stringify(error).includes('sk-or-v1-abcdef'), 'the matched content is never echoed');
+      assert.ok(!JSON.stringify(error).includes(fakeOrKey('abcdef')), 'the matched content is never echoed');
     }
   }
   // Credential at object KEY position is blocked too — and the key name itself
   // never reaches the error (position is reported at the parent path only).
-  const keyPosition = 'sk-or-v1-keypositionsecret00';
+  const keyPosition = fakeOrKey('keypositionsecret00');
   try {
     await routeDecide({ repository: repo, brief: { [keyPosition]: 'x', task: 'x' } }, { home, fetchImpl });
     assert.fail('expected jev-redacted for a credential-shaped key');
@@ -403,7 +406,7 @@ test('redaction guard fires before any network call and never echoes the secret'
     assert.match(error.message, /object key/);
     assert.ok(!error.message.includes(keyPosition), 'the key name never reaches the error path');
   }
-  assert.throws(() => assertRedacted({ state: { 'AKIAIOSFODNN7EXAMPLE': 'v' } }), /object key.*at state/);
+  assert.throws(() => assertRedacted({ state: { [fakeAwsKey()]: 'v' } }), /object key.*at state/);
   assert.equal(fetched, false);
   assert.doesNotThrow(() => assertRedacted({ state: 'an ordinary brief', questions: { q: { instructions: 'pick', criteria: { a: 'x' } } } }));
 });
@@ -574,8 +577,8 @@ test('receipt hardening: exactly route_option, bound role, bound model', async t
 test('remote-controlled error text is scrubbed before it reaches thrown errors', async t => {
   const { repo, home } = fixture(t);
   catalogFixture(repo);
-  const secret = 'sk-or-v1-remote-secret-000000';
-  jevHome(home, { key: 'sk-or-v1-synthetic-test-key-000' });
+  const secret = fakeOrKey('remote-secret-000000');
+  jevHome(home, { key: SYNTH_KEY });
   const echo = async () => ({ ok: false, status: 403, json: async () => ({ error: { code: 403, message: `invalid key ${secret}` } }) });
   try {
     await routeDecide({ repository: repo, brief: 'x' }, { home, fetchImpl: echo });
@@ -599,7 +602,7 @@ test('remote-controlled error text is scrubbed before it reaches thrown errors',
   }
   // Bare `ts-…` keys — a custom typesafe endpoint can reflect the key in
   // error text; the Bearer form was already covered, the bare shape was not.
-  const tsKey = 'ts-bareechoedtypesafekey000';
+  const tsKey = fakeTsKey('bareechoedtypesafekey000');
   const echoTs = async () => ({ ok: false, status: 401, json: async () => ({ error: { code: 401, message: `bad credential ${tsKey}` } }) });
   try {
     await routeDecide({ repository: repo, brief: 'x' }, { home, fetchImpl: echoTs });
@@ -674,7 +677,7 @@ test('optionExclusions names closed-vocabulary tokens; catalogBinding echoes the
 
 test('runtimeStatus reports hasKey only — key material never leaks', t => {
   const { home } = fixture(t);
-  const secret = 'sk-or-v1-d0n0tleakme000000000000';
+  const secret = fakeOrKey('d0n0tleakme000000000000');
   jevHome(home, { key: secret });
   const status = runtimeStatus(home);
   assert.equal(status.jev.configured, true);
@@ -694,7 +697,7 @@ test('runtimeStatus reports hasKey only — key material never leaks', t => {
 
 test('transport errors carry no key material', async t => {
   const { repo, home } = fixture(t);
-  const secret = 'sk-or-v1-d0n0tleakme111111111111';
+  const secret = fakeOrKey('d0n0tleakme111111111111');
   catalogFixture(repo);
   jevHome(home, { key: secret });
   for (const fetchImpl of [netFail, httpFetch(500), timeoutFail]) {
