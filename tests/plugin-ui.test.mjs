@@ -908,7 +908,7 @@ test('activation is a prerequisite: it renders above Role profiles and gates Sav
     'title="Activation"',
     'title="Role profiles"',
     'title="Peer pool"',
-    'title="Communication language"',
+    '<LanguageCard',
     'title="Advanced"',
     'title="Maintenance"',
   ];
@@ -1064,7 +1064,7 @@ test('the Peer pool card authors the pool through catalog-backed pickers', () =>
   const bundle = clientBundle();
   const peerCard = source.slice(
     source.indexOf('title="Peer pool"'),
-    source.indexOf('title="Communication language"'),
+    source.indexOf('<LanguageCard'),
   );
   assert.notEqual(source.indexOf('title="Peer pool"'), -1, 'Peer pool card missing');
 
@@ -1178,7 +1178,7 @@ test('the Peer pool card reports draft state and seat counts', () => {
   const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
   const peerCard = source.slice(
     source.indexOf('title="Peer pool"'),
-    source.indexOf('title="Communication language"'),
+    source.indexOf('<LanguageCard'),
   );
   // Header badge: amber draft, else the saved/absent state (mockup dirty badge).
   for (const label of ['Unsaved changes', 'Saved pool', 'No saved pool']) {
@@ -1204,16 +1204,17 @@ test('seat rows state the parked lifecycle explicitly', () => {
 
 test('the standard-seat picker filters and closes at the top', () => {
   const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  const kit = readFileSync(join(root, 'plugin/client/ui-kit.tsx'), 'utf8');
   const peerCard = source.slice(
     source.indexOf('title="Peer pool"'),
-    source.indexOf('title="Communication language"'),
+    source.indexOf('<LanguageCard'),
   );
   assert.ok(peerCard.includes('Filter by name or description'), 'picker filter missing');
   assert.ok(peerCard.includes('pickerQuery'), 'filter state missing');
   assert.ok(peerCard.includes('No templates match this filter'), 'empty-filter state missing');
-  // SeatTemplateRow is module-level — its labels live outside the card slice.
-  assert.ok(source.includes('Notes & custom option'), 'per-row notes expander missing');
-  assert.ok(source.includes('Already present — open seat'), 'duplicate-add affordance missing');
+  // SeatTemplateRow lives in ui-kit — its labels sit outside the card slice.
+  assert.ok(kit.includes('Notes & custom option'), 'per-row notes expander missing');
+  assert.ok(kit.includes('Already present — open seat'), 'duplicate-add affordance missing');
   // Close sits in the picker header — before the archetype list renders.
   const closeIdx = peerCard.indexOf('label="Close"', peerCard.indexOf('Standard seat picker'));
   const listIdx = peerCard.indexOf('SeatTemplateRow', peerCard.indexOf('Standard seat picker'));
@@ -1280,7 +1281,8 @@ test('the Jev card splits saved settings from the draft and invalidates tests', 
 
 test('token lookup offers underlined mono buttons that focus the definition', () => {
   const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
-  assert.ok(source.includes('textDecorationLine: "underline"'), 'token underline style missing');
+  const kit = readFileSync(join(root, 'plugin/client/ui-kit.tsx'), 'utf8');
+  assert.ok(kit.includes('textDecorationLine: "underline"'), 'token underline style missing');
   assert.ok(source.includes('accessibilityLabel={`Define ${token}`}'), 'Define X labels missing');
   assert.ok(source.includes('"Show token definitions"'), 'Show label missing');
   assert.ok(source.includes('"Hide token definitions"'), 'Hide label missing');
@@ -1325,7 +1327,9 @@ test('draft uids are fresh per seat, ignored by form equality, and copied fresh'
 });
 
 test('custom controls carry RN accessibility props and stale mockup strings stay out', () => {
-  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  // A11y props span the shell (seat rows, notices) and the ui-kit primitives.
+  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8')
+    + readFileSync(join(root, 'plugin/client/ui-kit.tsx'), 'utf8');
   for (const prop of ['accessibilityRole=', 'accessibilityLabel=', 'accessibilityState=', 'accessibilityLiveRegion=']) {
     assert.ok(source.includes(prop), `missing a11y prop: ${prop}`);
   }
@@ -1425,14 +1429,15 @@ test('the in-surface nav strip anchors the four routing sections in order', () =
 
 test('the routing region opens with the mockup headline and sub-copy', () => {
   const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  const kit = readFileSync(join(root, 'plugin/client/ui-kit.tsx'), 'utf8');
   assert.ok(source.includes('Routing configuration'), 'eyebrow missing');
   assert.ok(source.includes('Peer routing configuration'), 'headline missing');
   assert.ok(source.includes('Review the draft. Save when the whole pool is ready.'), 'sub-copy missing');
-  // The eyebrow uppercases via the shared style, not a hardcoded string.
-  const eyebrow = source.slice(source.indexOf('eyebrow:'), source.indexOf('noticeBox:'));
+  // The eyebrow uppercases via the shared style (ui-kit), not a hardcoded string.
+  const eyebrow = kit.slice(kit.indexOf('eyebrow:'), kit.indexOf('noticeBox:'));
   assert.ok(eyebrow.includes('textTransform: "uppercase"'), 'eyebrow must uppercase via style');
   // The host SLP header is untouched — no second page title.
-  assert.equal(occurrences(source, 'pageTitle'), 2, 'page title style + its single use only');
+  assert.equal(occurrences(kit + source, 'pageTitle'), 2, 'page title style + its single use only');
 });
 
 test('role profiles lay out in a container-measured two-column panel grid', () => {
@@ -1449,34 +1454,36 @@ test('role profiles lay out in a container-measured two-column panel grid', () =
     'two-column/one-column switch missing',
   );
   // Panels are bordered sub-cards on the subtler surface.
-  const panel = source.slice(source.indexOf('profilePanel:'), source.indexOf('profileHeading:'));
+  const kit = readFileSync(join(root, 'plugin/client/ui-kit.tsx'), 'utf8');
+  const panel = kit.slice(kit.indexOf('profilePanel:'), kit.indexOf('profileHeading:'));
   assert.ok(panel.includes('borderWidth: 1') && panel.includes('padding: 18'), 'profile-panel geometry missing');
   assert.ok(source.includes('backgroundColor: colors.surface0 }, profilePanelWide'), 'panel fill must use the surface slot');
 });
 
 test('provider family and mode render as mockup choice chips', () => {
   const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  const kit = readFileSync(join(root, 'plugin/client/ui-kit.tsx'), 'utf8');
   const profiles = source.slice(source.indexOf('title="Role profiles"'), source.indexOf('</Card>', source.indexOf('title="Role profiles"')));
   // Both fields use the choice variant inside the profile panels.
   assert.ok(occurrences(profiles, 'variant="choice"') >= 2, 'family + mode must render as choice chips');
   // Choice-chip visuals: square-ish radius, muted until selected, then the
   // accent border/text over a tinted fill (surface2 — no accent-tint slot).
-  const choice = source.slice(source.indexOf('choice:'), source.indexOf('choiceLabel:'));
+  const choice = kit.slice(kit.indexOf('choice:'), kit.indexOf('choiceLabel:'));
   assert.ok(choice.includes('borderRadius: 6'), 'choice chip radius missing');
   assert.ok(
-    source.includes('backgroundColor: active ? colors.surface2 : colors.surface0'),
+    kit.includes('backgroundColor: active ? colors.surface2 : colors.surface0'),
     'selected choice must take the tinted fill',
   );
   assert.ok(
-    source.includes('color: active ? colors.accent : colors.foregroundMuted'),
+    kit.includes('color: active ? colors.accent : colors.foregroundMuted'),
     'selected choice must take the accent text',
   );
   // Other ChipSelect consumers keep the pill default.
-  assert.ok(source.includes('variant = "pill"'), 'pill must remain the default variant');
+  assert.ok(kit.includes('variant = "pill"'), 'pill must remain the default variant');
 });
 
 test('the model row is a non-destructive select-box with a manual disclosure', () => {
-  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  const source = readFileSync(join(root, 'plugin/client/ui-kit.tsx'), 'utf8');
   const picker = source.slice(source.indexOf('function OptionPicker'), source.indexOf('function Collapse'));
   // The collapsed row shows the stored value (never blanked by opening).
   assert.ok(picker.includes('effective ?'), 'stored-value display missing');
@@ -1493,7 +1500,8 @@ test('the model row is a non-destructive select-box with a manual disclosure', (
 });
 
 test('controls share hover/focus/pressed/disabled states via the theme', () => {
-  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8')
+    + readFileSync(join(root, 'plugin/client/ui-kit.tsx'), 'utf8');
   // RN-web runtime fields are widened once, locally — no untyped destructure.
   assert.ok(source.includes('type ControlState = { pressed: boolean; hovered?: boolean; focused?: boolean }'),
     'widened control-state type missing');
@@ -1508,8 +1516,10 @@ test('controls share hover/focus/pressed/disabled states via the theme', () => {
 });
 
 test('no hardcoded hex colors live in the client', () => {
-  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
-  const hits = source.match(/#[0-9a-fA-F]{3,8}\b/g) ?? [];
+  const files = ['plugin/client/ManagerSurface.tsx', 'plugin/client/ui-kit.tsx'];
+  const hits = files.flatMap(file =>
+    (readFileSync(join(root, file), 'utf8').match(/#[0-9a-fA-F]{3,8}\b/g) ?? []).map(hit => `${file}:${hit}`),
+  );
   assert.deepEqual(hits, [], `hex color literals found: ${hits.join(', ')}`);
 });
 
