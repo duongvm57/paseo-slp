@@ -9,6 +9,8 @@ import { dirname, join } from 'node:path';
 import { createJev } from '../plugin/server/jev.ts';
 import { makeHome, seqNow, targetOf } from './helpers/plugin-doubles.mjs';
 import { fakeOrKey, fakeTsKey } from './fake-secrets.mjs';
+import { assertRedacted, sanitizeRemoteText } from '../src/jev.mjs';
+import { redactionFixtures } from './jev-redaction-matrix.mjs';
 
 const jevPath = home => join(home, 'slp-runtime', 'state', 'jev.json');
 const keyPath = home => join(home, 'slp-runtime', 'state', 'jev-openrouter.key');
@@ -266,4 +268,135 @@ test('get/set-jev verify the daemon home like every other mutation', async t => 
     () => getJev(jev, home),
     error => error.code === 'HOME_UNVERIFIED' && /not a real directory/.test(error.message),
   );
+});
+
+// ---------------------------------------------------------------------------
+// Redaction parity — one fixture matrix through BOTH sanitizers
+// (tests/jev-redaction-matrix.mjs). src/jev.mjs exposes assertRedacted (the
+// outbound guard that refuses the send) and sanitizeRemoteText (exported);
+// plugin/server/jev.ts keeps its sanitizeRemoteText private — the only
+// reachable surfaces are testJev's accepted-label detail (cap 120) and its
+// network-error detail (cap 200). Both go through the same scrubber, so the
+// pins are byte-exact between the sides.
+// ---------------------------------------------------------------------------
+
+test('redaction parity: the fixture matrix behaves identically on both sanitizers', async t => {
+  const home = makeHome(t);
+  const jev = createJev();
+  await setJev(jev, home, config());
+  await setJevKey(jev, home, fakeOrKey('probe-key'));
+
+  const labelScrub = async text => {
+    const probe = createJev({ fetchImpl: async () => ({ ok: true, json: async () => ({ data: { label: text } }) }) });
+    const result = await testJev(probe, home);
+    assert.equal(result.ok, true);
+    const prefix = 'key accepted (label ';
+    assert.ok(result.detail.startsWith(prefix) && result.detail.endsWith(')'), `label detail shape: ${result.detail}`);
+    return result.detail.slice(prefix.length, -1);
+  };
+  const errorScrub = async text => {
+    const probe = createJev({ fetchImpl: async () => { throw new Error(`upstream ${text} tail`); } });
+    const result = await testJev(probe, home);
+    assert.equal(result.ok, false);
+    return result.detail;
+  };
+  const redactError = (text, name) => {
+    try {
+      assertRedacted(text);
+    } catch (error) {
+      return error;
+    }
+    throw new Error(`expected jev-redacted for ${name}`);
+  };
+
+  for (const { name, text, detect } of redactionFixtures) {
+    const pluginLabel = await labelScrub(text);
+    const pluginError = await errorScrub(text);
+    const srcScrubbed = sanitizeRemoteText(text, 120);
+    if (detect === null) {
+      // Pass-through is a no-op on both sides: the outbound guard stays
+      // silent and every scrub surface returns the input byte-identical.
+      assert.doesNotThrow(() => assertRedacted(text), name);
+      assert.equal(sanitizeRemoteText(text), text, name);
+      assert.equal(pluginLabel, text, `${name}: plugin label passes verbatim`);
+      assert.equal(pluginError, `request failed: upstream ${text} tail`, `${name}: plugin error passes verbatim`);
+      continue;
+    }
+    // The outbound guard refuses the send, names the pattern class and never
+    // echoes the matched content.
+    const thrown = redactError(text, name);
+    assert.equal(thrown.code, 'jev-redacted', name);
+    assert.ok(thrown.message.includes(`(${detect.pattern})`), `${name}: names ${detect.pattern}`);
+    for (const secret of detect.secrets) {
+      assert.ok(!thrown.message.includes(secret), `${name}: error never echoes the secret`);
+      assert.ok(!srcScrubbed.includes(secret), `${name}: src scrub leaks no secret`);
+      assert.ok(!pluginLabel.includes(secret), `${name}: plugin label leaks no secret`);
+      assert.ok(!pluginError.includes(secret), `${name}: plugin error leaks no secret`);
+    }
+    assert.equal(pluginLabel, srcScrubbed, `${name}: identical sanitized bytes`);
+    assert.ok(srcScrubbed.includes('<redacted>'), name);
+  }
+});
+
+test('redaction parity edge inputs — caps after scrub, non-strings, payload paths', async t => {
+  const home = makeHome(t);
+  const jev = createJev();
+  await setJev(jev, home, config());
+  await setJevKey(jev, home, fakeOrKey('probe-key'));
+
+  // Non-string payload leaves are skipped by the outbound guard; on the
+  // plugin side the label is scrubbed only when it is a string — metadata
+  // types never reach the detail.
+  assert.doesNotThrow(() => assertRedacted({ n: 42, flag: true, nil: null, list: [1, 'ok'] }));
+  for (const label of [42, { secret: fakeOrKey('notread1234567') }, null]) {
+    const probe = createJev({ fetchImpl: async () => ({ ok: true, json: async () => ({ data: { label } }) }) });
+    assert.equal((await testJev(probe, home)).detail, 'key accepted', `non-string label ${JSON.stringify(label)}`);
+  }
+  // An empty-string label is falsy — same 'key accepted' with nothing emitted.
+  const emptyLabel = createJev({ fetchImpl: async () => ({ ok: true, json: async () => ({ data: { label: '' } }) }) });
+  assert.equal((await testJev(emptyLabel, home)).detail, 'key accepted');
+  assert.equal(sanitizeRemoteText(''), '');
+  // src's sanitizeRemoteText coerces through String(value) — pinned here so
+  // the contract is explicit; the plugin call site guards with typeof.
+  assert.equal(sanitizeRemoteText(12345), '12345');
+  assert.equal(sanitizeRemoteText(null), 'null');
+
+  // Caps apply AFTER redaction: a credential straddling the cut point loses
+  // its match first, so no credential prefix can leak through the cap. (The
+  // key needs a word boundary — the space before it is load-bearing.)
+  const longKey = fakeOrKey('a'.repeat(30));
+  const straddled = sanitizeRemoteText('z'.repeat(194) + ' ' + longKey);
+  assert.equal(straddled.length, 200);
+  assert.ok(straddled.endsWith('<reda'), 'redaction ran before the slice');
+  assert.ok(!straddled.includes('sk-'), 'no credential prefix leaks past the cap');
+  const labelProbe = createJev({ fetchImpl: async () => ({ ok: true, json: async () => ({ data: { label: 'z'.repeat(114) + ' ' + longKey } }) }) });
+  const straddleResult = await testJev(labelProbe, home);
+  assert.equal(straddleResult.detail, `key accepted (label ${'z'.repeat(114)} <reda)`);
+  assert.ok(!straddleResult.detail.includes(longKey));
+  assert.equal(sanitizeRemoteText('x'.repeat(300)).length, 200, 'default cap');
+  assert.equal(sanitizeRemoteText('x'.repeat(300), 64).length, 64, 'caller cap');
+  const capProbe = createJev({ fetchImpl: async () => ({ ok: true, json: async () => ({ data: { label: 'q'.repeat(150) } }) }) });
+  assert.equal((await testJev(capProbe, home)).detail, `key accepted (label ${'q'.repeat(120)})`);
+  const errProbe = createJev({ fetchImpl: async () => { throw new Error('e'.repeat(300)); } });
+  assert.equal((await testJev(errProbe, home)).detail, `request failed: ${'e'.repeat(200)}`);
+
+  // Outbound-guard path pinning: a nested value reports its JSON path, and a
+  // credential at object-key position reports only the parent path — the key
+  // text itself never reaches the error.
+  const embedded = fakeOrKey('nestedkey00000000');
+  try {
+    assertRedacted({ state: { task: embedded } });
+    assert.fail('expected jev-redacted');
+  } catch (error) {
+    assert.equal(error.code, 'jev-redacted');
+    assert.match(error.message, /\(openrouter-key\) at state\.task/);
+  }
+  try {
+    assertRedacted({ state: { [embedded]: 'v' } });
+    assert.fail('expected jev-redacted');
+  } catch (error) {
+    assert.equal(error.code, 'jev-redacted');
+    assert.match(error.message, /object key \(openrouter-key\) at state/);
+    assert.ok(!error.message.includes(embedded), 'the key text never reaches the error');
+  }
 });
