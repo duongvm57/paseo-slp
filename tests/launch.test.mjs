@@ -370,3 +370,16 @@ test('handoff packet keeps the full ancestor prefix for depth-3 submodule gaps',
   assert.deepEqual(plan.handoff.candidate.nestedIncomplete, ['inner/deep/sub']);
   assert.match(plan.create.initialPrompt, /Snapshot evidence gap: inner\/deep\/sub is unproven submodule scope/);
 });
+
+test('preparation preserves fail-fast request precedence and diagnostic stage ordering', t => {
+  const { dir, installed } = fixture(t);
+  const bad = { ...request, repository: dir, role: 'unknown', inventoryFile: 'relative', assignmentFile: 'also-relative' };
+  assert.throws(() => launchPlan(installed, bad), /Unknown role/);
+  const result = launchCheck(installed, bad);
+  assert.deepEqual(result.checks.map(check => check.name), ['install', 'inventoryFile', 'assignmentFile', 'request', 'binding', 'provider', 'settings', 'plan']);
+  const errors = Object.fromEntries(result.checks.map(check => [check.name, check.error]));
+  assert.equal(errors.inventoryFile, 'Absolute inventoryFile required');
+  assert.equal(errors.assignmentFile, 'Absolute assignmentFile required');
+  assert.equal(errors.request, 'Unknown role');
+  assert.equal(errors.plan, 'Unknown role');
+});
