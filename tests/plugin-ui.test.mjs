@@ -1601,7 +1601,7 @@ test('every card async completion, error and finally path is stale-guarded', () 
 // hover/focus/pressed/disabled states) ported onto host theme slots.
 // ---------------------------------------------------------------------------
 
-test('the in-surface nav strip anchors the four routing sections in order', () => {
+test('the in-surface tab strip switches the four routing sections in order', () => {
   const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
   // Four items in the fixed section order.
   const nav = source.slice(source.indexOf('MANAGER_SECTIONS = ['), source.indexOf('] as const'));
@@ -1610,19 +1610,21 @@ test('the in-surface nav strip anchors the four routing sections in order', () =
   }
   const order = ['profiles', 'pool', 'language', 'jev'].map(id => nav.indexOf(`id: "${id}"`));
   assert.deepEqual([...order].sort((a, b) => a - b), order, 'nav order must be profiles → pool → language → jev');
-  // Navigation container semantics + per-item selected state.
-  assert.ok(source.includes('accessibilityLabel="Manager sections"'), 'nav a11y label missing');
-  assert.ok(source.includes('role="navigation"'), 'nav must use a navigation container role');
-  assert.ok(source.includes('accessibilityState={{ selected: active }}'), 'nav items must expose selected state');
-  // Anchors scroll the root ScrollView to measured card offsets.
-  assert.ok(source.includes('sectionTops.current'), 'section offset map missing');
-  assert.ok(source.includes('onLayout'), 'cards must measure their offset via onLayout');
-  assert.ok(source.includes('scrollToSection(section.id)'), 'nav press must scroll to the section');
-  assert.ok(source.includes('scrollTo({ y:'), 'root scrollTo missing');
-  assert.ok(source.includes('onScroll={onRootScroll}'), 'scroll handler wiring missing');
-  assert.ok(source.includes('scrollEventThrottle={100}'), 'scroll throttle missing');
-  // Active section is the last section whose top passed the scroll offset.
-  assert.ok(source.includes('contentOffset.y'), 'active-section tracking must read the scroll offset');
+  // Tab semantics: a press activates the section — no scrolling to it.
+  assert.ok(source.includes('accessibilityLabel="Manager sections"'), 'tab strip a11y label missing');
+  assert.ok(source.includes('role="tablist"'), 'tab strip must use a tablist container role');
+  assert.ok(source.includes('accessibilityRole="tab"'), 'nav items must be tabs');
+  assert.ok(source.includes('accessibilityState={{ selected: active }}'), 'tabs must expose selected state');
+  assert.ok(source.includes('setActiveSection(section.id)'), 'tab press must switch the active section');
+  // Inactive sections stay mounted under display:none — drafts and
+  // card-local state survive a tab switch, but nothing lays out.
+  for (const id of ['profiles', 'pool', 'language', 'jev']) {
+    assert.ok(source.includes(`sectionShown("${id}")`), `section ${id} must gate layout on the active tab`);
+  }
+  // The scroll-anchor machinery is gone — scrolling never reveals sections.
+  for (const gone of ['sectionTops', 'scrollToSection', 'onRootScroll', 'scrollTo({ y:', 'onScroll={']) {
+    assert.ok(!source.includes(gone), `scroll-anchor machinery remains: ${gone}`);
+  }
 });
 
 test('the routing region opens with the mockup headline and sub-copy', () => {

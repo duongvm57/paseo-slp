@@ -91,7 +91,7 @@ import { usePeerPoolCard, PeerPoolCard } from "./cards/peer-pool.tsx";
 const AUTHORITY = { exclusiveAdministrativeWindow: true, verifiedHostHomeMapping: true } as const;
 
 
-// In-surface nav — the mockup's left sidebar nav ported as an anchor strip
+// In-surface nav — the mockup's left sidebar nav ported as a tab strip
 // inside the routing region (the sidebar chrome itself is not ported).
 const MANAGER_SECTIONS = [
   { id: "profiles", label: "Role profiles" },
@@ -163,25 +163,12 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   const [showMaintenance, setShowMaintenance] = useState(false);
   const [statusDetailsOpen, setStatusDetailsOpen] = useState(false);
 
-  // In-surface section nav (mockup sidebar → anchor strip): each routing card
-  // records its content offset via onLayout, the root ScrollView scrolls to
-  // it, and onScroll marks the last section whose top passed the viewport.
-  const rootScrollRef = useRef<ScrollView | null>(null);
-  const sectionTops = useRef<Partial<Record<ManagerSectionId, number>>>({});
+  // In-surface section tabs (mockup sidebar → tab strip): a press switches
+  // the active section — inactive sections stay mounted under display:none
+  // so drafts and card-local state survive, but never lay out or scroll
+  // into view.
   const [activeSection, setActiveSection] = useState<ManagerSectionId>("profiles");
-  const scrollToSection = (id: ManagerSectionId) => {
-    const top = sectionTops.current[id];
-    if (top !== undefined) rootScrollRef.current?.scrollTo({ y: Math.max(0, top - 12), animated: true });
-  };
-  const onRootScroll = (event: { nativeEvent: { contentOffset: { y: number } } }) => {
-    const y = event.nativeEvent.contentOffset.y;
-    let current: ManagerSectionId = "profiles";
-    for (const section of MANAGER_SECTIONS) {
-      const top = sectionTops.current[section.id];
-      if (top !== undefined && top <= y + 40) current = section.id;
-    }
-    setActiveSection(previous => (previous === current ? previous : current));
-  };
+  const sectionShown = (id: ManagerSectionId) => (activeSection === id ? null : { display: "none" as const });
   // Role profiles: the mockup's two-column .profile-grid, measured on the
   // card body container (never the window) — two panels ≥700px, else stacked.
   const [profilePanelWide, setProfilePanelWide] = useState(false);
@@ -561,9 +548,6 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
 
   return (
     <ScrollView
-      ref={rootScrollRef}
-      onScroll={onRootScroll}
-      scrollEventThrottle={100}
       contentContainerStyle={{ padding: compact ? 12 : 24, gap: compact ? 12 : 16 }}
     >
       <View style={styles.headerRow}>
@@ -713,8 +697,8 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
       {statusView ? (
         // The routing region's own intro — the mockup's .route-intro eyebrow +
         // headline + sub-copy, then the sidebar nav ported as an in-surface
-        // anchor strip (scroll actions, not routes). The host SLP header and
-        // the prototype's sidebar chrome stay outside this surface.
+        // tab strip. The host SLP header and the prototype's sidebar chrome
+        // stay outside this surface.
         <View style={{ gap: compact ? 8 : 12 }}>
           <View style={{ gap: 4 }}>
             <Text style={[styles.eyebrow, { color: colors.foregroundMuted }]}>Routing configuration</Text>
@@ -723,15 +707,15 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
               Review the draft. Save when the whole pool is ready.
             </Text>
           </View>
-          <View role="navigation" accessibilityLabel="Manager sections" style={styles.navStrip}>
+          <View role="tablist" accessibilityLabel="Manager sections" style={styles.navStrip}>
             {MANAGER_SECTIONS.map(section => {
               const active = activeSection === section.id;
               return (
                 <Pressable
                   key={section.id}
-                  onPress={() => scrollToSection(section.id)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Go to ${section.label}`}
+                  onPress={() => setActiveSection(section.id)}
+                  accessibilityRole="tab"
+                  accessibilityLabel={`${section.label} tab`}
                   accessibilityState={{ selected: active }}
                   style={(state: ControlState) => [
                     styles.navItem,
@@ -769,7 +753,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
         // card. The peer note lives inside this card because it scopes what
         // routing does NOT configure; a separate card would orphan one line
         // of disclosure.
-        <View onLayout={event => { sectionTops.current.profiles = event.nativeEvent.layout.y; }}>
+        <View style={sectionShown("profiles")}>
         <RoutingCard
           colors={colors}
           target={target}
@@ -788,7 +772,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
         // .paseo-slp/slp-routing.json. This card is its sole writer; it loads
         // with the target (independent of binding, like the Jev card) and a
         // save takes effect the next time a Lead reads `routes`.
-        <View onLayout={event => { sectionTops.current.pool = event.nativeEvent.layout.y; }}>
+        <View style={sectionShown("pool")}>
         <PeerPoolCard
           colors={colors}
           target={target}
@@ -807,7 +791,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
       ) : null}
 
       {statusView ? (
-        <View onLayout={event => { sectionTops.current.language = event.nativeEvent.layout.y; }}>
+        <View style={sectionShown("language")}>
         <LanguageCard
           colors={colors}
           disabled={language.disabled}
@@ -830,7 +814,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
         // effect at the NEXT preparation — a running session is never
         // mutated. The key is write-only: the card reports hasKey, never the
         // value.
-        <View onLayout={event => { sectionTops.current.jev = event.nativeEvent.layout.y; }}>
+        <View style={sectionShown("jev")}>
         <JevCard colors={colors} target={target} jev={jev} />
         </View>
       ) : null}
