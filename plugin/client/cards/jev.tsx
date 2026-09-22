@@ -4,6 +4,7 @@
 // the target, its stale-guard predicate (`sameTarget` wraps the shell-owned
 // keyRef/targetKey mechanism), the RPC callers and the lastError plumbing.
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Text, View } from "react-native";
 import { JevProvider } from "../../shared/contracts.ts";
 import type {
   GetJevRequest,
@@ -18,6 +19,8 @@ import type {
   TestJevResult,
 } from "../../shared/contracts.ts";
 import { errorMessage } from "../manager-state.ts";
+import type { Colors } from "../ui-kit.tsx";
+import { Badge, Button, Card, ChipSelect, Field, styles, SwitchRow } from "../ui-kit.tsx";
 
 // Jev provider kinds — the same pin/defaults src/jev.mjs enforces
 // daemon-side. Changing kind resets model/baseUrl to the kind's defaults.
@@ -275,4 +278,217 @@ export function useJevCard({ target, targetKey, sameTarget, callGetJev, callSetJ
     runTest,
     retryLoad: () => { if (target) void loadJev(target); },
   };
+}
+
+// ---------------------------------------------------------------------------
+// View — render-only (wave 11 S3c). The hook above owns all state and
+// handlers; this component paints them.
+// ---------------------------------------------------------------------------
+
+export type JevCardState = ReturnType<typeof useJevCard>;
+
+export function JevCard({ colors, target, jev }: {
+  colors: Colors;
+  target: TargetValue | null;
+  jev: JevCardState;
+}) {
+  return (
+    <Card
+      colors={colors}
+      title="Jev"
+      subtitle="Bounded routing decisions — a Lead runs `slp route-decide` so Jev picks the pool seat from the eligible set, and prepare verifies the receipt offline. All toggles default off; an outage fails closed and disabling restores Lead-judgment routing."
+    >
+      {// Mockup recovery finding — the three load states are distinct:
+       // loading notice, an error branch with Retry, and the loaded
+       // settings. A failed load never paints as eternal "loading…".
+      jev.loadError !== null ? (
+        <View style={[styles.noticeBox, { borderColor: colors.statusDanger, backgroundColor: colors.surface2 }]} accessibilityLiveRegion="polite">
+          <Text style={[styles.checkTitle, { color: colors.statusDanger }]}>Could not load Jev settings</Text>
+          <Text style={[styles.mutedSmall, { color: colors.statusDanger }]}>{jev.loadError}</Text>
+          <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+            Settings and key status are unavailable.
+          </Text>
+          <View>
+            <Button colors={colors} kind="primary" label="Retry" onPress={() => jev.retryLoad()} />
+          </View>
+        </View>
+      ) : jev.view === null ? (
+        <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]} accessibilityLiveRegion="polite">
+          Loading Jev settings…
+        </Text>
+      ) : (
+        <>
+          {// Saved provider strip — the SAVED provider/model/baseUrl
+           // stays visible above the unsaved settings so a dirty draft
+           // never looks like the live config (mockup finding 1).
+          }
+          <View style={[styles.savedProvider, { borderLeftColor: colors.accent, backgroundColor: colors.surface2 }]}>
+            <Text style={[styles.eyebrow, { color: colors.foregroundMuted }]}>Saved provider</Text>
+            <View style={[styles.cardHeadRow, { justifyContent: "space-between" }]}>
+              <Text style={[styles.checkTitle, { color: colors.foreground }]}>
+                {jev.view.provider ? JEV_KIND_LABEL[jev.view.provider.kind] : "Not configured"}
+              </Text>
+              {jev.view.configured ? (
+                <Badge
+                  colors={colors}
+                  label={jev.view.enabled === true ? "Configured · enabled" : "Configured · disabled"}
+                  tone="good"
+                />
+              ) : null}
+            </View>
+            <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+              {jev.view.provider
+                ? `${jev.view.provider.model} · ${jev.view.provider.baseUrl} · ${jev.view.hasKey
+                    ? jev.view.keyPermissionsOk === false
+                      ? "Key stored — file permissions too open (chmod 600)"
+                      : "Key stored"
+                    : "No key stored"}`
+                : "No saved settings — Apply writes the first configuration."}
+            </Text>
+            {jev.view.error ? (
+              <Text style={[styles.mutedSmall, { color: colors.statusDanger }]}>config error: {jev.view.error}</Text>
+            ) : null}
+          </View>
+          <View style={[styles.cardHeadRow, { justifyContent: "space-between" }]}>
+            <Text style={[styles.fieldLabel, { color: colors.foreground }]}>
+              {jev.dirty ? "Unsaved settings" : "Settings"}
+            </Text>
+            {jev.dirty ? <Badge colors={colors} label="Apply before key actions" tone="draft" /> : null}
+          </View>
+          <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Provider</Text>
+          <ChipSelect<"openrouter" | "typesafe">
+            colors={colors}
+            value={jev.kind}
+            options={[
+              { label: "OpenRouter", value: "openrouter" },
+              { label: "TypeSafe (first-party)", value: "typesafe" },
+            ]}
+            disabled={!target || jev.busy}
+            onChange={next => {
+              jev.setKind(next);
+            }}
+          />
+          <View style={styles.field}>
+            <Field
+              colors={colors}
+              label="Model"
+              hint={jev.kind === "typesafe"
+                ? "Pinned versioned id (jev-<semver>) — aliases like jev-latest are rejected"
+                : "Pinned <owner>/jev-<version> id — aliases like jev-latest are rejected"}
+              value={jev.model}
+              onChangeText={text => { jev.setModel(text); }}
+              placeholder={JEV_KIND_DEFAULT[jev.kind].model}
+              disabled={!target || jev.busy}
+            />
+            {jev.modelError ? (
+              <Text style={[styles.mutedSmall, { color: colors.statusDanger }]} accessibilityLiveRegion="polite">
+                {jev.modelError}
+              </Text>
+            ) : null}
+          </View>
+          <View style={styles.field}>
+            <Field
+              colors={colors}
+              label={jev.baseUrl.trim() !== "" && jev.baseUrl.trim() !== JEV_KIND_DEFAULT[jev.kind].baseUrl
+                ? "Base URL (custom)"
+                : "Base URL"}
+              hint={`POST ${(jev.baseUrl.trim() === "" ? JEV_KIND_DEFAULT[jev.kind].baseUrl : jev.baseUrl.trim()).replace(/\/+$/, "")}${jev.kind === "typesafe" ? "/v1/systemone" : "/api/alpha/decisions"}${jev.kind === "typesafe" ? " — an origin+path prefix mounts a custom endpoint/proxy" : " — bare origin or the documented …/api/v1 prefixed form"}`}
+              value={jev.baseUrl}
+              onChangeText={text => { jev.setBaseUrl(text); }}
+              placeholder={JEV_KIND_DEFAULT[jev.kind].baseUrl}
+              disabled={!target || jev.busy}
+            />
+            {jev.urlError ? (
+              <Text style={[styles.mutedSmall, { color: colors.statusDanger }]} accessibilityLiveRegion="polite">
+                {jev.urlError}
+              </Text>
+            ) : null}
+          </View>
+          <SwitchRow
+            colors={colors}
+            checked={jev.enabledOn}
+            disabled={!target || jev.busy}
+            onToggle={next => { jev.setEnabledOn(next); }}
+            title="Enable Jev"
+            hint="Master toggle — off keeps every capability inert without deleting the stored key."
+          />
+          <SwitchRow
+            colors={colors}
+            checked={jev.routingOn}
+            disabled={!target || jev.busy || !jev.enabledOn}
+            onToggle={next => { jev.setRoutingOn(next); }}
+            title="Routing decisions"
+            hint="When armed, prepare requires a Jev decision receipt for catalog routing (run `slp route-decide`); Lead judgment alone no longer suffices."
+          />
+          {jev.saved && !jev.dirty ? (
+            <Text style={[styles.mutedSmall, { color: colors.statusSuccess }]} accessibilityLiveRegion="polite">Saved.</Text>
+          ) : null}
+          <Button
+            colors={colors}
+            kind="primary"
+            label={jev.busy ? "Saving…" : "Apply Jev settings"}
+            disabled={!target || jev.busy || !jev.dirty}
+            onPress={() => void jev.save()}
+          />
+          <View style={[styles.divider, { borderTopColor: colors.border }]} />
+          {// Key & connection actions name the SAVED provider — they
+           // operate on the stored config, so a dirty draft locks them
+           // until Apply (mockup finding 1).
+          }
+          <Text style={[styles.fieldLabel, { color: colors.foreground }]}>
+            Key & connection · {JEV_KIND_LABEL[jev.view.provider?.kind ?? jev.kind]}
+          </Text>
+          {jev.dirty ? (
+            <View style={[styles.noticeBox, { borderColor: colors.statusWarning, backgroundColor: colors.surface2 }]}>
+              <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
+                Apply settings before managing a key or testing — these actions use the saved
+                provider: {JEV_KIND_LABEL[jev.view.provider?.kind ?? jev.kind]}. Any previous test
+                result is no longer current.
+              </Text>
+            </View>
+          ) : null}
+          <Field
+            colors={colors}
+            label={`${JEV_KIND_LABEL[jev.view.provider?.kind ?? jev.kind]} API key`}
+            hint={`Stored at slp-runtime/state/${JEV_KIND_DEFAULT[jev.view.provider?.kind ?? jev.kind].keyFile} (0600) — never shown back; enter a new key to replace it`}
+            value={jev.keyInput}
+            onChangeText={text => { jev.setKeyInput(text); }}
+            placeholder={JEV_KIND_DEFAULT[jev.view.provider?.kind ?? jev.kind].keyPlaceholder}
+            disabled={!target || jev.keyBusy || jev.dirty}
+            secure
+          />
+          {jev.keyInput.trim() !== "" ? (
+            <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
+              Unsaved key — save it before testing.
+            </Text>
+          ) : null}
+          <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+            <Button
+              colors={colors}
+              label={jev.keyBusy ? "Working…" : `Save ${JEV_KIND_LABEL[jev.view.provider?.kind ?? jev.kind]} key`}
+              disabled={!target || jev.keyBusy || jev.dirty || jev.keyInput.trim() === ""}
+              onPress={() => void jev.saveKey(jev.keyInput.trim())}
+            />
+            <Button
+              colors={colors}
+              label={`Remove ${JEV_KIND_LABEL[jev.view.provider?.kind ?? jev.kind]} key`}
+              disabled={!target || jev.keyBusy || jev.dirty || jev.view?.hasKey !== true}
+              onPress={() => void jev.saveKey(null)}
+            />
+            <Button
+              colors={colors}
+              label={jev.testBusy ? "Testing…" : `Test ${JEV_KIND_LABEL[jev.view.provider?.kind ?? jev.kind]} connection`}
+              disabled={!target || jev.testBusy || jev.dirty || jev.view?.hasKey !== true || jev.keyInput.trim() !== ""}
+              onPress={() => void jev.runTest()}
+            />
+          </View>
+          {jev.test ? (
+            <Text style={[styles.mutedSmall, { color: jev.test.ok ? colors.statusSuccess : colors.statusDanger }]} accessibilityLiveRegion="polite">
+              {jev.test.ok ? "Connection OK" : "Connection failed"}{jev.test.detail ? ` — ${jev.test.detail}` : ""}
+            </Text>
+          ) : null}
+        </>
+      )}
+    </Card>
+  );
 }

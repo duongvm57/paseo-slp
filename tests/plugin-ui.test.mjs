@@ -776,11 +776,11 @@ test('client entry bundles against host externals with no server-only or node co
 
 test('the routing UI is one card with one save and one divergence warning', () => {
   const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
-  // The card's state/handlers live in the routing card module (wave 11
-  // S3b/D) — pins on build/save/setter internals read that file; render
-  // pins keep reading the shell JSX.
-  const routingCard = readFileSync(join(root, 'plugin/client/cards/routing.ts'), 'utf8');
-  const poolCard = readFileSync(join(root, 'plugin/client/cards/peer-pool.ts'), 'utf8');
+  // The card's state/handlers AND its JSX live in the routing card module
+  // (wave 11 S3b/D ownership + S3c render extraction) — pins on card
+  // internals read that file; shell pins keep reading ManagerSurface.
+  const routingCard = readFileSync(join(root, 'plugin/client/cards/routing.tsx'), 'utf8');
+  const poolCard = readFileSync(join(root, 'plugin/client/cards/peer-pool.tsx'), 'utf8');
   const bundle = clientBundle();
 
   // One consolidated "Role profiles" card edits the full profile each role
@@ -788,8 +788,8 @@ test('the routing UI is one card with one save and one divergence warning', () =
   // The "routing" metaphor is retired from the card title only — the stored
   // artifact keeps its role-routing file/RPC names.
   // The nav strip's "Role profiles" anchor label is the only other use.
-  assert.equal(occurrences(source, 'title="Role profiles"'), 1, 'exactly one Role profiles card title');
-  assert.ok(occurrences(source, '"Role profiles"') <= 2, 'card title + nav label');
+  assert.equal(occurrences(routingCard, 'title="Role profiles"'), 1, 'exactly one Role profiles card title');
+  assert.ok(occurrences(source, '"Role profiles"') + occurrences(routingCard, '"Role profiles"') <= 2, 'card title + nav label');
   assert.equal(occurrences(source, '"Role providers"'), 0);
   assert.equal(occurrences(source, '"Role routing"'), 0);
   assert.equal(occurrences(source, '"Supervisor routing"'), 0);
@@ -812,10 +812,10 @@ test('the routing UI is one card with one save and one divergence warning', () =
   // One Save action — a single button label and a single dispatch site for
   // the one set-role-routing call that carries both roles. The label is
   // "Save" — the card context already names what is saved (spec §9).
-  assert.equal(occurrences(source, '"Save routing"'), 0, 'label shortened to Save');
-  assert.equal(occurrences(source, '"Save"'), 1, 'exactly one Save button');
+  assert.equal(occurrences(source, '"Save routing"') + occurrences(routingCard, '"Save routing"'), 0, 'label shortened to Save');
+  assert.equal(occurrences(routingCard, '"Save"'), 1, 'exactly one Save button');
   assert.equal(occurrences(routingCard, 'callSetRoleRouting('), 1, 'one set-role-routing call site');
-  assert.equal(occurrences(source, 'routing.save()'), 1, 'one save dispatch');
+  assert.equal(occurrences(routingCard, 'routing.save()'), 1, 'one save dispatch');
 
   // ONE build path: buildRoleChoice runs only inside the card's builds
   // object (two roles), and save consumes the same builds the gate
@@ -825,7 +825,7 @@ test('the routing UI is one card with one save and one divergence warning', () =
 
   // The divergence warning renders once on the card, not once per role.
   assert.equal(
-    occurrences(source, 'Stored role profiles differ from the live binding'),
+    occurrences(routingCard, 'Stored role profiles differ from the live binding'),
     1,
     'exactly one divergence warning',
   );
@@ -834,15 +834,15 @@ test('the routing UI is one card with one save and one divergence warning', () =
   // keyed on the routing form's picks plus a thinking-option field. The Peer
   // pool seat editor deliberately mirrors the same picker patterns, so the
   // per-card counts scope to the Role profiles card region.
-  const roleCard = source.slice(
-    source.indexOf('title="Role profiles"'),
-    source.indexOf('title="Peer pool"'),
+  const roleCard = routingCard.slice(
+    routingCard.indexOf('title="Role profiles"'),
+    routingCard.indexOf('</Card>', routingCard.indexOf('title="Role profiles"')),
   );
   assert.ok(
     routingCard.includes('const family = routingForm[role].family'),
     'feature defs fetch keys on the routing form',
   );
-  assert.equal(occurrences(source, 'featureDefsFor(role)'), 1, 'feature defs resolved once per role');
+  assert.equal(occurrences(routingCard, 'featureDefsFor(role)'), 1, 'feature defs resolved once per role');
   assert.equal(
     occurrences(routingCard, 'featureDefsFor("'),
     2,
@@ -883,7 +883,7 @@ test('the routing UI is one card with one save and one divergence warning', () =
   // family's catalog (applyFamilyChange) instead of keeping stale foreign
   // values. "family" is out of setRoutingField's union entirely.
   assert.equal(occurrences(routingCard, 'setField(role, "family")'), 0, 'family write must reset dependents');
-  assert.equal(occurrences(source, 'onChange={routing.setFamily(role)}'), 1, 'family picker uses the dedicated handler');
+  assert.equal(occurrences(routingCard, 'onChange={routing.setFamily(role)}'), 1, 'family picker uses the dedicated handler');
   // The role card and the seat editor both route family switches through
   // applyFamilyChange — two application sites, same re-validation rule —
   // one in the routing card module, one on the seat editor in the shell.
@@ -922,8 +922,8 @@ test('activation is a prerequisite: it renders above Role profiles and gates Sav
     'title="Daemon home"',
     'title="Status"',
     'title="Activation"',
-    'title="Role profiles"',
-    'title="Peer pool"',
+    '<RoutingCard',
+    '<PeerPoolCard',
     '<LanguageCard',
     'title="Advanced"',
     'title="Maintenance"',
@@ -945,7 +945,9 @@ test('activation is a prerequisite: it renders above Role profiles and gates Sav
   // While bound the gate is a diff-gate: enabled iff the form-built routing
   // differs from the stored one (routingDirty no longer participates —
   // prefill does not set it, which was the reported stuck-disabled bug).
-  const saveButton = source.match(
+  // The card JSX lives in the routing card module (wave 11 S3c).
+  const routingModule = readFileSync(join(root, 'plugin/client/cards/routing.tsx'), 'utf8');
+  const saveButton = routingModule.match(
     /label=\{routing\.busy \? "Saving…" : "Save"\}[\s\S]*?disabled=\{([^}]*)\}/,
   );
   assert.ok(saveButton, 'Save button not found');
@@ -953,14 +955,14 @@ test('activation is a prerequisite: it renders above Role profiles and gates Sav
   assert.match(saveButton[1], /!routing\.differs/, 'Save is not diff-gated against the stored routing');
   assert.ok(!/routingDirty|routing\.dirty/.test(saveButton[1]), 'the dirty flag no longer gates Save');
   assert.ok(
-    source.includes('Activate first — role profiles are saved against a live binding.'),
+    routingModule.includes('Activate first — role profiles are saved against a live binding.'),
     'activate-first hint missing',
   );
 
   // The bound case confirms the save until the next edit; the divergence
   // warning still owns the diverged state, so the line is suppressed there.
   assert.ok(
-    source.includes('Saved — matches the live binding.'),
+    routingModule.includes('Saved — matches the live binding.'),
     'bound-case save feedback missing',
   );
 
@@ -1078,15 +1080,17 @@ test('buildPeerPool rejects the constraints validateCatalog enforces', () => {
 test('the Peer pool card authors the pool through catalog-backed pickers', () => {
   const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
   const bundle = clientBundle();
-  const peerCard = source.slice(
-    source.indexOf('title="Peer pool"'),
-    source.indexOf('<LanguageCard'),
+  // The card JSX lives in the pool card module (wave 11 S3c).
+  const poolView = readFileSync(join(root, 'plugin/client/cards/peer-pool.tsx'), 'utf8');
+  const peerCard = poolView.slice(
+    poolView.indexOf('title="Peer pool"'),
+    poolView.indexOf('</Card>', poolView.indexOf('title="Peer pool"')),
   );
-  assert.notEqual(source.indexOf('title="Peer pool"'), -1, 'Peer pool card missing');
+  assert.notEqual(poolView.indexOf('title="Peer pool"'), -1, 'Peer pool card missing');
 
   // One save path, CAS-guarded — the sha256 get-peer-pool returned is sent
   // back as expectedSha256; a conflict reloads instead of overwriting.
-  const poolCardModule = readFileSync(join(root, 'plugin/client/cards/peer-pool.ts'), 'utf8');
+  const poolCardModule = readFileSync(join(root, 'plugin/client/cards/peer-pool.tsx'), 'utf8');
   assert.equal(occurrences(poolCardModule, 'callSetPeerPool('), 1, 'one set-peer-pool call site');
   assert.equal(occurrences(poolCardModule, 'callGetPeerPool('), 2, 'load + reload reads');
   assert.ok(poolCardModule.includes('expectedSha256'), 'CAS token is sent on save');
@@ -1144,19 +1148,19 @@ test('the Peer pool card authors the pool through catalog-backed pickers', () =>
 });
 
 test('the Jev card offers both provider kinds with per-kind model/baseUrl/key surfaces', () => {
-  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
-  // Kind defaults/labels live in the Jev card module (wave 11 S3b/D).
-  const jevModule = readFileSync(join(root, 'plugin/client/cards/jev.ts'), 'utf8');
+  // Kind defaults/labels and the card JSX live in the Jev card module
+  // (wave 11 S3b/D ownership + S3c render extraction).
+  const jevModule = readFileSync(join(root, 'plugin/client/cards/jev.tsx'), 'utf8');
   // Kind picker with both options — the Human asked for a TypeSafe
   // first-party path beside the OpenRouter relay.
-  assert.ok(source.includes('"TypeSafe (first-party)"'), 'typesafe kind option missing');
-  assert.ok(source.includes('{ label: "OpenRouter", value: "openrouter" }'), 'openrouter kind option missing');
+  assert.ok(jevModule.includes('"TypeSafe (first-party)"'), 'typesafe kind option missing');
+  assert.ok(jevModule.includes('{ label: "OpenRouter", value: "openrouter" }'), 'openrouter kind option missing');
   // Per-kind defaults and the per-kind key file label.
   assert.ok(jevModule.includes('jev-1.13.0'), 'typesafe pinned model default missing');
   assert.ok(jevModule.includes('jev-typesafe.key'), 'typesafe key file missing');
   // Custom base URL is the Human-requested surface — an editable field that
   // marks itself when the value diverges from the kind default.
-  assert.ok(source.includes('"Base URL (custom)"'), 'custom baseUrl marker missing');
+  assert.ok(jevModule.includes('"Base URL (custom)"'), 'custom baseUrl marker missing');
 });
 
 test('featureDefsForSeat is declared before poolBuild calls it eagerly', () => {
@@ -1164,7 +1168,7 @@ test('featureDefsForSeat is declared before poolBuild calls it eagerly', () => {
   // — a const declared below it is a TDZ crash on any non-empty seat list
   // (host report: picker renders, adding a seat crashes the surface).
   // Both live in the pool card module (wave 11 S3b/D).
-  const source = readFileSync(join(root, 'plugin/client/cards/peer-pool.ts'), 'utf8');
+  const source = readFileSync(join(root, 'plugin/client/cards/peer-pool.tsx'), 'utf8');
   const decl = source.indexOf('const featureDefsForSeat');
   const use = source.indexOf('const poolBuild = buildPeerPool(');
   assert.ok(decl !== -1 && use !== -1, 'featureDefsForSeat/poolBuild must exist');
@@ -1177,7 +1181,7 @@ test('the Manager UI renders in English — no Vietnamese strings in plugin/clie
   const source = [
     'plugin/client/ManagerSurface.tsx',
     'plugin/client/ui-kit.tsx',
-    'plugin/client/cards/peer-pool.ts',
+    'plugin/client/cards/peer-pool.tsx',
   ].map(f => readFileSync(join(root, f), 'utf8')).join('\n');
   for (const label of [
     'Add a standard seat', 'Already present — open seat',
@@ -1204,9 +1208,11 @@ test('the Manager UI renders in English — no Vietnamese strings in plugin/clie
 
 test('the Peer pool card reports draft state and seat counts', () => {
   const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
-  const peerCard = source.slice(
-    source.indexOf('title="Peer pool"'),
-    source.indexOf('<LanguageCard'),
+  // The card JSX lives in the pool card module (wave 11 S3c).
+  const poolView = readFileSync(join(root, 'plugin/client/cards/peer-pool.tsx'), 'utf8');
+  const peerCard = poolView.slice(
+    poolView.indexOf('title="Peer pool"'),
+    poolView.indexOf('</Card>', poolView.indexOf('title="Peer pool"')),
   );
   // Header badge: amber draft, else the saved/absent state (mockup dirty badge).
   for (const label of ['Unsaved changes', 'Saved pool', 'No saved pool']) {
@@ -1221,7 +1227,7 @@ test('the Peer pool card reports draft state and seat counts', () => {
 });
 
 test('seat rows state the parked lifecycle explicitly', () => {
-  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  const source = readFileSync(join(root, 'plugin/client/cards/peer-pool.tsx'), 'utf8');
   for (const state of ['Enabled in draft', 'Disabled · configured', 'Disabled · needs provider/model']) {
     assert.ok(source.includes(`"${state}"`), `missing seat state: ${state}`);
   }
@@ -1233,9 +1239,11 @@ test('seat rows state the parked lifecycle explicitly', () => {
 test('the standard-seat picker filters and closes at the top', () => {
   const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
   const kit = readFileSync(join(root, 'plugin/client/ui-kit.tsx'), 'utf8');
-  const peerCard = source.slice(
-    source.indexOf('title="Peer pool"'),
-    source.indexOf('<LanguageCard'),
+  // The card JSX lives in the pool card module (wave 11 S3c).
+  const poolView = readFileSync(join(root, 'plugin/client/cards/peer-pool.tsx'), 'utf8');
+  const peerCard = poolView.slice(
+    poolView.indexOf('title="Peer pool"'),
+    poolView.indexOf('</Card>', poolView.indexOf('title="Peer pool"')),
   );
   assert.ok(peerCard.includes('Filter by name or description'), 'picker filter missing');
   assert.ok(peerCard.includes('pickerQuery'), 'filter state missing');
@@ -1252,35 +1260,35 @@ test('the standard-seat picker filters and closes at the top', () => {
 });
 
 test('CAS confirmation renders at the control that triggered it', () => {
-  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
-  const poolModule = readFileSync(join(root, 'plugin/client/cards/peer-pool.ts'), 'utf8');
+  // The card JSX and its state live in the pool card module (wave 11 S3c).
+  const poolModule = readFileSync(join(root, 'plugin/client/cards/peer-pool.tsx'), 'utf8');
   assert.ok(poolModule.includes('"notice" | "footer" | null'), 'origin-typed confirm state missing');
-  assert.ok(source.includes('requestReload("notice")'), 'notice-origin reload missing');
-  assert.ok(source.includes('requestReload("footer")'), 'footer-origin reload missing');
-  assert.ok(source.includes('poolReloadConfirm === "notice"'), 'notice-local confirm missing');
-  assert.ok(source.includes('poolReloadConfirm === "footer"'), 'footer-local confirm missing');
+  assert.ok(poolModule.includes('requestReload("notice")'), 'notice-origin reload missing');
+  assert.ok(poolModule.includes('requestReload("footer")'), 'footer-origin reload missing');
+  assert.ok(poolModule.includes('poolReloadConfirm === "notice"'), 'notice-local confirm missing');
+  assert.ok(poolModule.includes('poolReloadConfirm === "footer"'), 'footer-local confirm missing');
   // "Keep current edits" is focused by default via keepEditsRef.
-  assert.ok(source.includes('keepEditsRef'), 'keep-edits focus target missing');
-  assert.ok(source.includes('Keep current edits'), 'keep-edits action missing');
-  assert.ok(source.includes('Discard changes and Reload'), 'discard action missing');
+  assert.ok(poolModule.includes('keepEditsRef'), 'keep-edits focus target missing');
+  assert.ok(poolModule.includes('Keep current edits'), 'keep-edits action missing');
+  assert.ok(poolModule.includes('Discard changes and Reload'), 'discard action missing');
   // "Open seat" on the conflict notice scrolls/focuses the editor.
-  assert.ok(source.includes('seatRowRefs'), 'seat-row scroll target missing');
+  assert.ok(poolModule.includes('seatRowRefs'), 'seat-row scroll target missing');
 });
 
 test('saving and reloading are separate pending states with their own labels', () => {
-  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
-  const poolModule = readFileSync(join(root, 'plugin/client/cards/peer-pool.ts'), 'utf8');
+  // The card JSX and its state live in the pool card module (wave 11 S3c).
+  const poolModule = readFileSync(join(root, 'plugin/client/cards/peer-pool.tsx'), 'utf8');
   assert.ok(poolModule.includes('setPoolSaving(true)'), 'save busy flag missing');
   assert.ok(poolModule.includes('setPoolReloading(true)'), 'reload busy flag missing');
-  assert.ok(source.includes('poolSaving ? "Saving…"'), 'Saving… label missing');
-  assert.ok(source.includes('poolReloading ? "Reloading…"'), 'Reloading… label missing');
+  assert.ok(poolModule.includes('poolSaving ? "Saving…"'), 'Saving… label missing');
+  assert.ok(poolModule.includes('poolReloading ? "Reloading…"'), 'Reloading… label missing');
 });
 
 test('the Jev card splits saved settings from the draft and invalidates tests', () => {
-  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
-  // Card state/handlers live in the Jev card module (wave 11 S3b/D).
-  const jevModule = readFileSync(join(root, 'plugin/client/cards/jev.ts'), 'utf8');
-  const jevCard = source.slice(source.indexOf('title="Jev"'), source.indexOf('</Card>', source.indexOf('title="Jev"')));
+  // Card state/handlers AND the card JSX live in the Jev card module
+  // (wave 11 S3b/D ownership + S3c render extraction).
+  const jevModule = readFileSync(join(root, 'plugin/client/cards/jev.tsx'), 'utf8');
+  const jevCard = jevModule.slice(jevModule.indexOf('title="Jev"'), jevModule.indexOf('</Card>', jevModule.indexOf('title="Jev"')));
   // Saved-provider strip names the SAVED provider, not the draft pick.
   assert.ok(jevCard.includes('Saved provider'), 'saved-provider strip missing');
   assert.ok(jevCard.includes('jev.view.provider'), 'saved strip reads the stored provider');
@@ -1324,7 +1332,8 @@ test('the Jev card splits saved settings from the draft and invalidates tests', 
 });
 
 test('token lookup offers underlined mono buttons that focus the definition', () => {
-  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  // The seat JSX lives in the pool card module (wave 11 S3c).
+  const source = readFileSync(join(root, 'plugin/client/cards/peer-pool.tsx'), 'utf8');
   const kit = readFileSync(join(root, 'plugin/client/ui-kit.tsx'), 'utf8');
   assert.ok(kit.includes('textDecorationLine: "underline"'), 'token underline style missing');
   assert.ok(source.includes('accessibilityLabel={`Define ${token}`}'), 'Define X labels missing');
@@ -1345,7 +1354,7 @@ test('token lookup offers underlined mono buttons that focus the definition', ()
 });
 
 test('seat rows key on the stable draft uid, not the editable id', () => {
-  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  const source = readFileSync(join(root, 'plugin/client/cards/peer-pool.tsx'), 'utf8');
   assert.ok(source.includes('key={seat.uid}'), 'seat rows must key on the draft uid');
   assert.ok(!source.includes('key={`${index}:${seat.id}`}'), 'index:id key would remount on rename');
 });
@@ -1373,7 +1382,10 @@ test('draft uids are fresh per seat, ignored by form equality, and copied fresh'
 test('custom controls carry RN accessibility props and stale mockup strings stay out', () => {
   // A11y props span the shell (seat rows, notices) and the ui-kit primitives.
   const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8')
-    + readFileSync(join(root, 'plugin/client/ui-kit.tsx'), 'utf8');
+    + readFileSync(join(root, 'plugin/client/ui-kit.tsx'), 'utf8')
+    + readFileSync(join(root, 'plugin/client/cards/routing.tsx'), 'utf8')
+    + readFileSync(join(root, 'plugin/client/cards/jev.tsx'), 'utf8')
+    + readFileSync(join(root, 'plugin/client/cards/peer-pool.tsx'), 'utf8');
   for (const prop of ['accessibilityRole=', 'accessibilityLabel=', 'accessibilityState=', 'accessibilityLiveRegion=']) {
     assert.ok(source.includes(prop), `missing a11y prop: ${prop}`);
   }
@@ -1395,7 +1407,7 @@ test('target-scoped Jev reads refuse to paint a stale response over the displaye
   // mechanism is still the shell's — the card receives it as `sameTarget`,
   // which the shell wires to keyRef === targetKey.
   const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
-  const jevModule = readFileSync(join(root, 'plugin/client/cards/jev.ts'), 'utf8');
+  const jevModule = readFileSync(join(root, 'plugin/client/cards/jev.tsx'), 'utf8');
   assert.ok(
     source.includes('keyRef.current === targetKey(forTarget)'),
     'the shell must wire sameTarget to the keyRef/targetKey guard',
@@ -1493,7 +1505,8 @@ test('the routing region opens with the mockup headline and sub-copy', () => {
 });
 
 test('role profiles lay out in a container-measured two-column panel grid', () => {
-  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  // The card JSX lives in the routing card module (wave 11 S3c).
+  const source = readFileSync(join(root, 'plugin/client/cards/routing.tsx'), 'utf8');
   // The threshold is measured on the card body container — never the window.
   assert.ok(source.includes('profilePanelWide'), 'wide-panel flag missing');
   assert.ok(
@@ -1513,7 +1526,8 @@ test('role profiles lay out in a container-measured two-column panel grid', () =
 });
 
 test('provider family and mode render as mockup choice chips', () => {
-  const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  // The card JSX lives in the routing card module (wave 11 S3c).
+  const source = readFileSync(join(root, 'plugin/client/cards/routing.tsx'), 'utf8');
   const kit = readFileSync(join(root, 'plugin/client/ui-kit.tsx'), 'utf8');
   const profiles = source.slice(source.indexOf('title="Role profiles"'), source.indexOf('</Card>', source.indexOf('title="Role profiles"')));
   // Both fields use the choice variant inside the profile panels.
@@ -1553,7 +1567,10 @@ test('the model row is a non-destructive select-box with a manual disclosure', (
 
 test('controls share hover/focus/pressed/disabled states via the theme', () => {
   const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8')
-    + readFileSync(join(root, 'plugin/client/ui-kit.tsx'), 'utf8');
+    + readFileSync(join(root, 'plugin/client/ui-kit.tsx'), 'utf8')
+    + readFileSync(join(root, 'plugin/client/cards/routing.tsx'), 'utf8')
+    + readFileSync(join(root, 'plugin/client/cards/jev.tsx'), 'utf8')
+    + readFileSync(join(root, 'plugin/client/cards/peer-pool.tsx'), 'utf8');
   // RN-web runtime fields are widened once, locally — no untyped destructure.
   assert.ok(source.includes('type ControlState = { pressed: boolean; hovered?: boolean; focused?: boolean }'),
     'widened control-state type missing');
@@ -1682,7 +1699,7 @@ test('catalog input accepts a role and the client caches by family|role', () => 
   assert.ok(occurrences(source, 'schemaVersion: 1, family, role') >= 2, 'catalog requests must send role');
   // Feature cache keys are family|role|model|modeId.
   assert.ok(managerState.includes('`${family}|${role}|${model}|'), 'feature key missing the role segment');
-  const poolCard = readFileSync(join(root, 'plugin/client/cards/peer-pool.ts'), 'utf8');
+  const poolCard = readFileSync(join(root, 'plugin/client/cards/peer-pool.tsx'), 'utf8');
   assert.ok(poolCard.includes('`${seat.family}|peer|'), 'seat feature key missing the peer segment');
   // No bare-family catalog lookups remain.
   assert.ok(!/catalogs\[form\.family\]/.test(source), 'bare-family role-card lookup remains');
