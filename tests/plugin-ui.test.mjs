@@ -776,6 +776,10 @@ test('client entry bundles against host externals with no server-only or node co
 
 test('the routing UI is one card with one save and one divergence warning', () => {
   const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
+  // The card's state/handlers live in the routing card module (wave 11
+  // S3b/D) — pins on build/save/setter internals read that file; render
+  // pins keep reading the shell JSX.
+  const routingCard = readFileSync(join(root, 'plugin/client/cards/routing.ts'), 'utf8');
   const bundle = clientBundle();
 
   // One consolidated "Role profiles" card edits the full profile each role
@@ -809,14 +813,14 @@ test('the routing UI is one card with one save and one divergence warning', () =
   // "Save" — the card context already names what is saved (spec §9).
   assert.equal(occurrences(source, '"Save routing"'), 0, 'label shortened to Save');
   assert.equal(occurrences(source, '"Save"'), 1, 'exactly one Save button');
-  assert.equal(occurrences(source, 'callSetRoleRouting('), 1, 'one set-role-routing call site');
-  assert.equal(occurrences(source, 'saveRouting()'), 1, 'one save dispatch');
+  assert.equal(occurrences(routingCard, 'callSetRoleRouting('), 1, 'one set-role-routing call site');
+  assert.equal(occurrences(source, 'routing.save()'), 1, 'one save dispatch');
 
-  // ONE build path: buildRoleChoice runs only inside routingBuilds (two
-  // roles), and saveRouting consumes the same routingBuilds the gate
+  // ONE build path: buildRoleChoice runs only inside the card's builds
+  // object (two roles), and save consumes the same builds the gate
   // compares — never a second construction that could drift.
-  assert.equal(occurrences(source, 'buildRoleChoice('), 2, 'one shared build site, two roles');
-  assert.equal(occurrences(source, 'routingBuilds.'), 4, 'gate + save consume the same builds');
+  assert.equal(occurrences(routingCard, 'buildRoleChoice('), 2, 'one shared build site, two roles');
+  assert.equal(occurrences(routingCard, 'builds.'), 4, 'gate + save consume the same builds');
 
   // The divergence warning renders once on the card, not once per role.
   assert.equal(
@@ -834,12 +838,12 @@ test('the routing UI is one card with one save and one divergence warning', () =
     source.indexOf('title="Peer pool"'),
   );
   assert.ok(
-    source.includes('const family = routingForm[role].family'),
+    routingCard.includes('const family = routingForm[role].family'),
     'feature defs fetch keys on the routing form',
   );
   assert.equal(occurrences(source, 'featureDefsFor(role)'), 1, 'feature defs resolved once per role');
   assert.equal(
-    occurrences(source, 'featureDefsFor("'),
+    occurrences(routingCard, 'featureDefsFor("'),
     2,
     'the shared build merges the same defs for both roles',
   );
@@ -877,14 +881,23 @@ test('the routing UI is one card with one save and one divergence warning', () =
   // single-field write — so dependent picks re-validate against the new
   // family's catalog (applyFamilyChange) instead of keeping stale foreign
   // values. "family" is out of setRoutingField's union entirely.
-  assert.equal(occurrences(source, 'setRoutingField(role, "family")'), 0, 'family write must reset dependents');
-  assert.equal(occurrences(source, 'onChange={setRoutingFamily(role)}'), 1, 'family picker uses the dedicated handler');
+  assert.equal(occurrences(routingCard, 'setField(role, "family")'), 0, 'family write must reset dependents');
+  assert.equal(occurrences(source, 'onChange={routing.setFamily(role)}'), 1, 'family picker uses the dedicated handler');
   // The role card and the seat editor both route family switches through
-  // applyFamilyChange — two application sites, same re-validation rule.
-  assert.equal(occurrences(source, 'applyFamilyChange('), 2, 'family-change sites: role + seat');
+  // applyFamilyChange — two application sites, same re-validation rule —
+  // one in the routing card module, one on the seat editor in the shell.
+  assert.equal(
+    occurrences(source, 'applyFamilyChange(') + occurrences(routingCard, 'applyFamilyChange('),
+    2,
+    'family-change sites: role + seat',
+  );
   // Same for the feature-key fields: a model OR mode pick clears the feature
   // form via the shared helper — two application sites, one rule.
-  assert.equal(occurrences(source, 'applySettingChange('), 2, 'feature-key sites: role + seat');
+  assert.equal(
+    occurrences(source, 'applySettingChange(') + occurrences(routingCard, 'applySettingChange('),
+    2,
+    'feature-key sites: role + seat',
+  );
 
   // The Activation card no longer exposes the pre-binding configurators;
   // the routing card is the sole role→provider configurator in the UI
@@ -930,12 +943,12 @@ test('activation is a prerequisite: it renders above Role profiles and gates Sav
   // differs from the stored one (routingDirty no longer participates —
   // prefill does not set it, which was the reported stuck-disabled bug).
   const saveButton = source.match(
-    /label=\{routingBusy \? "Saving…" : "Save"\}[\s\S]*?disabled=\{([^}]*)\}/,
+    /label=\{routing\.busy \? "Saving…" : "Save"\}[\s\S]*?disabled=\{([^}]*)\}/,
   );
   assert.ok(saveButton, 'Save button not found');
   assert.match(saveButton[1], /!statusView\?\.binding/, 'Save is not gated on a live binding');
-  assert.match(saveButton[1], /!routingDiffers/, 'Save is not diff-gated against the stored routing');
-  assert.ok(!/routingDirty/.test(saveButton[1]), 'the dirty flag no longer gates Save');
+  assert.match(saveButton[1], /!routing\.differs/, 'Save is not diff-gated against the stored routing');
+  assert.ok(!/routingDirty|routing\.dirty/.test(saveButton[1]), 'the dirty flag no longer gates Save');
   assert.ok(
     source.includes('Activate first — role profiles are saved against a live binding.'),
     'activate-first hint missing',
@@ -1622,11 +1635,14 @@ test('catalog input accepts a role and the client caches by family|role', () => 
   assert.throws(() => CatalogInput.parse({ schemaVersion: 1, family: 'devin', role: 'manager' }));
 
   const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
-  assert.ok(source.includes('`${family}|${role}`'), 'catalog scope key missing');
+  // The scope/key formats are the shell-card seam contract — they live in
+  // manager-state.ts (catalogScope/featureKey) since wave 11 S3b/D.
+  const managerState = readFileSync(join(root, 'plugin/client/manager-state.ts'), 'utf8');
+  assert.ok(managerState.includes('`${family}|${role}`'), 'catalog scope key missing');
   // Every catalog request carries its role scope.
   assert.ok(occurrences(source, 'schemaVersion: 1, family, role') >= 2, 'catalog requests must send role');
   // Feature cache keys are family|role|model|modeId.
-  assert.ok(source.includes('`${family}|${role}|${model}|'), 'feature key missing the role segment');
+  assert.ok(managerState.includes('`${family}|${role}|${model}|'), 'feature key missing the role segment');
   assert.ok(source.includes('`${seat.family}|peer|'), 'seat feature key missing the peer segment');
   // No bare-family catalog lookups remain.
   assert.ok(!/catalogs\[form\.family\]/.test(source), 'bare-family role-card lookup remains');

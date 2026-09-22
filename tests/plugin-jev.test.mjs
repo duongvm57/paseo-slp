@@ -4,12 +4,12 @@
 // network: the fetch seam is doubled throughout.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createJev } from '../plugin/server/jev.ts';
 import { makeHome, seqNow, targetOf } from './helpers/plugin-doubles.mjs';
 import { fakeOrKey, fakeTsKey } from './fake-secrets.mjs';
-import { assertRedacted, sanitizeRemoteText } from '../src/jev.mjs';
+import { assertRedacted, readJevConfig, readJevKey, sanitizeRemoteText } from '../src/jev.mjs';
 import { redactionFixtures } from './jev-redaction-matrix.mjs';
 
 const jevPath = home => join(home, 'slp-runtime', 'state', 'jev.json');

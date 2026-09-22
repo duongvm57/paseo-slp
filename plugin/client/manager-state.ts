@@ -6,6 +6,7 @@ import { OWNED_PROVIDER_ID_RE, ownedProviderId } from "../shared/families.ts";
 import { isStandardSeatId, seatTokenConflict } from "../shared/routing-vocabulary.ts";
 import type { SeatTokenConflict } from "../shared/routing-vocabulary.ts";
 import type { SeatArchetype } from "../shared/archetypes.ts";
+import type { RoleName } from "../shared/families.ts";
 import type {
   CatalogResult,
   CatalogSelectOptionValue,
@@ -51,6 +52,12 @@ export function newOperationId(): string {
 // ---------------------------------------------------------------------------
 
 export const targetKey = (target: TargetValue): string => `${target.hostId} ${target.daemonHome}`;
+
+// Shell/card seam key formats (wave 11 S3): cards declare catalog scopes
+// and feature picks; the shell owns both caches keyed by these strings.
+export const catalogScope = (family: FamilyName, role: RoleName): string => `${family}|${role}`;
+export const featureKey = (family: FamilyName, role: RoleName, model: string, modeId: string): string =>
+  `${family}|${role}|${model}|${modeId}`;
 
 export interface TargetView {
   status: StatusResult | null;
