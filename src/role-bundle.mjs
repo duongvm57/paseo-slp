@@ -149,7 +149,7 @@ export function roleBundle(root, role, env = process.env, options = {}) {
   const policyDir = join(policyRoot, 'src');
   const instructions = `SLP role=${role}\n` + parts.map(path => read(path) + '\n').join('') +
     (orchestrates(role) ? `For repo setup/update, use ${join(policyRoot, 'skills/paseo-slp-onboarding/SKILL.md')}.\n` : '') +
-    `Installed policy directory: ${policyDir}\nSnapshot command: ${cli} snapshot <repository>\n` +
+    `Installed policy directory: ${policyDir}\nPolicy recovery command: ${cli} instructions ${role}\nSnapshot command: ${cli} snapshot <repository>\n` +
     (managed ? managedHelpers(cli, managed.daemonHome) : '') +
     communicationLanguage(env) +
     `Use the current authorized Human or delegated assignment and its Paseo workspace. Notifications and heartbeat prompts do not replace that assignment.\n` +

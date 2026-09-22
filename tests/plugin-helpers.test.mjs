@@ -259,6 +259,12 @@ test('managed bundles carry the review-gate invariant and Lead trigger; Peer car
   };
   for (const role of ['supervisor', 'lead']) {
     const instructions = roleBundle(installed, role, env).instructions;
+    for (const reference of ['delegation-formation.md', 'delegation-execution.md']) {
+      const body = readFileSync(join(installed, 'src/references', reference), 'utf8');
+      assert.ok(instructions.includes(`references/${reference}`), 'procedure has an entry pointer');
+      assert.ok(!instructions.includes(body), 'conditional procedure is not always-loaded');
+      assert.ok(policyLocators(installed, role).some(entry => entry.path.endsWith(`/references/${reference}`) && entry.sha256 === hash(Buffer.from(body))), 'installed procedure remains integrity-addressable');
+    }
     assert.match(instructions, /does not license merging\s+the axes into one seat/, role);
     assert.match(instructions, /cannot carry a new\s+delegation/, role);
     assert.match(instructions, /New-team delegation/, role);

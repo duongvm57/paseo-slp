@@ -22,6 +22,15 @@ controls authority. Complete unknown fields from repository evidence and the
 assignment before the decision that depends on them; do not treat blanks as grants.
 The defaults below can be adapted under the repository's policy mandate.
 
+## Context recovery
+
+If role policy or locators are missing after compaction, use the Policy recovery
+command delivered with the role (the verified runtime's `bin/slp.mjs instructions
+<role>`), then read the references relevant to the current decision. Preserve the
+recorded Node, runtime root and daemon home; a source-checkout preview is not the
+managed session's policy. Recover assignment and ownership from task evidence
+before applying this repository's tactics.
+
 ## Status and project characteristics
 
 Owner, version, review date, scope, routing intent and

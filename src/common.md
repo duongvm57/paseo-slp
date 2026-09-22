@@ -41,3 +41,9 @@ artifacts. Supervisors/Leads apply their monitoring procedure to stop owned task
 wake sources.
 Report cancellation receipts and any descendants/resources whose settlement
 remains unknown. Resume only on a new Human instruction.
+
+After context loss, recover role policy using the Policy recovery command in
+this session's role delivery. Resolve conditional references against its Installed
+policy directory. Recover the current assignment, ownership and report route
+from inspectable session/task evidence before acting; missing evidence is a gap,
+not permission to invent an assignment. Policy recovery does not restore task state.
