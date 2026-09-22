@@ -44,6 +44,7 @@ import {
   makeHome,
   makeMaterializer,
   makePayload,
+  makePluginFixture,
   opConflicts,
   opOf,
   readConfigJson,
@@ -61,10 +62,7 @@ import {
 // ---------------------------------------------------------------------------
 
 test('happy activate: INACTIVE → ACTIVE, providers/profiles/injection written, binding committed', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const opId = randomUUID();
 
@@ -153,10 +151,7 @@ test('idempotent retry: same operationId + same payload returns the existing ope
 });
 
 test('same operationId with a changed payload → IDEMPOTENCY_CONFLICT', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const opId = randomUUID();
   const first = await manager.activate(activateInput(home, deps.payload, opId), daemon);
@@ -189,10 +184,7 @@ test('competing mutation start while a worker is in flight → BUSY', async t =>
 });
 
 test('re-activate with identical target verifies and returns no-op, no patch', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const first = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   await waitTerminal(manager, home, first.operation.operationId, daemon);
@@ -206,10 +198,7 @@ test('re-activate with identical target verifies and returns no-op, no patch', a
 });
 
 test('mcp.enabled=false in live config → MCP_DISABLED, nothing written', async t => {
-  const home = makeHome(t, { version: 1, daemon: { mcp: { enabled: false } } });
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t, { version: 1, daemon: { mcp: { enabled: false } } });
   const manager = createManager(deps);
   const opId = randomUUID();
   const start = await manager.activate(activateInput(home, deps.payload, opId), daemon);
@@ -267,10 +256,7 @@ test('pre-existing slp-* provider without adoptIdentical → COLLISION', async t
 });
 
 test('adoptIdentical adopts byte-identical entries with baseline adopted-observed', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const first = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   await waitTerminal(manager, home, first.operation.operationId, daemon);
@@ -292,10 +278,7 @@ test('adoptIdentical adopts byte-identical entries with baseline adopted-observe
 });
 
 test('adoptIdentical with a differing entry → COLLISION with expected/actual hashes', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const first = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   await waitTerminal(manager, home, first.operation.operationId, daemon);
@@ -382,10 +365,7 @@ test('unrelated config is preserved byte-for-byte across activation and deactiva
 });
 
 test('deactivate semantic restore: absent injectIntoAgents → explicit false', async t => {
-  const home = makeHome(t, { version: 1, daemon: { mcp: { enabled: true } } });
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t, { version: 1, daemon: { mcp: { enabled: true } } });
   const manager = createManager(deps);
   const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   const doneAct = await waitTerminal(manager, home, act.operation.operationId, daemon);
@@ -434,10 +414,7 @@ test('set-language writes, reports and clears the plugin-owned language file', a
 });
 
 test('deactivate with present injectIntoAgents=false restores false (not absent)', async t => {
-  const home = makeHome(t, { version: 1, daemon: { mcp: { enabled: true, injectIntoAgents: false } } });
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t, { version: 1, daemon: { mcp: { enabled: true, injectIntoAgents: false } } });
   const manager = createManager(deps);
   const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   const doneAct = await waitTerminal(manager, home, act.operation.operationId, daemon);
@@ -452,10 +429,7 @@ test('profilesPresent records RAW key presence: absent vs explicit [] stay disti
   // The recorded projection stores raw truth — the absent≡empty equivalence
   // exists only at §8.3 comparison sites, never in receipt projections/hashes.
   const activate = async config => {
-    const home = makeHome(t, config);
-    const binaries = makeBinaries(t);
-    const daemon = await makeDaemon(t, home);
-    const deps = makeDeps({ execOpts: { binaries } });
+    const { home, binaries, daemon, deps } = await makePluginFixture(t, config);
     const manager = createManager(deps);
     const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
     await waitTerminal(manager, home, act.operation.operationId, daemon);
@@ -493,10 +467,7 @@ test('profilesPresent records RAW key presence: absent vs explicit [] stay disti
 });
 
 test('deactivate blocked by DEPENDENT_REFERENCE from an unrelated profile', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   const doneAct = await waitTerminal(manager, home, act.operation.operationId, daemon);
@@ -514,10 +485,7 @@ test('deactivate blocked by DEPENDENT_REFERENCE from an unrelated profile', asyn
 });
 
 test('deactivate blocked by DEPENDENT_REFERENCE from metadataGeneration.providers', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   const doneAct = await waitTerminal(manager, home, act.operation.operationId, daemon);
@@ -537,10 +505,7 @@ test('deactivate blocked by DEPENDENT_REFERENCE from metadataGeneration.provider
 });
 
 test('deactivate with a modified owned profile → OWNERSHIP_DRIFT, no patch', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   const doneAct = await waitTerminal(manager, home, act.operation.operationId, daemon);
@@ -642,10 +607,7 @@ test('rebind preserves human-edited profile preferences', async t => {
 });
 
 test('initialProfileFamily on an existing binding → INVALID_REQUEST', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   await waitTerminal(manager, home, act.operation.operationId, daemon);
@@ -658,10 +620,7 @@ test('initialProfileFamily on an existing binding → INVALID_REQUEST', async t 
 });
 
 test('initialProfileFamily selects the profile provider family', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const act = await manager.activate(
     activateInput(home, deps.payload, randomUUID(), { initialProfileFamily: 'pi' }),
@@ -674,10 +633,7 @@ test('initialProfileFamily selects the profile provider family', async t => {
 });
 
 test('profiles on first activation write the supplied values verbatim', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const act = await manager.activate(
     activateInput(home, deps.payload, randomUUID(), {
@@ -705,10 +661,7 @@ test('profiles on first activation write the supplied values verbatim', async t 
 });
 
 test('profiles on an existing binding apply explicit edits: set, clear, repoint', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const act = await manager.activate(
     activateInput(home, deps.payload, randomUUID(), {
@@ -762,10 +715,7 @@ test('profiles on an existing binding reject an unavailable family', async t => 
 });
 
 test('status exposes live managed-profile values for the bound editor', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const pre = await manager.status(statusInput(home), daemon);
   assert.deepEqual(pre.managedProfiles, [], 'no binding → no managed profiles');
@@ -788,10 +738,7 @@ test('status exposes live managed-profile values for the bound editor', async t 
 });
 
 test('status reports state and never mutates; unknown operationId → NOT_FOUND', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const before = readFileSync(join(home, 'config.json'));
   const s0 = await manager.status(statusInput(home), daemon);
@@ -866,10 +813,7 @@ test('SCHEMA_LOSS: unknown field inside a strict object', async t => {
 });
 
 test('SCHEMA_LOSS: unknown field on an owned provider entry', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   const doneAct = await waitTerminal(manager, home, act.operation.operationId, daemon);
@@ -906,10 +850,7 @@ test('legacy provider entry migration is detected as SCHEMA_LOSS', async t => {
 });
 
 test('target host mismatch → TARGET_MISMATCH', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   await waitTerminal(manager, home, act.operation.operationId, daemon);
@@ -921,10 +862,7 @@ test('target host mismatch → TARGET_MISMATCH', async t => {
 });
 
 test('corrupt journal → RECOVERY_REQUIRED, never overwritten', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   await waitTerminal(manager, home, act.operation.operationId, daemon);
@@ -938,10 +876,7 @@ test('corrupt journal → RECOVERY_REQUIRED, never overwritten', async t => {
 });
 
 test('receipt revision increments monotonically', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   await waitTerminal(manager, home, act.operation.operationId, daemon);
@@ -952,10 +887,7 @@ test('receipt revision increments monotonically', async t => {
 });
 
 test('no SLP temp files remain after a successful activation', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   await waitTerminal(manager, home, act.operation.operationId, daemon);
@@ -965,10 +897,7 @@ test('no SLP temp files remain after a successful activation', async t => {
 });
 
 test('status with no receipt but present SLP entries → RECOVERY_REQUIRED', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   await waitTerminal(manager, home, act.operation.operationId, daemon);
@@ -1043,10 +972,7 @@ test('materializer failure → op failed, state INACTIVE, staging cleaned', asyn
 });
 
 test('pure planner: patchForDirection rebuilds forward and inverse patches', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   const done = await waitTerminal(manager, home, act.operation.operationId, daemon);
@@ -1240,10 +1166,7 @@ test('installed-impl parity: MiniStore and DaemonConfigStore merge the same patc
 });
 
 test('mixed absent/exact-present adoption computes indexes over the full array', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const managerA = createManager(deps);
   const act = await managerA.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   await waitTerminal(managerA, home, act.operation.operationId, daemon);
@@ -1278,10 +1201,7 @@ test('allProfilesSha256 hashes the §7 wire format: {present:false} vs {present:
     ['absent', undefined],
     ['explicit-empty', { version: 1, daemon: { mcp: { enabled: true }, agentProfiles: [] } }],
   ]) {
-    const home = makeHome(t, config);
-    const binaries = makeBinaries(t);
-    const daemon = await makeDaemon(t, home);
-    const deps = makeDeps({ execOpts: { binaries } });
+    const { home, binaries, daemon, deps } = await makePluginFixture(t, config);
     const manager = createManager(deps);
     const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
     await waitTerminal(manager, home, act.operation.operationId, daemon);
@@ -1293,10 +1213,7 @@ test('allProfilesSha256 hashes the §7 wire format: {present:false} vs {present:
 });
 
 test('adoption with only slp-lead records slots in index order and verifies clean', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const managerA = createManager(deps);
   const act = await managerA.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   await waitTerminal(managerA, home, act.operation.operationId, daemon);
@@ -1324,10 +1241,7 @@ test('adoption with only slp-lead records slots in index order and verifies clea
 });
 
 test('swapped owned profile order is already at the after endpoint — no patch', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const managerA = createManager(deps);
   const act = await managerA.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   await waitTerminal(managerA, home, act.operation.operationId, daemon);

@@ -635,6 +635,17 @@ export function makeDeps(opts = {}) {
   };
 }
 
+// A fresh daemon and its matching filesystem/dependency fixtures. Leave
+// manager creation and operation starts to the test: crash cases must be able
+// to install journal blockers before the manager consumes its first UUID.
+export async function makePluginFixture(t, config) {
+  const home = makeHome(t, config);
+  const binaries = makeBinaries(t);
+  const daemon = await makeDaemon(t, home);
+  const deps = makeDeps({ execOpts: { binaries } });
+  return { home, binaries, daemon, deps };
+}
+
 export const authority = { exclusiveAdministrativeWindow: true, verifiedHostHomeMapping: true };
 export const targetOf = home => ({ hostId: 'test-host', daemonHome: home });
 export function activateInput(home, payload, operationId, extra = {}) {

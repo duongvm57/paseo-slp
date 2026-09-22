@@ -37,6 +37,7 @@ import {
   makeLaunchers,
   makeMaterializer,
   makePayload,
+  makePluginFixture,
   makeHome,
   opCodes,
   opOf,
@@ -58,10 +59,7 @@ import {
 // ---------------------------------------------------------------------------
 
 test('crash before any plan (accepted phase) → foreign pending; inspect marks failed; new activate proceeds', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   dirBlocker(home); // every poisoned write fails EEXIST
   deps.uuidBox.state.poisonFrom = 3; // 'materialized' write onward
   const managerA = createManager(deps);
@@ -96,10 +94,7 @@ test('crash before any plan (accepted phase) → foreign pending; inspect marks 
 });
 
 test('crash at prepared (plan durable, patch never dispatched) → complete redispatches the forward patch exactly once', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   dirBlocker(home);
   deps.uuidBox.state.poisonFrom = 6; // 'patch-dispatched' write onward
   const managerA = createManager(deps);
@@ -128,10 +123,7 @@ test('crash at prepared (plan durable, patch never dispatched) → complete redi
 });
 
 test('patch applied then settle-write killed → foreign pending at patch-dispatched → complete finalizes with zero extra patches', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   dirBlocker(home);
   deps.uuidBox.state.poisonFrom = 7; // settle write onward
   const managerA = createManager(deps);
@@ -162,10 +154,7 @@ test('patch applied then settle-write killed → foreign pending at patch-dispat
 });
 
 test('crash after verified (attempt returned, commit never wrote) → complete finalizes', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   dirBlocker(home);
   deps.uuidBox.state.poisonFrom = 9; // commit write
   const managerA = createManager(deps);
@@ -190,10 +179,7 @@ test('crash after verified (attempt returned, commit never wrote) → complete f
 });
 
 test('restore-before on an applied activation → inverse patch once, providers removed, runtime retained', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   dirBlocker(home);
   deps.uuidBox.state.poisonFrom = 7;
   const managerA = createManager(deps);
@@ -256,10 +242,7 @@ test('patch rejection (never applied) → outcome-unknown; no blind rollback; sa
 });
 
 test('journal write failure after a successful patch → op lands recovery-required; complete finishes it', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   fileBlocker(home); // single EEXIST — cleanup removes it
   deps.uuidBox.state.poisonOnly = 7; // only the settle write fails
   const managerA = createManager(deps);
@@ -288,10 +271,7 @@ test('journal write failure after a successful patch → op lands recovery-requi
 });
 
 test('single journal failure at materialized write → clean terminal failure, not stuck pending', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   fileBlocker(home);
   deps.uuidBox.state.poisonOnly = 3; // only the 'materialized' write fails
   const managerA = createManager(deps);
@@ -305,10 +285,7 @@ test('single journal failure at materialized write → clean terminal failure, n
 });
 
 test('acceptance write failure → activate rejected IO_FAILURE, no receipt left', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   fileBlocker(home);
   deps.uuidBox.state.poisonOnly = 2; // the acceptance write itself
   const manager = createManager(deps);
@@ -320,10 +297,7 @@ test('acceptance write failure → activate rejected IO_FAILURE, no receipt left
 });
 
 test('deactivate crash after its patch applied → restore-before reinstates the binding', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const managerA = createManager(deps);
   const act = await managerA.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   const doneAct = await waitTerminal(managerA, home, act.operation.operationId, daemon);
@@ -356,10 +330,7 @@ test('deactivate crash after its patch applied → restore-before reinstates the
 });
 
 test('deactivate crash after its patch applied → complete finishes the removal', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const managerA = createManager(deps);
   const act = await managerA.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   const doneAct = await waitTerminal(managerA, home, act.operation.operationId, daemon);
@@ -384,10 +355,7 @@ test('deactivate crash after its patch applied → complete finishes the removal
 });
 
 test('deactivate crash before dispatch (entries intact) → complete redispatches removal', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const managerA = createManager(deps);
   const act = await managerA.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   const doneAct = await waitTerminal(managerA, home, act.operation.operationId, daemon);
@@ -414,10 +382,7 @@ test('deactivate crash before dispatch (entries intact) → complete redispatche
 });
 
 test('divergent disk/live state → reconcile refuses to patch and stays RECOVERY_REQUIRED', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   dirBlocker(home);
   deps.uuidBox.state.poisonFrom = 7;
   const managerA = createManager(deps);
@@ -451,10 +416,7 @@ test('divergent disk/live state → reconcile refuses to patch and stays RECOVER
 });
 
 test('reconcile guards: missing interruptedOperationId → INVALID_REQUEST; unknown → NOT_FOUND; terminal op → INVALID_REQUEST', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const missing = await manager.reconcile(reconcileInput(home, randomUUID(), 'complete'), daemon);
   assert.equal(missing.accepted, false);
@@ -489,10 +451,7 @@ test('reconcile during an in-flight worker → BUSY', async t => {
 });
 
 test('reconcile retry with same id + payload returns the existing recovery operation', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   dirBlocker(home);
   deps.uuidBox.state.poisonFrom = 7;
   const managerA = createManager(deps);
@@ -542,10 +501,7 @@ test('status distinguishes same-boot in-flight vs foreign pending; never writes'
 });
 
 test('inspect on a healthy binding reports ACTIVE with no conflicts', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   await waitTerminal(manager, home, act.operation.operationId, daemon);
@@ -701,10 +657,7 @@ test('reconcile-of-reconcile: a dead restore-before still drives the chain to th
 });
 
 test('journaled inspect: status resolves the op and a conflicting retry is refused', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const inspectId = randomUUID();
   const inspect = await manager.reconcile(reconcileInput(home, inspectId, 'inspect'), daemon);
@@ -719,10 +672,7 @@ test('journaled inspect: status resolves the op and a conflicting retry is refus
 });
 
 test('inspect detects injectIntoAgents drift and transitions to RECOVERY_REQUIRED', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   await waitTerminal(manager, home, act.operation.operationId, daemon);
@@ -741,10 +691,7 @@ test('inspect detects injectIntoAgents drift and transitions to RECOVERY_REQUIRE
 });
 
 test('inspect transitions runtime/launch integrity failures to RECOVERY_REQUIRED', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   await waitTerminal(manager, home, act.operation.operationId, daemon);
@@ -821,10 +768,7 @@ test('inspect treats a verify identity mismatch against the receipt as RUNTIME_I
 });
 
 test('inspect refuses a binding whose recorded executable no longer probes clean', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   await waitTerminal(manager, home, act.operation.operationId, daemon);
@@ -840,10 +784,7 @@ test('inspect refuses a binding whose recorded executable no longer probes clean
 });
 
 test('receipt with a mutating phase but no plan is corrupt at journal read', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   await waitTerminal(manager, home, act.operation.operationId, daemon);
@@ -863,10 +804,7 @@ test('receipt with a mutating phase but no plan is corrupt at journal read', asy
 });
 
 test('reconcile throwing pre-dispatch keeps RECOVERY_REQUIRED — never restores ACTIVE', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const managerA = createManager(deps);
   const act = await managerA.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   const doneAct = await waitTerminal(managerA, home, act.operation.operationId, daemon);
@@ -898,10 +836,7 @@ test('reconcile throwing pre-dispatch keeps RECOVERY_REQUIRED — never restores
 });
 
 test('inspect with a recovery subject that throws unexpectedly keeps RECOVERY_REQUIRED', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   dirBlocker(home);
   deps.uuidBox.state.poisonFrom = 7; // settle write onward — patch applied, op stuck pending
   const managerA = createManager(deps);
@@ -929,10 +864,7 @@ test('inspect with a recovery subject that throws unexpectedly keeps RECOVERY_RE
 });
 
 test('deactivate failing before its plan journals restores ACTIVE priorState', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   const doneAct = await waitTerminal(manager, home, act.operation.operationId, daemon);
@@ -948,10 +880,7 @@ test('deactivate failing before its plan journals restores ACTIVE priorState', a
 });
 
 test('journaled reconcile intent lacking priorState (legacy) falls back to RECOVERY_REQUIRED', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   dirBlocker(home);
   deps.uuidBox.state.poisonFrom = 7;
   const managerA = createManager(deps);
@@ -993,10 +922,7 @@ test('journaled reconcile intent lacking priorState (legacy) falls back to RECOV
 // ---------------------------------------------------------------------------
 
 test('inspect treats mcp.enabled=false as binding drift, not a clean ACTIVE', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   await waitTerminal(manager, home, act.operation.operationId, daemon);
@@ -1017,10 +943,7 @@ test('inspect treats mcp.enabled=false as binding drift, not a clean ACTIVE', as
 });
 
 test('inspect transitions to RECOVERY_REQUIRED when the persisted file fails schema validation', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   await waitTerminal(manager, home, act.operation.operationId, daemon);
@@ -1038,10 +961,7 @@ test('inspect transitions to RECOVERY_REQUIRED when the persisted file fails sch
 });
 
 test('an interrupted inspect restores its own priorState — never erases recovery evidence', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const managerA = createManager(deps);
   const act = await managerA.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   await waitTerminal(managerA, home, act.operation.operationId, daemon);
@@ -1082,10 +1002,7 @@ test('an interrupted inspect restores its own priorState — never erases recove
 });
 
 test('inspect-created RECOVERY_REQUIRED over unmanaged entries still permits explicit adoption', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const managerA = createManager(deps);
   const act = await managerA.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   await waitTerminal(managerA, home, act.operation.operationId, daemon);
@@ -1110,10 +1027,7 @@ test('inspect-created RECOVERY_REQUIRED over unmanaged entries still permits exp
 });
 
 test('a clean re-inspect clears a state-level recovery once the drift is fixed', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   await waitTerminal(manager, home, act.operation.operationId, daemon);
@@ -1135,10 +1049,7 @@ test('a clean re-inspect clears a state-level recovery once the drift is fixed',
 });
 
 test('equal plan endpoints (identical-config adoption) finalize without a redundant patch', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const managerA = createManager(deps);
   const act = await managerA.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   await waitTerminal(managerA, home, act.operation.operationId, daemon);
@@ -1172,10 +1083,7 @@ test('equal plan endpoints (identical-config adoption) finalize without a redund
 });
 
 test('inspect refreshes owned profile positions so a later deactivate is not drifted', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   const doneAct = await waitTerminal(manager, home, act.operation.operationId, daemon);
@@ -1201,10 +1109,7 @@ test('inspect refreshes owned profile positions so a later deactivate is not dri
 });
 
 test('status(operationId) exposes the operation’s journaled conflicts', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const act = await manager.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   await waitTerminal(manager, home, act.operation.operationId, daemon);
@@ -1414,10 +1319,7 @@ test('recovery removal refuses when live metadataGeneration references owned pro
 });
 
 test('inspect publishes the profile refresh only after every invariant passes', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const managerA = createManager(deps);
   const act = await managerA.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   const doneAct = await waitTerminal(managerA, home, act.operation.operationId, daemon);
@@ -1447,10 +1349,7 @@ test('inspect publishes the profile refresh only after every invariant passes', 
 });
 
 test('journal validation rejects tampered derived hashes even when the format is valid', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const managerA = createManager(deps);
   const act = await managerA.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   await waitTerminal(managerA, home, act.operation.operationId, daemon);
@@ -1475,10 +1374,7 @@ test('journal validation rejects tampered derived hashes even when the format is
 });
 
 test('a symlinked state ancestor is rejected even when the receipt exists', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const managerA = createManager(deps);
   const act = await managerA.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   await waitTerminal(managerA, home, act.operation.operationId, daemon);
@@ -1531,10 +1427,7 @@ test('status response stays inside the bound under maximum schema-valid load', a
 });
 
 test('verifyPublished anchors the recorded payload identity on installed.json', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const managerA = createManager(deps);
   const act = await managerA.activate(activateInput(home, deps.payload, randomUUID()), daemon);
   const doneAct = await waitTerminal(managerA, home, act.operation.operationId, daemon);
@@ -1972,10 +1865,7 @@ test('W3: the 64 KiB fallback sheds oversized conflict diagnostics while preserv
 });
 
 test('X3: an oversized probe-failure conflict is normalized at creation so the op settles', async t => {
-  const home = makeHome(t);
-  const binaries = makeBinaries(t);
-  const daemon = await makeDaemon(t, home);
-  const deps = makeDeps({ execOpts: { binaries } });
+  const { home, binaries, daemon, deps } = await makePluginFixture(t);
   const manager = createManager(deps);
   const opId = randomUUID();
   // 2900-char explicit nodePath — schema-valid input (AbsolutePath ≤4096) but
