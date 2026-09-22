@@ -62,10 +62,42 @@ dependent work — it never defaults to Lead.
 
 | Class | Starting topology and evidence gate |
 |---|---|
-| Tiny / bounded familiar | One Engineer, focused proof and Lead artifact inspection. Lead may implement tiny tightly coupled work if assignment allows. Independent review optional unless material risk appears. |
+| Tiny / bounded familiar | One Peer Engineer, focused proof and Lead artifact inspection; follow the Tiny procedure below. Independent review optional unless the assignment, protocol or material risk requires it. |
 | Cross-module / lifecycle / migration / security | Read-only Architect investigates before implementation; one owner per write scope; independent review gate — split-axis seats, never one merged seat — on the stable candidate before Lead acceptance. |
 | Foundation / costly architecture lock-in | Independent design lenses or sealed council with distinct mandates; Lead records decision/counterargument/reversal conditions; Engineer then the independent review gate. Human decides owner-only trade-offs. |
 | Large dependency in a different domain | Separate bounded lane or dependency Lead within authority; explicit contract, handback and integration owner. |
+
+### Tiny procedure
+
+Lead classifies a task as tiny only when scope and verification are clear, the
+change is easy to reverse and it changes no authority, delegation, lifecycle or
+integrity rules. Record the reason in one sentence. Reclassify before dependent
+work when scope or risk grows; an assignment or protocol requiring independent
+review takes precedence. This procedure reduces ceremony, not required gates.
+
+1. Lead supplies one short inline brief: outcome, owned/excluded scope, authority,
+   verification and report recipient. Record the formation in the same brief or
+   timeline entry: operation, parent/child, workspace/cwd and ownership. No separate
+   plan, brief file or formation file is required. Reuse policy text under the
+   installed core's freshness rule; still verify current route/runtime prerequisites.
+2. Delegate to one Peer Engineer through agent-scoped create_agent with the pinned
+   workspace and notifyOnFinish, verifying parentage and placement. For corrections
+   or a suitable verified child in the same ongoing assignment, follow installed
+   session continuity. Add other dispositions only when the task no longer meets
+   tiny conditions or a required gate calls for them.
+3. Engineer returns the artifact/diff, candidate identity, actual checks with
+   relevant outputs and exit codes, remaining risks and resources in the session.
+   A separate report file is not required. Pause writes during Lead inspection.
+4. Lead inspects the artifact and evidence, then returns a short
+   ACCEPT/CHANGES_REQUESTED/BLOCKED verdict with candidate identity, proof and any
+   unresolved risk/resource. Use the installed snapshot helper or an exact commit
+   with all relevant working changes accounted for. Keep required handback routes.
+
+Repositories may strengthen this procedure for their risks; keep the installed
+core's authority, ownership, parentage and required-review invariants. A missing
+or older protocol that does not define a tiny procedure does not silently inherit
+these exemptions: record the gap and propose an update within Human authority.
+Do not rewrite existing repository protocols during package installation/update.
 
 For council, default to two distinct lenses, at most one challenge/response round
 per material proposition, then Lead reconciles. Add another lens only for an

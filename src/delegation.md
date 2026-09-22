@@ -5,8 +5,8 @@ Observe-existing-work, read references/delegation-formation.md before choosing
 the operation and recording its formation record. Read
 references/delegation-execution.md before preparing or issuing a delegation,
 verifying creation, recovering an ambiguous create, or retrieving a child report.
-Read references/provider-routing.md before every delegation, quota fallback
-or runtime settings change. Peer runtime changes stay within the authorized
+Read references/provider-routing.md before delegation, quota fallback
+or runtime settings changes under the common core's policy-text freshness rule. Peer runtime changes stay within the authorized
 pool; quota fallback follows its setting — one designated option, one retry.
 
 Every new team seat is created through its owning parent's agent-scoped
@@ -30,3 +30,8 @@ Standards): a summary like "Engineer → Reviewer" does not license merging
 the axes into one seat. A task too small to require review is a separate
 judgment from loosening a required gate. Required seats that cannot be
 supplied make the gate BLOCKED, never permission to skip or merge it.
+
+Tiny work uses the repository protocol's tiny procedure with one Peer Engineer
+under Lead. Protocol may reduce ceremony, never the authority, ownership,
+parentage or required-review invariants above. Missing procedure grants no
+exemption; record the gap. Raise the class when scope or risk outgrows tiny.

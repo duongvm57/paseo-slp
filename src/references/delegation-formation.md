@@ -3,7 +3,7 @@
 Read before classifying a delegation, continuation or observation.
 The always-loaded delegation core supplies parentage and review invariants.
 
-Read references/provider-routing.md before every delegation, quota fallback or runtime settings change.
+Consult references/provider-routing.md before delegation, quota fallback or runtime settings changes under the common core's policy-text freshness rule.
 Peer runtime changes remain inside the project pool; quota fallback follows its quotaFallback setting — one designated option, one retry.
 
 Before any delegation tool call, classify the situation — the assignment

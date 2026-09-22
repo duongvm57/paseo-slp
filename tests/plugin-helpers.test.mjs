@@ -517,3 +517,26 @@ test('ACP delivery keeps verified core while refreshing language and restoring c
   const unmanaged = roleDelivery(root, 'peer', { SLP_DAEMON_HOME: home });
   assert.ok(!unmanaged.anchor().includes('Communication language:'));
 });
+
+test('tiny policy keeps protocol-owned ceremony separate from required gates and runtime freshness', t => {
+  const dir = fixture(t), installed = join(dir, 'release');
+  install(root, installed);
+  const lead = roleBundle(installed, 'lead', {}).instructions;
+  const protocol = readFileSync(join(installed, 'src/templates/workspace-protocol.md'), 'utf8');
+  const orchestration = readFileSync(join(installed, 'src/references/orchestration.md'), 'utf8');
+  assert.match(lead, /assign one Peer Engineer/);
+  assert.match(lead, /repository protocol's tiny procedure/);
+  assert.match(lead, /raise the class before the affected work/);
+  assert.match(lead, /required independent review\s+gate .* still applies/);
+  assert.match(lead, /absent\ntiny procedure grants no ceremony exemption/);
+  assert.match(lead, /full relevant text already in context/);
+  assert.match(lead, /not runtime\nstate/);
+  assert.match(lead, /first required full workspace-protocol read remains\nmandatory/);
+  assert.match(protocol, /1\. Lead supplies one short inline brief/);
+  assert.match(protocol, /2\. Delegate to one Peer Engineer/);
+  assert.match(protocol, /3\. Engineer returns the artifact\/diff/);
+  assert.match(protocol, /4\. Lead inspects the artifact/);
+  assert.match(protocol, /does not silently inherit\nthese exemptions/);
+  assert.match(orchestration, /One Peer Engineer under Lead/);
+  assert.ok(!orchestration.includes('Lead directly if protocol'));
+});

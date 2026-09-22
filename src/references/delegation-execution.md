@@ -2,7 +2,10 @@
 
 Read before preparing a spawn, continuing a child, verifying creation,
 recovering an ambiguous create or retrieving a delegation report.
-Use delegation-formation.md first to classify the operation.
+Use delegation-formation.md first to classify the operation. For tiny tasks,
+follow the repository protocol's tiny procedure and keep formation in the brief
+or timeline when it permits that; runtime checks and structural invariants remain.
+Read/re-read policy text under the common core's freshness rule.
 
 1. Resolve project/task identity, repository root, authority and existing ownership.
    Inspect Paseo reachability, list_workspaces and relevant list_agents, plus Git

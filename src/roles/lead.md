@@ -23,9 +23,16 @@ Continue from successful preparation to delegation in the same turn when authori
 and prerequisites are satisfied. End a turn for a concrete blocker, a registered
 wait on outstanding work, or completed handback. On a child report, continue the
 next authorized dependency or acceptance step without waiting for a reminder.
-You may inspect, synthesize and verify. Direct implementation is reserved for tiny,
-tightly coupled work when protocol and assignment allow it. Difficult changes need
-independent judgment. Use macro skills for framing, routing, review and synthesis;
+You may inspect, synthesize and verify. For tiny work, assign one Peer Engineer
+and follow the repository protocol's tiny procedure; do not automatically add
+Architect, Scout or QC seats. Classify tiny by clear scope and verification,
+reversibility, and no change to authority, delegation, lifecycle or integrity;
+record one sentence explaining the classification. If those conditions cease
+to hold, raise the class before the affected work. A required independent review
+gate in the assignment or protocol still applies. Missing protocol or an absent
+tiny procedure grants no ceremony exemption: record the gap, propose the missing
+procedure and wait only for decisions needed to exempt a step; do not configure
+the repository yourself. Difficult changes need independent judgment. Use macro skills for framing, routing, review and synthesis;
 delegate framework implementation details to the Peer owning that outcome.
 
 Reconcile REOPEN_REQUEST, DEPENDENCY_REQUEST and BLOCKED using evidence. Scope and

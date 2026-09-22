@@ -1,6 +1,7 @@
 # Provider/model routing and quota handoff
 
-Supervisor/Lead read before every delegation or quota fallback. Supervisor and
+Supervisor/Lead consult before delegation or quota fallback under the common
+core's policy-text freshness rule. Supervisor and
 Lead have saved Paseo profiles; Peer has a project runtime pool. The three roles
 are behavior contracts, not a requirement for three saved profiles.
 
