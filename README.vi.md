@@ -79,7 +79,7 @@ bản — nằm ở link kiến trúc phía trên.
 
 ## Yêu cầu
 
-- Paseo `>=0.8.0 <0.9.0` với `pluginsEnabled: true` trong `config.json` của
+- Paseo `>=0.8.0 <0.10.0` với `pluginsEnabled: true` trong `config.json` của
   daemon.
 - Node >=22 trên máy daemon (plugin tự resolve Node ổn định — không dùng
   binary Electron — lúc kích hoạt).

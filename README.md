@@ -82,7 +82,7 @@ in the architecture doc linked above.
 
 ## Requirements
 
-- Paseo `>=0.8.0 <0.9.0` with `pluginsEnabled: true` in the daemon's
+- Paseo `>=0.8.0 <0.10.0` with `pluginsEnabled: true` in the daemon's
   `config.json`.
 - Node >=22 on the daemon host (the plugin resolves a stable ordinary Node —
   not the Electron binary — at activation).
