@@ -125,8 +125,8 @@ no pending wait, or under an explicit recovery mandate. Record every prompt
 separately with its timestamp and observed pre-send state, including prompts
 that overlap progress; a later success does not prove the prompt was needed.
 When intervention is necessary, preserve the pending operation and its uncertain
-outcome in the recovery handback. For interrupted creation, apply delegation.md's
-ownership reconciliation before asking for another child.
+outcome in the recovery handback. For interrupted creation, apply
+delegation-execution.md's ownership reconciliation before asking for another child.
 Identical retries with unchanged prerequisites add no evidence; inspect
 quota/auth/tool/authority causes before repeating. Retry thresholds belong
 to the protocol; numerical examples in the guide are heuristics.

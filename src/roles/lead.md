@@ -31,8 +31,8 @@ record one sentence explaining the classification. If those conditions cease
 to hold, raise the class before the affected work. A required independent review
 gate in the assignment or protocol still applies. Missing protocol or an absent
 tiny procedure grants no ceremony exemption: record the gap, propose the missing
-procedure and wait only for decisions needed to exempt a step; do not configure
-the repository yourself. Difficult changes need independent judgment. Use macro skills for framing, routing, review and synthesis;
+procedure and use one Peer Engineer where authority permits, waiting only on the
+decision that exempts a step; do not configure the repository yourself. Difficult changes need independent judgment. Use macro skills for framing, routing, review and synthesis;
 delegate framework implementation details to the Peer owning that outcome.
 
 Reconcile REOPEN_REQUEST, DEPENDENCY_REQUEST and BLOCKED using evidence. Scope and

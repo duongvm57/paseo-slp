@@ -562,8 +562,9 @@ test('parity: hook systemPrompt and devin wrapper inject the identical bundle fo
   const wrapperModule = await import(pathToFileURL(join(f.candidate, 'src', 'role-bundle.mjs')).href);
   for (const id of OWNED_IDS) {
     const role = id.split('-')[2];
-    // (b) what the devin wrapper path injects: roleInstructions(root, role)
-    // under the frozen managed env — identical to roleBundle().instructions.
+    // (b) the session-entry render the devin wrapper injects via acpRolePrompt
+    // on first and re-armed prompts — delivery.entry() under the frozen managed
+    // env; recurring prompts get the shorter delivery.anchor().
     const wrapperBytes = wrapperModule.roleBundle(f.candidate, role, managedEnv(f)).instructions;
     if (DEVIN_IDS.includes(id)) {
       // The devin path is the wrapper itself — nothing to compare, just

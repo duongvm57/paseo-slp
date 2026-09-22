@@ -341,8 +341,10 @@ authority/delegation/lifecycle/integrity as tiny, recording its reason. Workspac
 protocol owns the ceremony: the template supplies one Peer Engineer, an inline
 brief/formation, in-session proof and Lead artifact inspection/verdict. Required
 review gates still apply, and growing scope/risk raises the class. Missing or
-older protocols grant no implicit exemption; record the gap and propose a change,
-without automatically migrating repository tactics or blocking unrelated work.
+older protocols grant no implicit exemption; record the gap and propose a change.
+Where authority permits the task still runs through one Peer Engineer — only the
+step needing an exemption waits for a decision — without automatically migrating
+repository tactics or blocking unrelated work.
 
 Policy read/re-read requirements permit reuse of the full relevant text still
 in context when its source is known unchanged. A summary is not a substitute;
