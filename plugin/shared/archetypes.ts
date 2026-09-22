@@ -5,8 +5,8 @@
 //
 // The package owns the meaning of these standard seats: suitableFor/avoidFor
 // are the closed 16-token `axis:value` set, read-only on the form, and notes
-// are the package-provided explanation (local only — Jev never receives
-// notes). The id set is reserved (§7.2): an option on one of these ids is a
+// seed from the package-provided explanation but are user-editable (local
+// only — Jev never receives notes). The id set is reserved (§7.2): an option on one of these ids is a
 // standard seat whose tokens must equal the packaged set; every other id is
 // a custom seat with free strings. Every archetype ships a parked seat:
 // blank provider, blank model, enabled:false, availability:"ready" (the only

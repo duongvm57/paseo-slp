@@ -1572,28 +1572,22 @@ export function PeerPoolCard({ colors, target, compact, statusView, jev, pool, a
                     <Text style={[styles.fieldLabel, { color: colors.foreground }]}>
                       Local only — Jev never sees this
                     </Text>
-                    {managed ? (
-                      <View style={styles.field}>
-                        <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>Notes</Text>
-                        <Text style={[styles.mutedSmall, { color: colors.foreground }]}>
-                          {seat.notes !== "" ? seat.notes : "—"}
-                        </Text>
-                        <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-                          Package-provided — read-only.
-                        </Text>
-                      </View>
-                    ) : (
-                      <Field
-                        colors={colors}
-                        label="Notes"
-                        hint="Why this seat exists, in the working language — required"
-                        value={seat.notes}
-                        onChangeText={setSeatField(index, "notes")}
-                        placeholder="Cost, quota, and judgment notes for the Lead"
-                        disabled={disabled}
-                        multiline
-                      />
-                    )}
+                    {/*
+                      §7.4.B — Notes are a local-only annotation editable on
+                      both seat kinds; on a managed seat the package-provided
+                      explanation is the seeded default the user can overwrite.
+                      The field stays required for every seat.
+                    */}
+                    <Field
+                      colors={colors}
+                      label="Notes"
+                      hint="Why this seat exists, in the working language — required"
+                      value={seat.notes}
+                      onChangeText={setSeatField(index, "notes")}
+                      placeholder="Cost, quota, and judgment notes for the Lead"
+                      disabled={disabled}
+                      multiline
+                    />
                     <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
                       <Button
                         colors={colors}

@@ -1389,6 +1389,36 @@ test('managed seats pick mode like custom; only features stay a read-only summar
   assert.ok(!summary.includes('setSeatField(index, "modeId")'), 'managed summary must not edit mode');
 });
 
+test('managed-seat notes are an editable local annotation; id, features and tokens stay locked', () => {
+  // Wave 13 (§7.4.B): Notes are user-editable on both seat kinds — local only,
+  // Jev never sees them — with the package-provided explanation as the seeded
+  // default. Id, token lists and feature values stay package-owned.
+  const poolView = readFileSync(join(root, 'plugin/client/cards/peer-pool.tsx'), 'utf8');
+  assert.ok(!poolView.includes('Package-provided'), 'managed notes read-only block remains');
+  const notesRegion = poolView.slice(
+    poolView.indexOf('Local only — Jev never sees this'),
+    poolView.indexOf('label="Remove seat"'),
+  );
+  assert.ok(
+    notesRegion.includes('value={seat.notes}') &&
+    notesRegion.includes('onChangeText={setSeatField(index, "notes")}'),
+    'notes must render the editable Field on both seat kinds',
+  );
+  assert.ok(!notesRegion.includes('{managed'), 'the notes field must not be gated on managed');
+  // The seeding: a managed seat's notes default to the package explanation.
+  const archetype = PEER_SEAT_ARCHETYPES.find(a => a.id === 'standard-coding');
+  assert.equal(peerSeatFromArchetype(archetype).notes, archetype.notes,
+    'peerSeatFromArchetype must keep seeding the package explanation');
+  // The remaining managed locks: reserved id, feature controls, token lists.
+  assert.ok(
+    poolView.includes('Reserved standard-seat id — package-managed'),
+    'managed seat id must stay display-only',
+  );
+  assert.ok(poolView.includes('{managed ? null : featureDefs.defs.length > 0 ? ('),
+    'managed feature controls must stay locked');
+  assert.ok(poolView.includes(') : managed ? ('), 'managed token lists must stay read-only');
+});
+
 test('draft uids are fresh per seat, ignored by form equality, and copied fresh', () => {
   const form = peerPoolForm({
     version: 1, policy: 'p', quotaFallback: { enabled: false, optionId: null },

@@ -328,6 +328,13 @@ test('reserved ids are exact-match; conflicts compare unordered sets', () => {
   assert.deepEqual(conflict.suitableFor.missing, ['work:design', 'domain:security']);
   assert.deepEqual(conflict.suitableFor.extra, []);
   assert.deepEqual(conflict.avoidFor.extra, ['legacy-tag']);
+  // Notes are a local-only user annotation — never part of the divergence diff.
+  assert.equal(seatTokenConflict({
+    id: 'security-review',
+    suitableFor: standard.suitableFor,
+    avoidFor: standard.avoidFor,
+    notes: 'user-overwritten local note',
+  }), null, 'stored notes are not compared as divergence');
   // A custom id keeps free strings even when they match standard tokens.
   assert.equal(seatTokenConflict({ id: 'my-security-review', suitableFor: ['work:verify'], avoidFor: [] }), null);
   assert.equal(seatTokenConflict({ id: 'my-security-review', suitableFor: standard.suitableFor, avoidFor: standard.avoidFor }), null,
