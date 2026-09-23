@@ -168,6 +168,15 @@ sessions keep their provider process until they finish; launch shim paths stay
 stable across candidates. Rebinding is idempotent: activating the same
 candidate twice is a `no-op`.
 
+Family binaries follow verified stable CLI aliases from the daemon's PATH.
+Codex, Pi, Devin and Claude updates behind those aliases reach future managed
+launches without changing SLP's provider entries. The model picker refreshes
+the host's provider catalog when it loads or opens. An older SLP binding that
+stored a versioned binary path needs one reactivation to move onto the alias;
+an administrator-supplied direct release path intentionally pins that
+activation. Saved Supervisor/Lead choices and Peer pool model IDs remain
+Human-controlled; discovering a new model does not select it automatically.
+
 Directory installs are reloaded instead:
 
 ```bash

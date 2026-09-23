@@ -21,6 +21,9 @@ export interface ProviderCatalogApi {
       entries?: ProviderSnapshotEntryLike[];
       error?: string | null;
     }>;
+    // A plain snapshot may be cached from before a CLI self-update. Refresh
+    // is a host catalog operation, not an SLP configuration mutation.
+    refresh?(options?: { cwd?: string; providers?: string[] }): Promise<unknown>;
     listModels(provider: string, options?: { cwd?: string }): Promise<{
       models?: {
         id: string; label?: string;
@@ -122,8 +125,24 @@ export async function loadCatalog(input: CatalogRequest, paseo: ProviderCatalogA
   if (!snapshotUnsupported) {
     if (typeof paseo.providers.snapshot === "function") {
       try {
+        // The first picker query for a scope has no model. Ask the daemon to
+        // rediscover this managed provider before reading its snapshot, so a
+        // changed CLI behind a stable alias is visible when SLP opens. Feature
+        // queries reuse that catalog instead of repeating a costly refresh.
+        let refreshError: string | null = null;
+        if (!input.model && typeof paseo.providers.refresh === "function") {
+          try {
+            await paseo.providers.refresh({
+              ...(input.cwd ? { cwd: input.cwd } : {}),
+              providers: [preferredId],
+            });
+          } catch (error) {
+            refreshError = error instanceof Error ? error.message : String(error);
+          }
+        }
         const snapshot = await paseo.providers.snapshot(input.cwd ? { cwd: input.cwd } : undefined);
         const errors: string[] = [];
+        if (refreshError) errors.push(`provider refresh failed: ${refreshError}`);
         if (snapshot.error) errors.push(snapshot.error);
         const entry = pickSnapshotEntry(snapshot.entries ?? [], preferredId, provider);
         if (!entry) {

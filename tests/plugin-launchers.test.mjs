@@ -214,7 +214,7 @@ test('resolver: probes strip Paseo/Electron runtime-control vars and NODE_OPTION
   assert.equal(probeEnv.KEEP_ME, 'yes', 'unrelated environment is preserved');
 });
 
-test('resolver: family binaries resolve explicit > prior > PATH; missing stays unavailable', async t => {
+test('resolver: family binaries resolve explicit > PATH > prior; missing stays unavailable', async t => {
   const { request, stableRoot } = resolveDeps(t);
   const dir = tmp(t);
   const node = join(dir, 'node');
@@ -244,6 +244,14 @@ test('resolver: family binaries resolve explicit > prior > PATH; missing stays u
   assert.deepEqual(result.binaries.pi, { available: true, path: priorPi, version: 'pi 1.2.3' });
   assert.deepEqual(result.binaries.devin, { available: true, path: pathDevin, version: 'devin 4.5.6' });
   assert.deepEqual(result.binaries.claude, { available: false, path: null, version: null });
+
+  // A newly installed PATH binary replaces a still-working old receipt pin
+  // on re-activation. If PATH has no candidate, the prior remains usable.
+  const preferred = await resolver.resolve({
+    ...request, nodePath: node,
+    prior: { binaries: { devin: { available: true, path: priorPi, version: 'pi 1.2.3' } } },
+  });
+  assert.equal(preferred.binaries.devin.path, pathDevin);
 
   // Explicit binary that is actually the Node executable is an error.
   await assert.rejects(
@@ -283,16 +291,17 @@ test('resolver: _versions layout records the vendor current handle, healing stal
   symlinkSync(tracked, join(shimDir, 'devin'));
   const { run, calls } = fakeRun({
     [node]: nodeOk.handle,
+    [join(shimDir, 'devin')]: versionOut('devin 3000.11.1'),
     [tracked]: versionOut('devin 3000.11.1'),
     [stale]: versionOut('devin 3000.10.31'),
     [fresh]: versionOut('devin 3000.11.1'),
   });
   const resolver = createExecutableResolver({ run, env: { PATH: shimDir } });
 
-  // PATH resolution realpaths onto the versioned file but records `current`.
+  // PATH resolution preserves the stable PATH alias.
   const result = await resolver.resolve({ ...request, nodePath: node });
-  assert.deepEqual(result.binaries.devin, { available: true, path: tracked, version: 'devin 3000.11.1' });
-  assert.ok(calls.some(call => call.file === tracked), 'probe runs through the current handle');
+  assert.deepEqual(result.binaries.devin, { available: true, path: join(shimDir, 'devin'), version: 'devin 3000.11.1' });
+  assert.ok(calls.some(call => call.file === join(shimDir, 'devin')), 'probe runs through the stable alias');
 
   // A prior pin on a superseded release still heals to `current` on rebind —
   // the versioned file keeps probing fine, so without the handle the stale
@@ -302,8 +311,16 @@ test('resolver: _versions layout records the vendor current handle, healing stal
     nodePath: node,
     prior: { binaries: { devin: { available: true, path: stale, version: 'devin 3000.10.31' } } },
   });
-  assert.equal(rebound.binaries.devin.path, tracked);
+  assert.equal(rebound.binaries.devin.path, join(shimDir, 'devin'));
   assert.equal(rebound.binaries.devin.version, 'devin 3000.11.1');
+
+  // Without a PATH alias, the known vendor current handle heals the pin.
+  const noPath = createExecutableResolver({ run, env: { PATH: '' } });
+  const healed = await noPath.resolve({
+    ...request, nodePath: node,
+    prior: { binaries: { devin: { available: true, path: stale, version: 'devin 3000.10.31' } } },
+  });
+  assert.equal(healed.binaries.devin.path, tracked);
 
   // A `_versions` path with no `current` sibling keeps the realpath pin.
   const orphanDir = join(dir, 'orphan', '_versions', '9.9.9', 'bin');
@@ -316,6 +333,95 @@ test('resolver: _versions layout records the vendor current handle, healing stal
   });
   const orphanRes = await orphanRun.resolve({ ...request, nodePath: node, binaries: { codex: orphan } });
   assert.equal(orphanRes.binaries.codex.path, orphan);
+});
+
+test('resolver: Codex standalone releases follow the verified current handle on rebind', async t => {
+  const { request } = resolveDeps(t);
+  const dir = tmp(t);
+  const node = join(dir, 'node');
+  mkExe(node);
+  const standalone = join(dir, 'standalone');
+  const releases = join(standalone, 'releases');
+  const oldDir = join(releases, '0.154.0', 'bin');
+  const newDir = join(releases, '0.155.1', 'bin');
+  mkdirSync(oldDir, { recursive: true });
+  mkdirSync(newDir, { recursive: true });
+  const oldCodex = join(oldDir, 'codex');
+  const newCodex = join(newDir, 'codex');
+  mkExe(oldCodex);
+  mkExe(newCodex);
+  symlinkSync(join(releases, '0.155.1'), join(standalone, 'current'));
+  const currentCodex = join(standalone, 'current', 'bin', 'codex');
+  const binDir = join(dir, 'bin');
+  mkdirSync(binDir);
+  symlinkSync(currentCodex, join(binDir, 'codex'));
+  const { run, calls } = fakeRun({
+    [node]: nodeOk.handle,
+    [join(binDir, 'codex')]: versionOut('codex-cli 0.155.1'),
+    [oldCodex]: versionOut('codex-cli 0.154.0'),
+    [newCodex]: versionOut('codex-cli 0.155.1'),
+    [currentCodex]: versionOut('codex-cli 0.155.1'),
+  });
+  const resolver = createExecutableResolver({ run, env: { PATH: binDir } });
+  const initial = await resolver.resolve({ ...request, nodePath: node });
+  assert.deepEqual(initial.binaries.codex, {
+    available: true, path: join(binDir, 'codex'), version: 'codex-cli 0.155.1',
+  });
+  const rebound = await resolver.resolve({
+    ...request,
+    nodePath: node,
+    prior: { binaries: { codex: { available: true, path: oldCodex, version: 'codex-cli 0.154.0' } } },
+  });
+  assert.deepEqual(rebound.binaries.codex, initial.binaries.codex);
+  assert.ok(calls.some(call => call.file === join(binDir, 'codex')));
+  const noPath = createExecutableResolver({ run, env: { PATH: '' } });
+  const healed = await noPath.resolve({
+    ...request, nodePath: node,
+    prior: { binaries: { codex: { available: true, path: oldCodex, version: 'codex-cli 0.154.0' } } },
+  });
+  assert.equal(healed.binaries.codex.path, currentCodex);
+  const explicitPin = await resolver.resolve({
+    ...request, nodePath: node, binaries: { codex: oldCodex },
+  });
+  assert.deepEqual(explicitPin.binaries.codex, {
+    available: true, path: oldCodex, version: 'codex-cli 0.154.0',
+  });
+});
+
+test('resolver: stable PATH aliases follow updates for all four families', async t => {
+  const { request } = resolveDeps(t);
+  const dir = tmp(t);
+  const node = join(dir, 'node');
+  mkExe(node);
+  const bin = join(dir, 'bin');
+  mkdirSync(bin);
+  const handlers = { [node]: nodeOk.handle };
+  for (const family of FAMILIES) {
+    const oldPath = join(dir, family, 'v1', family);
+    const newPath = join(dir, family, 'v2', family);
+    mkdirSync(join(dir, family, 'v1'), { recursive: true });
+    mkdirSync(join(dir, family, 'v2'), { recursive: true });
+    mkExe(oldPath);
+    mkExe(newPath);
+    const alias = join(bin, family);
+    symlinkSync(oldPath, alias);
+    handlers[alias] = () => versionOut(`${family} ${realpathSync(alias) === oldPath ? 'v1' : 'v2'}`);
+  }
+  const resolver = createExecutableResolver({ run: fakeRun(handlers).run, env: { PATH: bin } });
+  const before = await resolver.resolve({ ...request, nodePath: node });
+  for (const family of FAMILIES) {
+    assert.deepEqual(before.binaries[family], {
+      available: true, path: join(bin, family), version: `${family} v1`,
+    });
+    rmSync(join(bin, family));
+    symlinkSync(join(dir, family, 'v2', family), join(bin, family));
+  }
+  const after = await resolver.resolve({ ...request, nodePath: node, prior: before });
+  for (const family of FAMILIES) {
+    assert.deepEqual(after.binaries[family], {
+      available: true, path: join(bin, family), version: `${family} v2`,
+    });
+  }
 });
 
 test('resolver: explicit invalid family binary is a conflict, not silent unavailability', async t => {

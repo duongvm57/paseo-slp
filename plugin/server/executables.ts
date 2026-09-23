@@ -1,8 +1,10 @@
 // §6: Node and family-binary resolution for the manager plugin.
 //
 // Resolution order (Node): explicit nodePath -> prior verified receipt path ->
-// executable `node` entries in absolute PATH directories, in order. An invalid
-// explicit path is an error, never a fallback trigger. process.execPath is
+// executable `node` entries in absolute PATH directories, in order.
+// Family binaries use explicit -> current daemon PATH -> prior verified path
+// so legacy realpath pins migrate to stable aliases at the next activation.
+// An invalid explicit path is an error, never a fallback trigger. process.execPath is
 // never a candidate (it may be Electron); no login shells, version managers or
 // installs. Every accepted executable is probe-verified and must resolve to an
 // absolute existing executable outside the SLP runtime root and the managed
@@ -264,33 +266,35 @@ async function resolveNode(request: ExecutableRequest, ctx: Ctx): Promise<Resolv
   );
 }
 
-/** Self-updating CLIs version under `<root>/_versions/<ver>/` (Devin CLI's
- *  layout). Realpath pins one release forever — and a still-working prior path
- *  wins re-resolution, so an upstream update never reaches managed providers
- *  (observed: pinned devin 3000.10.31 kept serving a pre-thinking-split ACP
- *  catalog after 3000.11.1 installed). When the vendor's `_versions/current`
- *  handle exists for the same binary tail and resolves inside the same
- *  versions root, record the handle instead: still an absolute vendor-owned
- *  path no PATH edit can move, and the updater re-points it on each release. */
+/** Follow verified vendor-owned current handles for self-updating CLIs.
+ *  Devin uses `_versions/<ver>/bin`; standalone Codex uses
+ *  `standalone/releases/<ver>/bin` with `standalone/current`. A realpath pin
+ *  on a prior release otherwise keeps answering an old model catalog even
+ *  after Paseo's base provider discovers the updated binary. */
 async function vendorCurrentHandle(real: string): Promise<string | null> {
-  const marker = `${sep}_versions${sep}`;
-  const at = real.indexOf(marker);
-  if (at < 0) return null;
-  const root = real.slice(0, at + marker.length);
-  const tail = real.slice(at + marker.length);
-  const slash = tail.indexOf(sep);
-  if (slash < 0) return null;
-  const handle = join(root, "current", tail.slice(slash + 1));
-  try {
-    if (!isInside(await realpath(handle), root)) return null;
-    return handle;
-  } catch {
-    return null;
+  const layouts = [
+    { marker: `${sep}_versions${sep}`, currentRoot: (root: string) => join(root, "current") },
+    { marker: `${sep}standalone${sep}releases${sep}`, currentRoot: (root: string) => join(root, "..", "current") },
+  ];
+  for (const layout of layouts) {
+    const at = real.indexOf(layout.marker);
+    if (at < 0) continue;
+    const releasesRoot = real.slice(0, at + layout.marker.length);
+    const tail = real.slice(at + layout.marker.length);
+    const slash = tail.indexOf(sep);
+    if (slash < 0) continue;
+    if (layout.marker.includes("standalone") && !tail.endsWith(`${sep}bin${sep}codex`)) continue;
+    const handle = join(layout.currentRoot(releasesRoot), tail.slice(slash + 1));
+    try {
+      if (isInside(await realpath(handle), releasesRoot)) return handle;
+    } catch {
+      // Missing or broken current handle: retain the verified release path.
+    }
   }
+  return null;
 }
 
-async function probeBinary(real: string, ctx: Ctx): Promise<BinaryResolution> {
-  const tracked = (await vendorCurrentHandle(real)) ?? real;
+async function probeBinary(tracked: string, ctx: Ctx): Promise<BinaryResolution> {
   const result = await ctx.run(tracked, ["--version"], {
     env: ctx.cleanEnv,
     timeoutMs: PROBE_TIMEOUT_MS,
@@ -320,13 +324,21 @@ function rejectBinary(real: string, node: ResolvedNode, ctx: Ctx): string | null
   return null;
 }
 
-async function checkBinary(path: string, node: ResolvedNode, ctx: Ctx): Promise<BinaryResolution> {
+async function checkBinary(
+  path: string,
+  node: ResolvedNode,
+  ctx: Ctx,
+  followVendorCurrent = true,
+): Promise<BinaryResolution> {
   if (!isAbsolute(path)) throw new Error("path is not absolute");
   const real = await executableRealpath(path);
   if (real === null) throw new Error("not an existing executable file");
   const rejected = rejectBinary(real, node, ctx);
   if (rejected) throw new Error(rejected);
-  return probeBinary(real, ctx);
+  // Preserve a validated stable alias. All four providers may update the
+  // target of their PATH symlink; realpath would freeze an old release.
+  const tracked = path === real && followVendorCurrent ? (await vendorCurrentHandle(real)) ?? real : path;
+  return probeBinary(tracked, ctx);
 }
 
 const UNAVAILABLE: BinaryResolution = { available: false, path: null, version: null };
@@ -340,7 +352,7 @@ async function resolveBinary(
   const explicit = request.binaries?.[family];
   if (explicit !== undefined) {
     try {
-      return await checkBinary(explicit, node, ctx);
+      return await checkBinary(explicit, node, ctx, false);
     } catch (error) {
       throw new OperationConflict(
         "EXECUTABLE_UNAVAILABLE",
@@ -350,22 +362,25 @@ async function resolveBinary(
       );
     }
   }
-  const prior = request.prior?.binaries?.[family];
-  if (prior?.available === true) {
-    try {
-      return await checkBinary(prior.path, node, ctx);
-    } catch {
-      // Previously verified path moved or changed; fall through to PATH.
-    }
-  }
+  // Prefer the daemon's current PATH alias to migrate legacy receipts that
+  // pinned a versioned realpath. Once recorded, the alias follows future
+  // vendor updates without another SLP activation.
   for (const dir of pathDirs(ctx.env)) {
     const candidate = join(dir, family);
     const real = await executableRealpath(candidate);
     if (real === null || rejectBinary(real, node, ctx)) continue;
     try {
-      return await probeBinary(real, ctx);
+      return await checkBinary(candidate, node, ctx);
     } catch {
       continue;
+    }
+  }
+  const prior = request.prior?.binaries?.[family];
+  if (prior?.available === true) {
+    try {
+      return await checkBinary(prior.path, node, ctx);
+    } catch {
+      // The last verified path is unavailable too.
     }
   }
   return UNAVAILABLE;
