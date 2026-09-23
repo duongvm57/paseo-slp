@@ -489,7 +489,7 @@ export const CatalogSelectOption = z.object({
 }).strict();
 /** One catalog model: the picker identity plus the thinking options the
  *  model declares and its declared default option id. Providers that bake
- *  thinking into model ids (devin) declare an empty/absent list. */
+ *  thinking into model ids declare an empty/absent list. */
 export const CatalogModel = CatalogOption.extend({
   thinkingOptions: z.array(CatalogSelectOption).optional(),
   defaultThinkingOptionId: z.string().min(1).optional(),

@@ -263,6 +263,61 @@ test('resolver: family binaries resolve explicit > prior > PATH; missing stays u
   assert.equal(res.binaries.claude.available, false);
 });
 
+test('resolver: _versions layout records the vendor current handle, healing stale prior pins', async t => {
+  const { request } = resolveDeps(t);
+  const dir = tmp(t);
+  const node = join(dir, 'node');
+  mkExe(node);
+  // Devin-style self-updating layout: _versions/<ver>/bin/<bin>, `current` symlink.
+  const versions = join(dir, 'cli', '_versions');
+  mkdirSync(join(versions, '3000.10.31', 'bin'), { recursive: true });
+  mkdirSync(join(versions, '3000.11.1', 'bin'), { recursive: true });
+  const stale = join(versions, '3000.10.31', 'bin', 'devin');
+  const fresh = join(versions, '3000.11.1', 'bin', 'devin');
+  mkExe(stale);
+  mkExe(fresh);
+  symlinkSync('3000.11.1', join(versions, 'current'));
+  const tracked = join(versions, 'current', 'bin', 'devin');
+  const shimDir = join(dir, 'pathbin');
+  mkdirSync(shimDir);
+  symlinkSync(tracked, join(shimDir, 'devin'));
+  const { run, calls } = fakeRun({
+    [node]: nodeOk.handle,
+    [tracked]: versionOut('devin 3000.11.1'),
+    [stale]: versionOut('devin 3000.10.31'),
+    [fresh]: versionOut('devin 3000.11.1'),
+  });
+  const resolver = createExecutableResolver({ run, env: { PATH: shimDir } });
+
+  // PATH resolution realpaths onto the versioned file but records `current`.
+  const result = await resolver.resolve({ ...request, nodePath: node });
+  assert.deepEqual(result.binaries.devin, { available: true, path: tracked, version: 'devin 3000.11.1' });
+  assert.ok(calls.some(call => call.file === tracked), 'probe runs through the current handle');
+
+  // A prior pin on a superseded release still heals to `current` on rebind —
+  // the versioned file keeps probing fine, so without the handle the stale
+  // version would win forever.
+  const rebound = await resolver.resolve({
+    ...request,
+    nodePath: node,
+    prior: { binaries: { devin: { available: true, path: stale, version: 'devin 3000.10.31' } } },
+  });
+  assert.equal(rebound.binaries.devin.path, tracked);
+  assert.equal(rebound.binaries.devin.version, 'devin 3000.11.1');
+
+  // A `_versions` path with no `current` sibling keeps the realpath pin.
+  const orphanDir = join(dir, 'orphan', '_versions', '9.9.9', 'bin');
+  mkdirSync(orphanDir, { recursive: true });
+  const orphan = join(orphanDir, 'codex');
+  mkExe(orphan);
+  const orphanRun = createExecutableResolver({
+    run: fakeRun({ [node]: nodeOk.handle, [orphan]: versionOut('codex 9.9.9') }).run,
+    env: { PATH: '' },
+  });
+  const orphanRes = await orphanRun.resolve({ ...request, nodePath: node, binaries: { codex: orphan } });
+  assert.equal(orphanRes.binaries.codex.path, orphan);
+});
+
 test('resolver: explicit invalid family binary is a conflict, not silent unavailability', async t => {
   const { request } = resolveDeps(t);
   const node = join(tmp(t), 'node');

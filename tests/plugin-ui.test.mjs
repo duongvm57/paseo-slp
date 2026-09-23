@@ -1829,9 +1829,14 @@ test('the catalog RPC rides providers.snapshot with legacy list calls kept', () 
   const source = readFileSync(join(root, 'plugin/server/provider-catalog.ts'), 'utf8');
   assert.ok(source.includes('providers.snapshot'), 'snapshot RPC missing');
   assert.ok(source.includes('paseo.providers.snapshot('), 'snapshot call missing');
-  // Legacy endpoints stay verbatim for pre-snapshot daemons.
-  assert.ok(source.includes('listModels(provider)'), 'legacy listModels path removed');
-  assert.ok(source.includes('listModes(provider)'), 'legacy listModes path removed');
+  // Legacy endpoints stay verbatim for pre-snapshot daemons — the shared
+  // per-provider listing helper is invoked on the family id.
+  assert.ok(source.includes('paseo.providers.listModels(providerId'), 'listModels call missing');
+  assert.ok(source.includes('paseo.providers.listModes(providerId'), 'listModes call missing');
+  assert.ok(source.includes('return listCatalog(provider)'), 'legacy family listing path removed');
+  // A snapshot entry caught mid-warmup resolves through those listings —
+  // "loading" must never reach the client as a cached terminal error.
+  assert.ok(source.includes('entry.status === "loading"'), 'loading fallback missing');
   // Probe-and-latch: no serverInfo accessor exists on PaseoApi, so the flag
   // must be the documented latch — and the comment must record why.
   assert.ok(source.includes('snapshotUnsupported'), 'capability latch missing');
