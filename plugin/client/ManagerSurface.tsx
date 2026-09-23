@@ -152,6 +152,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   // the managed provider id slp-<family>-<role>, so a supervisor and a peer
   // on the same family can report different catalogs.
   const [catalogs, setCatalogs] = useState<Partial<Record<string, CatalogResult>>>({});
+  const [catalogRevision, setCatalogRevision] = useState(0);
   const [catalogLoadingFor, setCatalogLoadingFor] = useState<string | null>(null);
   // Feature definitions depend on the selected model (the host requires a
   // provider/model draft) — cached per family|model|modeId key.
@@ -185,6 +186,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   const key = target ? targetKey(target) : null;
   const keyRef = useRef<string | null>(key);
   const autoLoadedFor = useRef<string | null>(null);
+  const refreshedActivation = useRef<string | null>(null);
 
   // Prefill the daemon home from the plugin process's own environment
   // (PASEO_HOME else ~/.paseo). A suggestion only — the §4 mapping
@@ -238,6 +240,25 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   }, [key, view.status, view.busy]);
 
   const statusView = view.status;
+
+  // Catalogs depend on the daemon and on the executable bound by activation.
+  // A successful rebind can change the model set under the same family|role
+  // key; stale cached options must not survive it.
+  useEffect(() => {
+    refreshedActivation.current = null;
+    setCatalogs({});
+    setFeatureSets({});
+    setCatalogRevision(current => current + 1);
+  }, [key]);
+  useEffect(() => {
+    const operation = statusView?.operation;
+    if (operation?.kind !== "activate" || !["succeeded", "no-op"].includes(operation.outcome)) return;
+    if (refreshedActivation.current === operation.operationId) return;
+    refreshedActivation.current = operation.operationId;
+    setCatalogs({});
+    setFeatureSets({});
+    setCatalogRevision(current => current + 1);
+  }, [key, statusView?.operation]);
 
   // The stale-guard predicates are shell-owned — they read keyRef so every
   // card hook gates its post-await writes against the DISPLAYED target, not
@@ -301,20 +322,25 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   // by a fresh RPC — a failed retry keeps the last error visible.
   const retryCatalog = async (family: FamilyName, role: RoleName) => {
     const scope = catalogScope(family, role);
+    const issueKey = keyRef.current;
     setCatalogLoadingFor(scope);
     try {
       const result = await callCatalog({
         schemaVersion: 1, family, role,
         ...(target ? { cwd: target.daemonHome } : {}),
       });
-      setCatalogs(current => ({ ...current, [scope]: result }));
+      if (keyRef.current === issueKey) setCatalogs(current => ({ ...current, [scope]: result }));
     } catch (error) {
-      setCatalogs(current => ({
-        ...current,
-        [scope]: { schemaVersion: 1, models: [], modes: [], features: [], error: errorMessage(error) },
-      }));
+      if (keyRef.current === issueKey) {
+        setCatalogs(current => ({
+          ...current,
+          [scope]: { schemaVersion: 1, models: [], modes: [], features: [], error: errorMessage(error) },
+        }));
+      }
     } finally {
-      setCatalogLoadingFor(current => (current === scope ? null : current));
+      if (keyRef.current === issueKey) {
+        setCatalogLoadingFor(current => (current === scope ? null : current));
+      }
     }
   };
 
@@ -358,7 +384,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the needed scope set
-  }, [neededKey]);
+  }, [neededKey, catalogRevision]);
 
   // Feature definitions need a model — fetch per role's routing-form
   // family|role|model|modeId pick (features resolve against the managed
@@ -405,7 +431,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the needed feature set
-  }, [neededFeaturesKey]);
+  }, [neededFeaturesKey, catalogRevision]);
   const retryFeatureSet = async (key: string) => {
     setFeaturesLoadingFor(key);
     await fetchFeatureSet(key);
@@ -761,6 +787,7 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
           routing={routing}
           catalogs={catalogs}
           catalogLoadingFor={catalogLoadingFor}
+          retryCatalog={retryCatalog}
           retryFeatureSet={retryFeatureSet}
         />
         </View>

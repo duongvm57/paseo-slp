@@ -63,6 +63,48 @@ test('snapshot path: managed-id entry wins, resolvedProvider recorded, models fi
   assert.equal(calls.listModes, 0);
 });
 
+test('picker catalog refreshes each managed provider before reading models after a CLI update', async () => {
+  for (const family of ['codex', 'pi', 'devin', 'claude']) {
+    const loadCatalog = await freshCatalog();
+    let model = 'old-model';
+    const calls = [];
+    const { paseo } = fakePaseo({
+      refresh: async options => {
+        calls.push(['refresh', options]);
+        model = 'new-model';
+      },
+      snapshot: async () => {
+        calls.push(['snapshot']);
+        return {
+          entries: [{ provider: `slp-${family}-peer`, status: 'ready', models: [{ id: model }], modes: [] }],
+          error: null,
+        };
+      },
+    });
+    const out = await loadCatalog({ schemaVersion: 1, family, role: 'peer' }, paseo);
+    assert.deepEqual(out.models.map(entry => entry.id), ['new-model'], family);
+    assert.deepEqual(calls[0], ['refresh', { providers: [`slp-${family}-peer`] }], family);
+    assert.deepEqual(calls[1], ['snapshot'], family);
+
+    calls.length = 0;
+    await loadCatalog({ schemaVersion: 1, family, role: 'peer', model: 'new-model' }, paseo);
+    assert.deepEqual(calls, [['snapshot']], 'feature lookup reuses refreshed catalog');
+  }
+});
+
+test('a failed host refresh still returns the snapshot with an actionable error', async () => {
+  const loadCatalog = await freshCatalog();
+  const { paseo } = fakePaseo({
+    refresh: async () => { throw new Error('refresh timed out'); },
+    snapshot: snapshotEntries([
+      { provider: 'slp-codex-peer', status: 'ready', models: [{ id: 'gpt-6-luna' }], modes: [] },
+    ]),
+  });
+  const result = await loadCatalog({ schemaVersion: 1, family: 'codex', role: 'peer' }, paseo);
+  assert.deepEqual(result.models.map(model => model.id), ['gpt-6-luna']);
+  assert.match(result.error, /provider refresh failed: refresh timed out/);
+});
+
 test('snapshot path: base family entry is the fallback when the managed id is absent', async () => {
   const loadCatalog = await freshCatalog();
   const { paseo } = fakePaseo({

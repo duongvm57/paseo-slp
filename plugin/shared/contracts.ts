@@ -868,7 +868,7 @@ export interface ExecutableRequest {
   } | null;
 }
 export interface ExecutableResolver {
-  /** Resolution order per §6: explicit input → prior verified → PATH probe.
+  /** Node: explicit → prior → PATH. Family binaries: explicit → PATH → prior.
    * Every positive result is probe-verified; failures yield available:false
    * binaries or throw OperationConflict(EXECUTABLE_UNAVAILABLE) for Node. */
   resolve(request: ExecutableRequest): Promise<ExecutableResolution>;

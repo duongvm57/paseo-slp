@@ -301,13 +301,14 @@ export function Field({ colors, label, hint, value, onChangeText, placeholder, d
  *  label with a "Change model ⌄" link. Expanding opens the filter + option
  *  list IN PLACE without clearing the value, plus a "Provider default" entry
  *  and a manual-ID disclosure for ids the catalog doesn't list. */
-export function OptionPicker({ colors, label, hint, options, value, onChange, disabled, placeholder }: {
+export function OptionPicker({ colors, label, hint, options, value, onChange, onOpen, disabled, placeholder }: {
   colors: Colors;
   label: string;
   hint?: string;
   options: readonly CatalogOptionValue[];
   value: string;
   onChange(next: string): void;
+  onOpen?(): void;
   disabled?: boolean;
   placeholder?: string;
 }) {
@@ -334,7 +335,7 @@ export function OptionPicker({ colors, label, hint, options, value, onChange, di
       <Text style={[styles.fieldLabel, { color: colors.foregroundMuted }]}>{label}</Text>
       <View style={[styles.selectBox, { borderColor: colors.border, backgroundColor: colors.surface0 }]}>
         <Pressable
-          onPress={() => { setOpen(current => !current); setQuery(""); }}
+          onPress={() => { if (!open) onOpen?.(); setOpen(current => !current); setQuery(""); }}
           disabled={disabled}
           accessibilityRole="button"
           accessibilityLabel={open ? `Close ${label}` : `Change ${label.toLowerCase()}`}

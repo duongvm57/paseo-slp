@@ -1113,6 +1113,7 @@ export function PeerPoolCard({ colors, target, compact, statusView, jev, pool, a
                         options={seatCatalog.models}
                         value={seat.model}
                         onChange={setSeatField(index, "model")}
+                        onOpen={() => { if (seat.family !== "") void retryCatalog(seat.family, "peer"); }}
                         disabled={disabled}
                         placeholder="Filter models…"
                       />
@@ -1127,6 +1128,14 @@ export function PeerPoolCard({ colors, target, compact, statusView, jev, pool, a
                         disabled={disabled}
                       />
                     )}
+                    {seatCatalog?.models.length === 0 && seat.family !== "" ? (
+                      <Button
+                        colors={colors}
+                        label="Refresh models"
+                        onPress={() => { if (seat.family !== "") void retryCatalog(seat.family, "peer"); }}
+                        disabled={disabled || catalogLoadingFor === seatScope}
+                      />
+                    ) : null}
                     {seatCatalog && seatCatalog.modes.length > 0 ? (
                       // §7.4.B — Mode is a user pick on both seat kinds: the
                       // same catalog picker and free-text fallback as Custom.

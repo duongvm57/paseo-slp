@@ -61,6 +61,11 @@ additionally verifies file modes. The shell installer and installed CLI share
 the standalone installation code. The plugin uses the documented config.patch
 transaction and stable executable shims.
 
+Managed family binaries use validated daemon PATH aliases when available, so
+Codex, Pi, Devin and Claude updates can reach future launches. Existing
+version-pinned bindings migrate on the next authorized activation; the SLP
+picker refreshes the host catalog before presenting models.
+
 Three roles remain Supervisor, Lead and Peer. Only two saved profiles are managed:
 slp-supervisor and slp-lead. The twelve providers remain slp-codex-{role},
 slp-pi-{role}, slp-devin-{role} and slp-claude-{role}; Peer chooses runtime from

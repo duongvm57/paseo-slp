@@ -19,6 +19,7 @@ import type {
   TargetValue,
 } from "../../shared/contracts.ts";
 import { FAMILY_LABEL, FAMILY_PICKER_ORDER } from "../../shared/families.ts";
+import type { RoleName } from "../../shared/families.ts";
 import {
   activationLabel,
   applyFamilyChange,
@@ -294,13 +295,14 @@ export function useRoutingCard({ target, targetKey, isCurrentKey, statusView, ca
 
 export type RoutingCardState = ReturnType<typeof useRoutingCard>;
 
-export function RoutingCard({ colors, target, statusView, routing, catalogs, catalogLoadingFor, retryFeatureSet }: {
+export function RoutingCard({ colors, target, statusView, routing, catalogs, catalogLoadingFor, retryCatalog, retryFeatureSet }: {
   colors: Colors;
   target: TargetValue | null;
   statusView: StatusResult | null;
   routing: RoutingCardState;
   catalogs: Partial<Record<string, CatalogResult>>;
   catalogLoadingFor: string | null;
+  retryCatalog: (family: FamilyName, role: RoleName) => Promise<unknown>;
   retryFeatureSet: (key: string) => Promise<unknown>;
 }) {
   const [profilePanelWide, setProfilePanelWide] = useState(false);
@@ -365,6 +367,7 @@ export function RoutingCard({ colors, target, statusView, routing, catalogs, cat
                 options={roleCatalog.models}
                 value={form.model}
                 onChange={routing.setField(role, "model")}
+                onOpen={() => { void retryCatalog(form.family, role); }}
                 disabled={disabled}
                 placeholder="Filter models…"
               />
@@ -379,6 +382,14 @@ export function RoutingCard({ colors, target, statusView, routing, catalogs, cat
                 disabled={disabled}
               />
             )}
+            {roleCatalog?.models.length === 0 ? (
+              <Button
+                colors={colors}
+                label="Refresh models"
+                onPress={() => { void retryCatalog(form.family, role); }}
+                disabled={disabled || catalogLoadingFor === catalogScope(form.family, role)}
+              />
+            ) : null}
             {roleCatalog && roleCatalog.modes.length > 0 ? (
               <View style={styles.field}>
                 <Text style={[styles.legend, { color: colors.foregroundMuted }]}>Mode</Text>

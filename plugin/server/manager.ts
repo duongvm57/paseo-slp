@@ -890,7 +890,8 @@ export function createManager(deps: ManagerDeps): Manager {
       if (!receipt) throw new Error("receipt vanished");
       const binding = receipt.binding;
 
-      // 1. Resolve executables (explicit → prior → PATH probe).
+      // 1. Resolve Node (explicit → prior → PATH) and family binaries
+      //    (explicit → current PATH alias → prior).
       const resolution = await deps.executables.resolve({
         daemonHome: ctx.canonicalHome,
         stableRoot: ctx.stableRoot,
