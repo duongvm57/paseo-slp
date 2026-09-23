@@ -518,13 +518,18 @@ persist.
 Dữ liệu ra ngoài và chi phí: một lượt đánh giá shadow gửi nội dung
 brief/handback/room-message đã capture tới Jev endpoint đã cấu hình, nghĩa là
 giao tiếp đó rời khỏi host và mỗi lượt đánh giá là một provider call trả
-phí. Coverage provider lấy từ fixture trên cả bốn family SLP
-(codex/pi/devin/claude); trên devin, bản ghi upstream drop body của MCP
-result nên evidence giao hàng send yếu hơn — result không quan sát được được
-ghi là uncertain, không bao giờ là confirmed. Các case đang mở và hàng đợi
-event là process-local: restart plugin không replay các turn đã lỡ, chỉ
-ring metadata tồn tại (`state/supervision-cases.json`, ≤200 mục hoặc 30
-ngày).
+phí. Coverage provider: chỉ codex có send shape đã verify trên timeline
+thật; fixture pi, devin và claude là mapper-derived nên send của chúng bị
+demote thành uncertain (`family-shape-unverified`) và mọi case của các
+family đó giữ `unknown` tới khi có fixture timeline thật. Trên devin, bản
+ghi upstream còn drop body của MCP result nên evidence giao hàng vẫn yếu
+hơn cả sau khi fixture được verify. Trên host này
+`report-route-unverifiable` luôn được set — không có report-recipient
+signal đọc được bằng máy — nên hiện mọi case resolve `unknown` trước cả
+Jev call; xem open decision về structured report-recipient label. Các case
+đang mở và hàng đợi event là process-local: restart plugin không replay
+các turn đã lỡ, chỉ ring metadata tồn tại (`state/supervision-cases.json`,
+≤200 mục hoặc 30 ngày).
 
 Mode `notify` hợp lệ về schema nhưng không có đường delivery trong build
 này — notification là một gate Human riêng. Validation E2E live chưa chạy;

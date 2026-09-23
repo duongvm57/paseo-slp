@@ -100,8 +100,8 @@
         "sendAgentPrompt": true,
         "recipientAgentId": "22222222-2222-4222-8222-222222222222",
         "prompt": "Sanitized fixture prompt — a Peer report or Lead instruction body appears here verbatim. No real session content.",
-        "confirmed": true,
-        "successEvidence": "detail.output.details.mcpResult.structuredContent.success === true with detail.output.isError === false",
+        "confirmed": false,
+        "successEvidence": "shape is mapper-derived, never observed on a real daemon timeline — even with detail.output.details.mcpResult.structuredContent.success === true the send demotes to the uncertain lane with family-shape-unverified; only codex's verified shape confirms",
         "caveat": "input.args is a JSON-encoded string, not an object — a second JSON.parse is required; malformed or non-object args stay unknown"
       }
     }

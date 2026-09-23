@@ -224,6 +224,25 @@ test('contribute() registers the RPCs plus the two before-hooks, cleanup unregis
   assert.doesNotThrow(() => cleanup(), 'cleanup must be idempotent');
 });
 
+test('contribute() leaves the shadow observer inert when the served home is only a default guess', async t => {
+  const contribute = await importContribute(t);
+  // No PASEO_HOME export → detectDaemonHome() answers source "default" and
+  // the observer must stay null: a default-guessed home is never observed
+  // (spec §Configuration — a prefill is not proof of host-home mapping).
+  const prevHome = process.env.PASEO_HOME;
+  delete process.env.PASEO_HOME;
+  t.after(() => { if (prevHome !== undefined) process.env.PASEO_HOME = prevHome; });
+  const onHooks = [];
+  const server = {
+    handle() {},
+    before() { return () => {}; },
+    on(name) { onHooks.push(name); return () => {}; },
+  };
+  const cleanup = contribute(server);
+  assert.deepEqual(onHooks, [], 'no lifecycle hooks register without a verified served home');
+  cleanup();
+});
+
 // ---------------------------------------------------------------------------
 // (b2) the catalog RPC maps real model descriptors — thinking options included
 // ---------------------------------------------------------------------------

@@ -37,6 +37,9 @@ export const VISIBILITY = {
   recipientInactive: "recipient-inactive",
   leadStartUnmatched: "lead-start-unmatched",
   reportRouteUnverifiable: "report-route-unverifiable",
+  familyShapeUnverified: "family-shape-unverified",
+  noCommunication: "no-observable-communication",
+  capturePaused: "capture-paused",
   queueOverflow: "queue-overflow",
   caseCeiling: "case-ceiling",
   evidenceOversize: "evidence-oversize",
@@ -47,9 +50,12 @@ export const VISIBILITY = {
 
 /** A parsed send_agent_prompt call. `confirmed` requires the family's
  *  strongest available success evidence (structured MCP result where the
- *  normalized item carries one); devin's mapper drops the MCP result body,
- *  so its completed sends stay unconfirmed (spec: "a successful structured
- *  MCP result" is required — missing output is a visibility limit). */
+ *  normalized item carries one) AND a real-timeline-verified family shape:
+ *  only codex fixtures are observed from an actual Paseo timeline — pi,
+ *  devin and claude shapes are mapper-derived (tests/fixtures/supervision/
+ *  README.md), so their sends are demoted to the uncertain lane with
+ *  `family-shape-unverified` regardless of probe output (spec: "Unsupported
+ *  shapes stay unknown"; a successful structured MCP result is required). */
 export interface SendObservation {
   callId: string;
   recipient: string;
@@ -222,6 +228,11 @@ export function extractSends(
     return { sends, uncertainSends, flags: [...flags] };
   }
   const probe = PROBES[family];
+  // Only codex's normalized shape is verified against a real timeline —
+  // every other family's sends stay uncertain even when the probe's own
+  // success evidence is satisfied (spec: fixture collection precedes
+  // family support; unsupported/unverified shapes stay unknown).
+  const shapeVerified = family === "codex";
   for (const item of turn) {
     if (item.type !== "tool_call") continue;
     const result = probe(item);
@@ -230,8 +241,12 @@ export function extractSends(
       flags.add(result.flag);
       continue;
     }
-    (result.send.confirmed ? sends : uncertainSends).push(result.send);
-    if (!result.send.confirmed) flags.add(VISIBILITY.sendResultUnobservable);
+    const confirmed = result.send.confirmed && shapeVerified;
+    (confirmed ? sends : uncertainSends).push({ ...result.send, confirmed });
+    if (!confirmed) {
+      flags.add(VISIBILITY.sendResultUnobservable);
+      if (!shapeVerified) flags.add(VISIBILITY.familyShapeUnverified);
+    }
   }
   return { sends, uncertainSends, flags: [...flags] };
 }
@@ -284,8 +299,13 @@ export function capture(event: TurnEnded, activeLeadIds: ReadonlySet<string>): C
       };
     }
     if (brief === null || handback === null) {
-      if (extraction.sends.length === 0 && extraction.uncertainSends.length === 0) return null;
       flags.add(VISIBILITY.briefSourceAmbiguous);
+      // A completed Peer turn with NO observable communication is still a
+      // case — "absent observable communication is unknown", and the gap
+      // must be visible on the observation list, not silently dropped.
+      if (extraction.sends.length === 0 && extraction.uncertainSends.length === 0) {
+        flags.add(VISIBILITY.noCommunication);
+      }
     }
     if (brief !== null && ASSIGNMENT_FILE_RE.test(brief.text)) flags.add(VISIBILITY.briefAssignmentFile);
     // The assignment's report route is not machine-readable on this host —

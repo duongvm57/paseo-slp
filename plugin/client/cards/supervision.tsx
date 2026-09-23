@@ -97,6 +97,9 @@ const gateStatus = (jevView: JevCardState["view"]): { label: string; tone: "neut
   if (jevView.enabled !== true) return { label: "Jev disabled — supervision stays off", tone: "neutral" };
   if (jevView.provider === null) return { label: "Jev provider unset — supervision stays off", tone: "draft" };
   if (!jevView.hasKey) return { label: "Jev key missing — supervision stays off", tone: "draft" };
+  if (jevView.keyPermissionsOk === false) {
+    return { label: "Jev key file is group/other-accessible — supervision stays off (chmod 600)", tone: "bad" };
+  }
   if (jevView.capabilities?.supervision !== true) {
     return { label: "Jev supervision capability not armed — routes capture nothing", tone: "draft" };
   }
@@ -161,7 +164,7 @@ function ObservationList({ colors, data }: { colors: Colors; data: GetSupervisio
                 </Text>
               </View>
               <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-                case {shortId(entry.fingerprint)} · room {entry.counts.roomMessages} / uncertain {entry.counts.uncertainRoomMessages} / reports {entry.counts.reportMessages} / peer-sends {entry.counts.peerSends} · assessments {entry.assessmentsUsed}
+                case {shortId(entry.fingerprint)} · room {entry.counts.roomMessages} / uncertain {entry.counts.uncertainRoomMessages} / other-room {entry.counts.otherRoomMessages} / reports {entry.counts.reportMessages} / peer-sends {entry.counts.peerSends} · assessments {entry.assessmentsUsed}
               </Text>
               {entry.reason !== null ? (
                 <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>reason: {entry.reason}</Text>
@@ -173,7 +176,7 @@ function ObservationList({ colors, data }: { colors: Colors; data: GetSupervisio
               ) : null}
               {entry.lastAssessment !== null ? (
                 <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-                  last assessment {entry.lastAssessment.model}: brief={entry.lastAssessment.choices.leadBrief} handback={entry.lastAssessment.choices.peerHandback} handling={entry.lastAssessment.choices.leadHandling}
+                  last assessment {entry.lastAssessment.model}: brief={entry.lastAssessment.choices.leadBrief.choice}@{entry.lastAssessment.choices.leadBrief.confidence} handback={entry.lastAssessment.choices.peerHandback.choice}@{entry.lastAssessment.choices.peerHandback.confidence} handling={entry.lastAssessment.choices.leadHandling.choice}@{entry.lastAssessment.choices.leadHandling.confidence}
                 </Text>
               ) : null}
             </View>
@@ -358,10 +361,11 @@ export function SupervisionCard({ colors, target, jev, supervision }: {
           content leaves this host. Notification delivery is not implemented in this build.
         </Text>
         <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
-          Coverage is fixture-derived for codex/pi/devin/claude — on devin the send result body is
-          unobservable, so delivery evidence is weaker there. Each evaluation is a billable Jev call.
-          Open cases and the event queue are process-local: a plugin restart does not replay missed
-          turns — only the bounded metadata ring persists.
+          Only the codex send shape is verified against a real timeline; pi/devin/claude sends stay
+          uncertain, so their cases resolve unknown. On this host every case is unknown before any
+          Jev call (report-route-unverifiable). Each evaluation is a billable Jev call. Open cases
+          and the event queue are process-local: a plugin restart does not replay missed turns —
+          only the bounded metadata ring persists.
         </Text>
       </View>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>

@@ -133,29 +133,54 @@ export interface EvidencePayload {
   roomMessages: { callId: string; turnId: string | null; prompt: string }[];
   uncertainRoomMessages: { callId: string; turnId: string | null }[];
   reportMessages: { callId: string; turnId: string | null; recipient: string; prompt: string }[];
+  // Confirmed Lead sends to OTHER verified direct Peers of the same Lead —
+  // ids only, no bodies: observable room activity that can support a
+  // handling-drift judgment (the Lead was communicative but did not handle
+  // THIS handback). Never counts as handling for this case.
+  otherRoomMessages: { callId: string; turnId: string | null; recipient: string }[];
   peerSends: { callId: string; recipient: string; prompt: string }[];
   pendingWindowElapsed: boolean;
   flags: string[];
 }
 
 // Local unknown gates — evaluated before ANY Jev call. Each returns a reason
-// code; the first match wins and no HTTP request is made (spec: "if
-// communication is incomplete or chronology is uncertain, the case stays
-// unknown").
+// code; the first match wins and no HTTP request is made. Spec §Observation:
+// "overlap, missing/mismatched starts, unsupported provider tool shapes,
+// delivery ambiguity, or a failed recipient refresh remain uncertainty and
+// locally block both closure and alert" — and §Jev: "unknown report delivery
+// or chronology blocks handling closure and handling-drift alerts". Since
+// the verdict is a single value, any blocked axis resolves the whole case to
+// unknown. Because the report route is never machine-readable on this host,
+// `report-route-unverifiable` is always present → every case gates here and
+// Jev is never called until a structured report-recipient signal exists.
+const BLOCKING_FLAGS: readonly string[] = [
+  VISIBILITY.unsupportedFamily,
+  VISIBILITY.familyShapeUnverified,
+  VISIBILITY.briefAssignmentFile,
+  VISIBILITY.briefSourceAmbiguous,
+  VISIBILITY.peerTurnNotCompleted,
+  VISIBILITY.sendNotCompleted,
+  VISIBILITY.sendInputUnparsed,
+  VISIBILITY.sendResultUnobservable,
+  VISIBILITY.sendResultUnsuccessful,
+  VISIBILITY.recipientRefreshFailed,
+  VISIBILITY.recipientInactive,
+  VISIBILITY.leadStartUnmatched,
+  VISIBILITY.reportRouteUnverifiable,
+  VISIBILITY.noCommunication,
+  VISIBILITY.capturePaused,
+  VISIBILITY.queueOverflow,
+  VISIBILITY.credentialGuard,
+];
+
 export function localGate(evidence: EvidencePayload): string | null {
+  for (const flag of BLOCKING_FLAGS) {
+    if (evidence.flags.includes(flag) || evidence.brief?.visibility.includes(flag)) {
+      return flag;
+    }
+  }
   if (evidence.brief === null) return VISIBILITY.briefSourceAmbiguous;
-  if (evidence.flags.includes(VISIBILITY.briefAssignmentFile) ||
-      evidence.brief.visibility.includes(VISIBILITY.briefAssignmentFile)) {
-    return VISIBILITY.briefAssignmentFile;
-  }
-  if (evidence.flags.includes(VISIBILITY.briefSourceAmbiguous) ||
-      evidence.brief.visibility.includes(VISIBILITY.briefSourceAmbiguous)) {
-    return VISIBILITY.briefSourceAmbiguous;
-  }
-  if (evidence.uncertainRoomMessages.length > 0 ||
-      evidence.flags.includes(VISIBILITY.leadStartUnmatched)) {
-    return "chronology-or-delivery-uncertain";
-  }
+  if (evidence.uncertainRoomMessages.length > 0) return "chronology-or-delivery-uncertain";
   return null;
 }
 
@@ -180,7 +205,18 @@ export function decide(
     return "unknown";
   }
   if (leadBrief.choice === "drift" || peerHandback.choice === "drift") return "suspected_drift";
-  if (leadHandling.choice === "drift") return "suspected_drift";
+  if (leadHandling.choice === "drift") {
+    // "Require observable supporting communication for a handling-drift
+    // alert" and "delay never turns silence into handling drift": a
+    // drift judgment needs observable Lead activity in the room (sends
+    // to this Peer, other direct Peers, or the route Supervisor). A
+    // canceled/failed Lead turn also cannot support an absence proof —
+    // its confirmed sends still count as handling, but truncation means
+    // silence inside it stays unknown.
+    const supporting = evidence.roomMessages.length + evidence.otherRoomMessages.length + evidence.reportMessages.length;
+    if (supporting === 0 || evidence.flags.includes(VISIBILITY.leadTurnNotCompleted)) return "unknown";
+    return "suspected_drift";
+  }
   // "pending" after the delay already elapsed cannot be closed — stay
   // unknown rather than infer drift from timing alone.
   if (leadHandling.choice === "pending") return "unknown";

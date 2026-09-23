@@ -419,45 +419,68 @@ export async function askJevDecision(
   const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
   const onOuterAbort = () => controller.abort();
   opts.signal?.addEventListener("abort", onOuterAbort, { once: true });
-  let response: Response;
-  try {
-    response = await fetchImpl(endpoint, {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-  } catch (error) {
+  // The deadline covers the WHOLE request — headers AND body reads (parity
+  // src/jev.mjs). Aborting the fetch signal aborts a stalled body stream on
+  // a real transport, but the deadline must not depend on it: every body
+  // read races a rejection armed on this controller's abort.
+  const requestError = (error: unknown): JevRequestError => {
     const err = error as Error;
-    if (opts.signal?.aborted) throw new JevRequestError("jev-abort", "Jev request aborted — plugin stopping");
+    if (opts.signal?.aborted) return new JevRequestError("jev-abort", "Jev request aborted — plugin stopping");
     if (timedOut || err.name === "TimeoutError" || err.name === "AbortError") {
-      throw new JevRequestError("jev-timeout", `Jev request timed out after ${timeoutMs}ms`);
+      return new JevRequestError("jev-timeout", `Jev request timed out after ${timeoutMs}ms`);
     }
-    throw new JevRequestError("jev-network", `Jev request failed: ${sanitizeRemoteText(err.message)}`);
+    return new JevRequestError("jev-network", `Jev request failed: ${sanitizeRemoteText(err.message)}`);
+  };
+  const aborted = new Promise<never>((_, reject) => {
+    controller.signal.addEventListener("abort", () => {
+      reject(opts.signal?.aborted
+        ? new JevRequestError("jev-abort", "Jev request aborted — plugin stopping")
+        : requestError(new Error("body read aborted")));
+    }, { once: true });
+  });
+  const readJson = (res: Response): Promise<unknown> => Promise.race([res.json(), aborted]);
+  let response: Response;
+  let parsedJson: unknown;
+  try {
+    try {
+      response = await fetchImpl(endpoint, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      throw requestError(error);
+    }
+    if (!response.ok) {
+      let detail = "";
+      try {
+        const parsed: unknown = await readJson(response);
+        if (isRecord(parsed) && isRecord(parsed.error)) {
+          const remote = parsed.error;
+          detail = typeof remote.message === "string" && remote.message !== ""
+            ? `: ${sanitizeRemoteText(remote.message)}`
+            : typeof remote.code === "string" && remote.code !== ""
+              ? ` (code ${sanitizeRemoteText(remote.code, 64)})`
+              : "";
+        }
+      } catch (error) {
+        if (error instanceof JevRequestError) throw error;
+        if (timedOut || (error as Error).name === "AbortError") throw requestError(error);
+        /* body not JSON */
+      }
+      throw new JevRequestError("jev-http", `Jev request failed with HTTP ${response.status}${detail}`);
+    }
+    try {
+      parsedJson = await readJson(response);
+    } catch (error) {
+      if (error instanceof JevRequestError) throw error;
+      if (timedOut || (error as Error).name === "AbortError") throw requestError(error);
+      throw new JevRequestError("jev-response", "Jev response is not valid JSON");
+    }
   } finally {
     clearTimeout(timer);
     opts.signal?.removeEventListener("abort", onOuterAbort);
-  }
-  if (!response.ok) {
-    let detail = "";
-    try {
-      const parsed: unknown = await response.json();
-      if (isRecord(parsed) && isRecord(parsed.error)) {
-        const remote = parsed.error;
-        detail = typeof remote.message === "string" && remote.message !== ""
-          ? `: ${sanitizeRemoteText(remote.message)}`
-          : typeof remote.code === "string" && remote.code !== ""
-            ? ` (code ${sanitizeRemoteText(remote.code, 64)})`
-            : "";
-      }
-    } catch { /* body not JSON */ }
-    throw new JevRequestError("jev-http", `Jev request failed with HTTP ${response.status}${detail}`);
-  }
-  let parsedJson: unknown;
-  try {
-    parsedJson = await response.json();
-  } catch {
-    throw new JevRequestError("jev-response", "Jev response is not valid JSON");
   }
   if (!isRecord(parsedJson) || typeof parsedJson.model !== "string" || parsedJson.model === "" || !isRecord(parsedJson.answers)) {
     throw new JevRequestError("jev-response", "Jev response requires model and answers");

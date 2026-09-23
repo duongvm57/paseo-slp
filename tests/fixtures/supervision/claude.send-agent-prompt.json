@@ -52,8 +52,8 @@
         "sendAgentPrompt": true,
         "recipientAgentId": "22222222-2222-4222-8222-222222222222",
         "prompt": "Sanitized fixture prompt — a Peer report or Lead instruction body appears here verbatim. No real session content.",
-        "confirmed": true,
-        "successEvidence": "detail.output is the tool_result content — a JSON-encoded string in observed sessions; parse it and require success === true",
+        "confirmed": false,
+        "successEvidence": "shape is mapper-derived, never observed on a real daemon timeline — even with success === true in the tool_result body the send demotes to the uncertain lane with family-shape-unverified; only codex's verified shape confirms",
         "caveat": "name keeps the verbatim MCP wire form 'mcp__paseo__send_agent_prompt' (underscore-separated), NOT 'paseo.send_agent_prompt'; output may also arrive structured if the daemon normalizes the result — accept both, require success === true"
       }
     }

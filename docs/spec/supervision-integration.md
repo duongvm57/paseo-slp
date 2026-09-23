@@ -1,6 +1,11 @@
 # SLP communication supervision — integration design
 
-Status: design proposal, not implemented. Investigated 2026-09-23 against
+Status: shadow observer implemented (2026-09-23, `feat/supervision-integration`).
+Steps 1–3 and 5 of the implementation order are landed: host evidence,
+the configuration seam, the shadow observer, and the documentation. `notify`
+remains schema-valid but inert — it is a second Human gate — and live E2E
+validation has not run, so the open decisions below are still open.
+Original status: design proposal investigated 2026-09-23 against
 `paseo-supervision` commit
 [`1bad19b8`](https://github.com/hoangnb24/paseo-supervision/tree/1bad19b8ee6c58482494f56a3d8c6edb4f969ee1),
 this SLP checkout at `d253711a`, the installed Paseo 0.8.0 SDK declarations,

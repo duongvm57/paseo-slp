@@ -257,10 +257,16 @@ are not replayed after a restart. External data/cost: shadow evaluation
 sends captured brief/handback/room-message content to the configured Jev
 endpoint, so communication leaves the host and each evaluation is a paid
 provider call. Mode notify is schema-valid but has no delivery
-implementation — notification is a separate Human gate. Provider coverage
-is fixture-derived for all four families; on devin the MCP result body is
-dropped upstream, so send delivery evidence is weaker there than on codex.
-Live E2E validation has not run; see docs/spec/supervision-integration.md.
+implementation — notification is a separate Human gate. Provider coverage:
+only the codex normalized send shape is verified against a real timeline;
+pi/devin/claude fixtures are mapper-derived, so their sends stay uncertain
+(family-shape-unverified) and their cases resolve unknown until real
+fixtures exist — devin additionally drops the MCP result body upstream.
+Because no machine-readable report-recipient signal exists on this host,
+report-route-unverifiable is set on every case, so all cases currently
+resolve unknown before any Jev call — accepted, pending the structured
+report-recipient decision. Live E2E validation has not run; see
+docs/spec/supervision-integration.md.
 
 prepare accepts repository, workspaceId, assignment and role. Supervisor/Lead use
 fresh profiles/providers; Peer uses providers and route.optionId/catalogSha256.

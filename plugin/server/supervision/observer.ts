@@ -41,7 +41,11 @@ const CASE_LIFE_MS = 24 * 60 * 60 * 1000;
 const RING_MAX = 200;
 const RING_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const SDK_TIMEOUT_MS = 15_000;
-const HTTP_TIMEOUT_MS = 15_000;
+// Parity with the shared Jev helper's default bound (5s, same as
+// src/jev.mjs) — the deadline covers the whole request including the body
+// read; a longer observer-only override would silently widen the cost of a
+// stalled provider.
+const HTTP_TIMEOUT_MS = 5_000;
 const MAX_DIAGNOSTIC_REASONS = 20;
 const CASES_FILE = join("state", "supervision-cases.json");
 
@@ -56,6 +60,7 @@ interface CaseEvidence {
   handback: { text: string; messageId: string | null } | null;
   roomMessages: MessageRef[];          // confirmed Lead→Peer sends after the handback
   uncertainRoomMessages: MessageRef[]; // parsed sends whose start/success cannot be proven
+  otherRoomMessages: MessageRef[];     // confirmed Lead→other direct-Peer sends (supporting activity, not handling)
   reportMessages: MessageRef[];        // confirmed Lead→Supervisor sends (separate provenance)
   peerSends: MessageRef[];             // confirmed Peer→recipient sends (delivered communication)
   flags: string[];
@@ -248,6 +253,20 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     }
   };
 
+  // Turn/message IDs where available — ids only, bounded (spec §Shadow
+  // evidence: "turn/message IDs where available").
+  const messageIdsOf = (item: Case): Observation["messageIds"] => ({
+    brief: item.evidence.brief?.messageId ?? null,
+    handback: item.evidence.handback?.messageId ?? null,
+    sendCallIds: [
+      ...item.evidence.roomMessages,
+      ...item.evidence.uncertainRoomMessages,
+      ...item.evidence.otherRoomMessages,
+      ...item.evidence.reportMessages,
+      ...item.evidence.peerSends,
+    ].map(message => message.callId).slice(0, 24),
+  });
+
   const recordRing = (item: Case, state: Observation["state"], reason: string | null): void => {
     const entries = loadRing();
     const stamp = new Date(now()).toISOString();
@@ -257,6 +276,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
       leadAgentId: item.leadId,
       peerId: item.peerId,
       peerTurnId: item.peerTurnId,
+      messageIds: messageIdsOf(item),
       observedAt: prior?.observedAt ?? new Date(item.observedAt).toISOString(),
       updatedAt: stamp,
       state,
@@ -265,6 +285,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
       counts: {
         roomMessages: item.evidence.roomMessages.length,
         uncertainRoomMessages: item.evidence.uncertainRoomMessages.length,
+        otherRoomMessages: item.evidence.otherRoomMessages.length,
         reportMessages: item.evidence.reportMessages.length,
         peerSends: item.evidence.peerSends.length,
       },
@@ -291,6 +312,14 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     const routes = shadowRoutes();
     if (isSlpPeer(agent.provider) && agent.parentAgentId !== null && routes.has(agent.parentAgentId)) {
       // Fresh creation — the hook payload's parentAgentId is authoritative.
+      // Host-verified contract (paseo packages/server agent-manager.ts):
+      // "agent.created" is emitted exactly once inside createAgentInternal
+      // after registerSession succeeds; resumeAgentFromPersistence emits
+      // nothing and the plugin runtime only dispatches live events to
+      // currently-registered hooks — there is no replay/backfill on plugin
+      // reload, so this payload can never arrive stale for a pre-existing
+      // agent. Post-restart discovery of unknown pairs instead goes through
+      // the refresh-verified verify-peer job below.
       // Tombstoned ids re-enter only through the refresh-verified restore job.
       if (tombstoned(agent.id)) {
         enqueue({ t: "verify-peer", order: ++order, leadId: agent.parentAgentId, peerId: agent.id });
@@ -349,7 +378,21 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     if (signal.aborted) return;
     lastPaseo = paseo;
     const routes = shadowRoutes();
-    if (!captureAllowed()) return;
+    if (!captureAllowed()) {
+      // Gate down: capture pauses — nothing is appended and no bodies are
+      // retained (spec: a failed gate "does not retain new message bodies").
+      // Open cases of the affected Lead are flagged so the dropped window
+      // reads as uncertainty, never as silence that could look complete.
+      const gatedLeadId = isSlpLead(event.agent.provider) ? event.agent.id : event.agent.parentAgentId;
+      if (gatedLeadId !== null && routes.has(gatedLeadId)) {
+        for (const item of cases.values()) {
+          if (item.leadId !== gatedLeadId) continue;
+          if (!item.evidence.flags.includes(VISIBILITY.capturePaused)) item.evidence.flags.push(VISIBILITY.capturePaused);
+          item.dirty = true;
+        }
+      }
+      return;
+    }
     // Peer membership: known-verified pairs observe directly; unknown pairs
     // queue a refresh-verified restore first (post-restart self-healing —
     // "restore discovery only after read-only refresh verifies active
@@ -406,10 +449,11 @@ export function createSupervisionObserver(deps: ObserverDeps) {
           leadAgentId: job.capture.leadId,
           peerId: job.capture.peerId,
           peerTurnId: job.capture.turnId,
+          messageIds: { brief: null, handback: null, sendCallIds: [] },
           observedAt: stamp, updatedAt: stamp,
           state: "unknown", reason: VISIBILITY.queueOverflow,
           visibility: [VISIBILITY.queueOverflow],
-          counts: { roomMessages: 0, uncertainRoomMessages: 0, reportMessages: 0, peerSends: 0 },
+          counts: { roomMessages: 0, uncertainRoomMessages: 0, otherRoomMessages: 0, reportMessages: 0, peerSends: 0 },
           assessmentsUsed: 0, lastAssessment: null,
         });
         ringDirty = true;
@@ -469,7 +513,9 @@ export function createSupervisionObserver(deps: ObserverDeps) {
       const gen = archiveGeneration.get(job.leadId);
       try {
         const result = await bounded(paseo.agents.ref(job.leadId).refresh(), signal);
-        if (gen !== undefined && archiveGeneration.get(job.leadId) !== gen) return;
+        // Strict compare — also catches "not tombstoned at apply, archived
+        // while the refresh was in flight" (undefined → 1).
+        if (archiveGeneration.get(job.leadId) !== gen) return;
         const agent = result?.agent;
         if (!agent || agent.archivedAt !== null || agent.status === "closed" || !isSlpLead(agent.provider)) return;
         archiveGeneration.delete(job.leadId);
@@ -481,7 +527,10 @@ export function createSupervisionObserver(deps: ObserverDeps) {
       const gen = archiveGeneration.get(job.peerId);
       try {
         const result = await bounded(paseo.agents.ref(job.peerId).refresh(), signal);
-        if (gen !== undefined && archiveGeneration.get(job.peerId) !== gen) return;
+        // Strict compare — an archive landing mid-refresh (undefined → 1)
+        // discards the verification too; a raced live-looking snapshot must
+        // never admit an agent that is already tombstoned again.
+        if (archiveGeneration.get(job.peerId) !== gen) return;
         const agent = result?.agent;
         if (!agent || agent.archivedAt !== null || agent.status === "closed" || !isSlpPeer(agent.provider)) return;
         const parent = agent.labels?.["paseo.parent-agent-id"] ?? null;
@@ -501,9 +550,10 @@ export function createSupervisionObserver(deps: ObserverDeps) {
         entries.set(event.id, {
           fingerprint: event.id, leadAgentId: event.leadId, peerId: event.peerId,
           peerTurnId: event.turnId, observedAt: stamp, updatedAt: stamp,
+          messageIds: { brief: null, handback: null, sendCallIds: [] },
           state: "unknown", reason: VISIBILITY.recipientRefreshFailed,
           visibility: [VISIBILITY.recipientRefreshFailed],
-          counts: { roomMessages: 0, uncertainRoomMessages: 0, reportMessages: 0, peerSends: 0 },
+          counts: { roomMessages: 0, uncertainRoomMessages: 0, otherRoomMessages: 0, reportMessages: 0, peerSends: 0 },
           assessmentsUsed: 0, lastAssessment: null,
         });
         ringDirty = true;
@@ -517,9 +567,10 @@ export function createSupervisionObserver(deps: ObserverDeps) {
         entries.set(event.id, {
           fingerprint: event.id, leadAgentId: event.leadId, peerId: event.peerId,
           peerTurnId: event.turnId, observedAt: stamp, updatedAt: stamp,
+          messageIds: { brief: null, handback: null, sendCallIds: [] },
           state: "unknown", reason: VISIBILITY.caseCeiling,
           visibility: [VISIBILITY.caseCeiling],
-          counts: { roomMessages: 0, uncertainRoomMessages: 0, reportMessages: 0, peerSends: 0 },
+          counts: { roomMessages: 0, uncertainRoomMessages: 0, otherRoomMessages: 0, reportMessages: 0, peerSends: 0 },
           assessmentsUsed: 0, lastAssessment: null,
         });
         ringDirty = true;
@@ -534,7 +585,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
       const evidence: CaseEvidence = {
         brief: event.brief.text !== "" ? { text: event.brief.text, messageId: event.brief.messageId, flags: [...flags] } : null,
         handback: event.handback,
-        roomMessages: [], uncertainRoomMessages: [],
+        roomMessages: [], uncertainRoomMessages: [], otherRoomMessages: [],
         reportMessages: [],
         peerSends: event.sends.map(s => ({ callId: s.callId, turnId: event.turnId, recipient: s.recipient, prompt: s.prompt })),
         flags: [...flags],
@@ -554,7 +605,9 @@ export function createSupervisionObserver(deps: ObserverDeps) {
         observedAt: now(),
         lastAssessment: null,
       };
-      if (JSON.stringify(buildEvidence(item, route)).length > MAX_EVIDENCE_BYTES) {
+      // 64 KiB of SERIALIZED bytes — JS string length counts UTF-16 code
+      // units, so multibyte text would slip past a `.length` check.
+      if (Buffer.byteLength(JSON.stringify(buildEvidence(item, route)), "utf8") > MAX_EVIDENCE_BYTES) {
         item.evidence.flags.push(VISIBILITY.evidenceOversize);
         item.gatedReason = VISIBILITY.evidenceOversize;
       }
@@ -613,8 +666,16 @@ export function createSupervisionObserver(deps: ObserverDeps) {
       const qualifies = subsequent && (job.startSeq as number) > item.handbackOrder;
       // A send proves handling only for the case of its actual Peer
       // recipient — a send to Peer X is not evidence about Peer Y's case.
-      const forPeer = roomFor.get(item.peerId) ?? [];
-      (qualifies ? item.evidence.roomMessages : item.evidence.uncertainRoomMessages).push(...forPeer);
+      // Sends to OTHER verified direct Peers are observable room activity:
+      // they can SUPPORT a handling-drift judgment but never prove handling
+      // for this case (spec: "require observable supporting communication").
+      for (const [recipient, list] of roomFor) {
+        if (recipient === item.peerId) {
+          (qualifies ? item.evidence.roomMessages : item.evidence.uncertainRoomMessages).push(...list);
+        } else if (qualifies) {
+          item.evidence.otherRoomMessages.push(...list);
+        }
+      }
       item.evidence.uncertainRoomMessages.push(
         ...uncertain.map(s => ({ callId: s.callId, turnId: event.turnId, recipient: s.recipient, prompt: s.prompt })),
       );
@@ -628,7 +689,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
   const clearBodies = (item: Case): void => {
     item.evidence.brief = item.evidence.brief === null ? null : { text: "", messageId: item.evidence.brief.messageId, flags: item.evidence.brief.flags };
     item.evidence.handback = item.evidence.handback === null ? null : { text: "", messageId: item.evidence.handback.messageId };
-    for (const lane of [item.evidence.roomMessages, item.evidence.uncertainRoomMessages, item.evidence.reportMessages, item.evidence.peerSends]) {
+    for (const lane of [item.evidence.roomMessages, item.evidence.uncertainRoomMessages, item.evidence.otherRoomMessages, item.evidence.reportMessages, item.evidence.peerSends]) {
       for (const message of lane) message.prompt = "";
     }
   };
@@ -646,6 +707,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     handback: item.evidence.handback,
     roomMessages: item.evidence.roomMessages.map(m => ({ callId: m.callId, turnId: m.turnId, prompt: m.prompt })),
     uncertainRoomMessages: item.evidence.uncertainRoomMessages.map(m => ({ callId: m.callId, turnId: m.turnId })),
+    otherRoomMessages: item.evidence.otherRoomMessages.map(m => ({ callId: m.callId, turnId: m.turnId, recipient: m.recipient })),
     reportMessages: item.evidence.reportMessages.map(m => ({ callId: m.callId, turnId: m.turnId, recipient: m.recipient, prompt: m.prompt })),
     peerSends: item.evidence.peerSends.map(m => ({ callId: m.callId, recipient: m.recipient, prompt: m.prompt })),
     pendingWindowElapsed: item.evidence.pendingDelayElapsed,
@@ -657,11 +719,16 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     if (route === undefined) { closeCase(item, "unknown", "route-removed"); return; }
     const gate = jevGate();
     if (!gate.ok) {
+      // A failed gate pauses the route: record the reason, drop every
+      // captured body, keep the metadata-only ring row (spec: "does not
+      // retain new message bodies or spend on assessments while delivery is
+      // impossible"). The case closes unknown — evidence already cleared
+      // can never support a later judgment anyway.
       routeReasons.set(item.leadId, gate.reason);
+      clearBodies(item);
       item.disposition = "unknown";
-      recordRing(item, "unknown", gate.reason);
-      ringDirty = true;
-      return; // stays open + dirty — retries when the gate recovers
+      closeCase(item, "unknown", gate.reason);
+      return;
     }
     routeReasons.delete(item.leadId);
     if (item.gatedReason !== null) { closeCase(item, "unknown", item.gatedReason); return; }
@@ -714,7 +781,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
       closeCase(item, "unknown", gateReason);
       return;
     }
-    if (JSON.stringify(payload).length > MAX_EVIDENCE_BYTES) {
+    if (Buffer.byteLength(JSON.stringify(payload), "utf8") > MAX_EVIDENCE_BYTES) {
       item.gatedReason = VISIBILITY.evidenceOversize;
       item.disposition = "unknown";
       closeCase(item, "unknown", VISIBILITY.evidenceOversize);
@@ -755,9 +822,9 @@ export function createSupervisionObserver(deps: ObserverDeps) {
         model: assessment.model,
         usage: assessment.usage,
         choices: {
-          leadBrief: assessment.answers.leadBrief.choice,
-          peerHandback: assessment.answers.peerHandback.choice,
-          leadHandling: assessment.answers.leadHandling.choice,
+          leadBrief: { choice: assessment.answers.leadBrief.choice, confidence: assessment.answers.leadBrief.confidence },
+          peerHandback: { choice: assessment.answers.peerHandback.choice, confidence: assessment.answers.peerHandback.confidence },
+          leadHandling: { choice: assessment.answers.leadHandling.choice, confidence: assessment.answers.leadHandling.confidence },
         },
       };
     }

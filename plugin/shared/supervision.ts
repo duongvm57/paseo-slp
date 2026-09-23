@@ -95,6 +95,13 @@ export const SupervisionCaseState = z.enum([
 ]);
 export type SupervisionCaseState = z.infer<typeof SupervisionCaseState>;
 
+// Per-axis choice + confidence (spec §Shadow evidence: "Jev
+// choice/confidence" — each axis carries both, never a bare choice).
+const SupervisionAxis = z.object({
+  choice: z.string(),
+  confidence: z.number().min(0).max(1),
+}).strict();
+
 export const SupervisionAssessmentSummary = z.object({
   at: z.string(),
   model: z.string(),
@@ -103,9 +110,9 @@ export const SupervisionAssessmentSummary = z.object({
     output_tokens: z.number().int().nonnegative(),
   }).nullable(),
   choices: z.object({
-    leadBrief: z.string(),
-    peerHandback: z.string(),
-    leadHandling: z.string(),
+    leadBrief: SupervisionAxis,
+    peerHandback: SupervisionAxis,
+    leadHandling: SupervisionAxis,
   }).strict(),
 }).strict();
 export type SupervisionAssessmentSummary = z.infer<typeof SupervisionAssessmentSummary>;
@@ -115,6 +122,14 @@ export const SupervisionObservation = z.object({
   leadAgentId: Id,
   peerId: Id,
   peerTurnId: z.string().nullable(),
+  /** Turn/message IDs where available (spec §Shadow evidence): the brief and
+   *  handback message ids plus the observed send call ids — bounded, ids
+   *  only, never bodies. */
+  messageIds: z.object({
+    brief: z.string().nullable(),
+    handback: z.string().nullable(),
+    sendCallIds: z.array(z.string().max(200)).max(24),
+  }).strict(),
   observedAt: z.string(),
   updatedAt: z.string(),
   state: SupervisionCaseState,
@@ -126,6 +141,7 @@ export const SupervisionObservation = z.object({
   counts: z.object({
     roomMessages: z.number().int().nonnegative(),
     uncertainRoomMessages: z.number().int().nonnegative(),
+    otherRoomMessages: z.number().int().nonnegative(),
     reportMessages: z.number().int().nonnegative(),
     peerSends: z.number().int().nonnegative(),
   }).strict(),

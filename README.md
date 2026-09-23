@@ -547,12 +547,18 @@ never persisted.
 External data and cost: a shadow evaluation sends captured
 brief/handback/room-message content to the configured Jev endpoint, so
 that communication leaves the host and each evaluation is a billable
-provider call. Provider coverage is fixture-derived across all four SLP
-families (codex/pi/devin/claude); on devin the upstream record drops the
-MCP result body, so send-delivery evidence is weaker there — an
-unobservable result is recorded as uncertain, never confirmed. Open cases
-and the event queue are process-local: a plugin restart does not replay
-missed turns, and only the metadata ring survives
+provider call. Provider coverage: codex is the only family whose
+normalized send shape is verified against a real timeline; the pi, devin
+and claude fixtures are mapper-derived, so their sends are demoted to
+uncertain (`family-shape-unverified`) and every case in those families
+stays `unknown` until real-timeline fixtures exist. On devin the upstream
+record additionally drops the MCP result body, so delivery evidence would
+stay weaker even after fixture verification. On this host
+`report-route-unverifiable` is always set — there is no machine-readable
+report-recipient signal — so cases currently resolve `unknown` before any
+Jev call; see the open decision on structured report-recipient labels.
+Open cases and the event queue are process-local: a plugin restart does
+not replay missed turns, and only the metadata ring survives
 (`state/supervision-cases.json`, ≤200 entries or 30 days).
 
 Mode `notify` is schema-valid but carries no delivery path in this build —

@@ -1,0 +1,28 @@
+This directory contains code adapted from paseo-supervision
+(https://github.com/hoangnb24/paseo-supervision), source commit
+1bad19b8ee6c58482494f56a3d8c6edb4f969ee1.
+
+The upstream Work is licensed under the Apache License, Version 2.0
+(http://www.apache.org/licenses/LICENSE-2.0); a copy is at the upstream
+repository root (LICENSE). Upstream carries no NOTICE file; the copyright
+holder line in its LICENSE is unfilled, so attribution here names the
+project and commit.
+
+Adapted portions (structure and algorithms, not copied code):
+
+- observer.ts — serialized queue/generation mechanics adapted from
+  upstream server/observer.ts. Removed: the supervisor sync RPC, alert
+  sends, and all notification delivery.
+- assessment.ts — Jev Choice response handling adapted from upstream
+  server/jev.ts: strict Zod schemas, unique-maximum probability
+  distributions, ~1-sum validation, confidence thresholding, and
+  conservative unknown mapping.
+- capture.ts — the correlation idea (latest user_message boundary,
+  confirmed-send evidence) informed by upstream server/communication.ts;
+  per-family send extraction is original to this repository.
+
+Modified relative to upstream: provider-aware extraction for the SLP
+family registry, SLP role routing and report-route semantics, Jev
+capability gating, daemon-home binding, bounded metadata-only persistence,
+and removal of every notification path. See
+docs/spec/supervision-integration.md for the divergence contract.

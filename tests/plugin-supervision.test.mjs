@@ -203,6 +203,8 @@ test('shadow route validation requires exact provider roles, non-archived, non-c
     ['Lead missing on daemon', { [SUP]: supAgent() }, /not found/],
     ['Supervisor provider is a lead', { [LEAD]: leadAgent(), [SUP]: supAgent({ provider: 'slp-pi-lead' }) }, /exact slp-<family>-supervisor/],
     ['Supervisor archived', { [LEAD]: leadAgent(), [SUP]: supAgent({ archivedAt: 'x' }) }, /archived/],
+    ['Supervisor closed', { [LEAD]: leadAgent(), [SUP]: supAgent({ status: 'closed' }) }, /closed/],
+    ['Supervisor workspace mismatch', { [LEAD]: leadAgent(), [SUP]: supAgent({ workspaceId: 'wks_other' }) }, /must share the Lead's workspace/],
     ['Supervisor missing', { [LEAD]: leadAgent() }, /Supervisor.*not found/],
   ];
   for (const [name, agents, pattern] of cases) {

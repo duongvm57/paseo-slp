@@ -66,11 +66,17 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   let observer: SupervisionObserver | null = null;
   try {
     const served = detectDaemonHome();
-    const binding = resolveDaemonHome(
-      { hostId: "local", daemonHome: served.daemonHome },
-      "config.json must be a regular file, not a link",
-    );
-    observer = createSupervisionObserver({ stableRoot: binding.stableRoot });
+    // Inert unless the served home is VERIFIED: a default-guessed home would
+    // observe the wrong daemon's state files. Only an exported PASEO_HOME
+    // ("env") proves which home this process serves (spec §Configuration:
+    // the local-target value is a prefill, not proof of host-home mapping).
+    if (served.source === "env") {
+      const binding = resolveDaemonHome(
+        { hostId: "local", daemonHome: served.daemonHome },
+        "config.json must be a regular file, not a link",
+      );
+      observer = createSupervisionObserver({ stableRoot: binding.stableRoot });
+    }
   } catch {
     observer = null;
   }

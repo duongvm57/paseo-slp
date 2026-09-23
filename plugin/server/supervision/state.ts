@@ -188,7 +188,7 @@ export function createSupervisionState(deps: {
         if (supervisor === null) {
           throw new OperationConflict("INVALID_REQUEST", `Supervisor agent ${route.supervisorAgentId} not found on this daemon`);
         }
-        const supAgent = supervisor as { provider?: unknown; archivedAt?: unknown; status?: unknown };
+        const supAgent = supervisor as { provider?: unknown; archivedAt?: unknown; status?: unknown; workspaceId?: unknown };
         if (!isSlpSupervisor(supAgent.provider)) {
           throw new OperationConflict(
             "INVALID_REQUEST",
@@ -200,6 +200,15 @@ export function createSupervisionState(deps: {
         }
         if (supAgent.status === "closed") {
           throw new OperationConflict("INVALID_REQUEST", `Supervisor ${route.supervisorAgentId} is closed — routes require an active agent`);
+        }
+        // The refreshed-agent requirements apply to BOTH named agents: the
+        // Supervisor must live in the Lead's exact workspace, same as the
+        // Lead binding (spec §Configuration — refresh list covers both).
+        if (supAgent.workspaceId !== route.leadWorkspaceId) {
+          throw new OperationConflict(
+            "INVALID_REQUEST",
+            `Supervisor ${route.supervisorAgentId} is in workspace ${JSON.stringify(supAgent.workspaceId)}, not ${route.leadWorkspaceId} — the Supervisor must share the Lead's workspace binding`,
+          );
         }
       }
     }
