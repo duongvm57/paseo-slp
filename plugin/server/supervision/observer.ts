@@ -80,11 +80,12 @@ interface Case {
   dirty: boolean;
   /** Per-case evaluation-basis generation — bumped on EVERY mutation an
    *  assessment could see (evidence appends, flag changes, body clears,
-   *  pending-elapsed flips). The global `version` only covers evidence
-   *  still QUEUED; this counter covers in-place mutations that never pass
-   *  an enqueue (gate-down, queue-overflow, lane pushes). An in-flight Jev
-   *  ask compares it at accept-time — spec: "New evidence arriving during
-   *  an assessment invalidates that assessment." */
+   *  pending-elapsed flips). The per-lead `enqPending` counter covers
+   *  evidence still QUEUED; this counter covers in-place mutations that
+   *  never pass an enqueue (gate-down, queue-overflow marks, lane pushes).
+   *  An in-flight Jev ask compares it at accept-time — spec: "New
+   *  evidence arriving during an assessment invalidates that
+   *  assessment." */
   evidenceVersion: number;
   gatedReason: string | null;
   disposition: "observed" | "unknown" | "suspected_drift";
@@ -99,16 +100,18 @@ const CasesFileSchema = z.object({
 }).strict();
 
 type Job =
-  | { t: "tick"; order: number }
-  | { t: "turn-end"; order: number; capture: Capture; startSeq: number | null; overlap: boolean }
-  // gen = the id's archive generation AT ENQUEUE — a queued verification
-  // answers a question asked at hook time; an archive landing before the
-  // job executes already changed the generation, so the job must discard
+  | { t: "tick"; order: number; leadId: null }
+  | { t: "turn-end"; order: number; leadId: string; capture: Capture; startSeq: number | null; overlap: boolean }
+  // gens = archive generations AT ENQUEUE — a queued verification answers
+  // a question asked at hook time; an archive landing before the job
+  // executes already changed the generation, so the job must discard
   // itself before spending a refresh (spec §Observation: "Archive
-  // generations invalidate pending work").
-  | { t: "verify-peer"; order: number; leadId: string; peerId: string; gen: number | undefined }
+  // generations invalidate pending work"). Generations are MONOTONIC —
+  // never reset on restore — so a stale job from an older archive era can
+  // never alias a newer one.
+  | { t: "verify-peer"; order: number; leadId: string; peerId: string; peerGen: number | undefined; leadGen: number | undefined }
   | { t: "restore-lead"; order: number; leadId: string; gen: number | undefined }
-  | { t: "archive"; order: number; agent: PluginHookAgent };
+  | { t: "archive"; order: number; leadId: string | null; agent: PluginHookAgent };
 
 /** The exact outbound evidence state (spec §Jev: bound ids, case and
  *  turn/message ids, the complete captured brief and session handback
@@ -164,9 +167,13 @@ export interface ObserverDeps {
   now?: () => number;
   signal?: AbortSignal;
   uuid?: () => string;
-  /** Test seams — default to the real Jev module. */
+  /** Test seams — default to the real Jev module / local gate. `localGate`
+   *  exists so the suspension-site matrix can reach the Jev-ask await on
+   *  this host, where every real capture carries
+   *  `report-route-unverifiable` and local gating closes before the ask. */
   gate?: (stableRoot: string) => SupervisionGate;
   ask?: typeof askJevDecision;
+  localGate?: (evidence: EvidencePayload) => string | null;
   httpTimeoutMs?: number;
 }
 
@@ -176,6 +183,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
   const uuid = deps.uuid ?? randomUUID;
   const gateOf = deps.gate ?? resolveSupervision;
   const ask = deps.ask ?? askJevDecision;
+  const evidenceGate = deps.localGate ?? localGate;
   const httpTimeoutMs = deps.httpTimeoutMs ?? HTTP_TIMEOUT_MS;
 
   const abort = new AbortController();
@@ -187,7 +195,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
   }
 
   let order = 0;                    // monotonic callback-order counter
-  let version = 0;                  // bumped on every enqueue — stale-detection
+  let version = 0;                  // bumped on every enqueue — drain scheduling only; per-lead enqPending is the eval basis
   let running = false;
   let stopped = false;
   const jobs: Job[] = [];
@@ -195,7 +203,24 @@ export function createSupervisionObserver(deps: ObserverDeps) {
   const seen = new Set<string>();               // capture fingerprint dedup
   const sentCalls = new Set<string>();          // leadId\0callId send dedup
   const peers = new Map<string, string>();      // verified peerId → leadId
-  const archiveGeneration = new Map<string, number>();
+  // Archive dimension is split in two: `archiveGen` is a MONOTONIC counter
+  // per id — bumped on every archive hook, never deleted. `archivedNow`
+  // holds the tombstone flag a restore clears. A reset-on-restore counter
+  // would alias generations across archive eras (ABA): a job queued in
+  // era 1 could "match" era 2's fresh 1 and un-tombstone a live archive.
+  const archiveGen = new Map<string, number>();
+  const archivedNow = new Set<string>();
+  // Per-lead count of enqueued-not-applied jobs — the queued-evidence
+  // dimension of an evaluation basis. Global `version` stays for drain
+  // scheduling only; per-lead scoping keeps unrelated-lead churn from
+  // discarding a paid assessment.
+  const enqPending = new Map<string, number>();
+  // Bumped on every OBSERVED gate-down edge — part of every evaluation
+  // basis, so a down→up flip inside an await (invisible to a re-read,
+  // which sees "ok" again) still invalidates work whose gather spanned
+  // the purge.
+  let purgeCount = 0;
+  let gateWasDown = false;
   const leadStarts = new Map<string, number>(); // leadId\0turnId → callback order
   const startMeta = new Map<string, { seq: number; overlapped: boolean }>();
   const openTurns = new Map<string, Set<string>>(); // leadId → started-not-ended turnIds
@@ -263,7 +288,58 @@ export function createSupervisionObserver(deps: ObserverDeps) {
   const keyStamps = (): string =>
     ["openrouter", "typesafe"].map(kind => statStamp(join(stableRoot, "state", `jev-${kind}.key`))).join("|");
 
-  const captureAllowed = (): boolean => jevGate().ok;
+  // The ONE gate-down reaction — every detection point funnels through
+  // observeGate(). Purge = flag `capture-paused` + clear bodies on EVERY
+  // open case + scrub bodies still sitting in queued turn-end captures
+  // (`jobs[]` is a retention store the case loop cannot reach) + bump
+  // `purgeCount` so a later down→up edge cannot alias the basis of work
+  // whose gather spanned this purge.
+  const onGateDown = (): void => {
+    purgeCount += 1;
+    for (const item of cases.values()) {
+      if (!item.evidence.flags.includes(VISIBILITY.capturePaused)) item.evidence.flags.push(VISIBILITY.capturePaused);
+      // clearBodies bumps evidenceVersion — an in-flight assessment must
+      // discard at accept-time.
+      clearBodies(item);
+      item.dirty = true;
+      recordRing(item, item.disposition, item.gatedReason);
+    }
+    for (const job of jobs) {
+      if (job.t === "turn-end") scrubCaptureBodies(job.capture);
+    }
+  };
+
+  /** The single gate read — any observation of a down edge runs the global
+   *  purge, no matter which caller saw it first. Detection points (hook,
+   *  job-top, send-loop, evaluation, pre-ask, views) all share the same
+   *  reaction instead of each carrying a local approximation of it. */
+  const observeGate = (): SupervisionGate => {
+    const gate = jevGate();
+    if (gate.ok) {
+      gateWasDown = false;
+      return gate;
+    }
+    if (!gateWasDown) {
+      gateWasDown = true;
+      onGateDown();
+    }
+    return gate;
+  };
+
+  const captureAllowed = (): boolean => observeGate().ok;
+
+  /** Metadata survives a purge; bodies do not. Scrubbing also stamps the
+   *  capture's flags so a case created after gate recovery still records
+   *  the purge window on its observation row. */
+  const scrubCaptureBodies = (captured: Capture): void => {
+    if (!captured.flags.includes(VISIBILITY.capturePaused)) captured.flags.push(VISIBILITY.capturePaused);
+    if (captured.kind === "peer") {
+      captured.brief = { text: "", messageId: captured.brief.messageId };
+      if (captured.handback !== null) captured.handback = { text: "", messageId: captured.handback.messageId };
+    }
+    for (const send of captured.sends) send.prompt = "";
+    for (const send of captured.uncertainSends) send.prompt = "";
+  };
 
   // --- metadata ring (state/supervision-cases.json) ------------------------
 
@@ -355,7 +431,12 @@ export function createSupervisionObserver(deps: ObserverDeps) {
 
   // --- synchronous hook handlers -------------------------------------------
 
-  const tombstoned = (id: string): boolean => archiveGeneration.has(id);
+  const tombstoned = (id: string): boolean => archivedNow.has(id);
+
+  /** The lead whose state a job can mutate — the queued-evidence basis
+   *  dimension. Null for lead-agnostic work (tick) or an archive whose
+   *  peer membership was already swept before enqueue resolved it. */
+  const jobLead = (job: Job): string | null => job.leadId;
   const startKey = (leadId: string, turnId: string | null): string | null =>
     turnId === null ? null : `${leadId}\0${turnId}`;
 
@@ -380,26 +461,53 @@ export function createSupervisionObserver(deps: ObserverDeps) {
       // its generation compare discards stale verifications. The job
       // carries the enqueue-time generation: an archive landing while the
       // job sits queued already invalidates it (spec: "Archive
-      // generations invalidate pending work").
-      enqueue({ t: "verify-peer", order: ++order, leadId: agent.parentAgentId, peerId: agent.id, gen: archiveGeneration.get(agent.id) });
+      // generations invalidate pending work"). The job carries BOTH
+      // generations — an archived lead cannot adopt a peer, and a peer
+      // archived while the job sits queued is a stale question.
+      enqueue({
+        t: "verify-peer", order: ++order, leadId: agent.parentAgentId, peerId: agent.id,
+        peerGen: archiveGen.get(agent.id), leadGen: archiveGen.get(agent.parentAgentId),
+      });
       return;
     }
     if (isSlpLead(agent.provider) && routes.has(agent.id) && tombstoned(agent.id)) {
-      enqueue({ t: "restore-lead", order: ++order, leadId: agent.id, gen: archiveGeneration.get(agent.id) });
+      enqueue({ t: "restore-lead", order: ++order, leadId: agent.id, gen: archiveGen.get(agent.id) });
     }
   }
 
   function onArchived(agent: PluginHookAgent, paseo: PaseoApi): void {
     if (signal.aborted) return;
     lastPaseo = paseo;
-    // Tombstone synchronously so a later-arriving turn cannot recreate state;
-    // the queued job preserves ordering and invalidates in-flight assessment
-    // through enqueue's version bump.
-    archiveGeneration.set(agent.id, (archiveGeneration.get(agent.id) ?? 0) + 1);
+    // Tombstone + generation bump are synchronous so a late event cannot
+    // re-enter. The generation is MONOTONIC — a restore clears only the
+    // `archivedNow` flag, so a stale queued job can never alias a newer
+    // archive era.
+    archiveGen.set(agent.id, (archiveGen.get(agent.id) ?? 0) + 1);
+    archivedNow.add(agent.id);
+    // Enqueue BEFORE the peers sweep so the job resolves its lead
+    // dimension while the membership entry still exists.
+    enqueue({
+      t: "archive", order: ++order, agent,
+      leadId: isSlpLead(agent.provider) ? agent.id : peers.get(agent.id) ?? null,
+    });
+    // The body purge CANNOT ride the queued job — a queue-full drop would
+    // leave bodies retained until expiry. Synchronously: drop the archived
+    // id's membership, every peers entry pointing at an archived lead, and
+    // every body of cases touching the archived id (≤ MAX_CASES — bounded,
+    // and the evidenceVersion bump invalidates any in-flight ask). The
+    // queued job only does bookkeeping (ring close).
+    peers.delete(agent.id);
+    for (const [peerId, leadId] of peers) if (leadId === agent.id) peers.delete(peerId);
+    if (isSlpLead(agent.provider)) routeReasons.set(agent.id, "lead-archived");
+    for (const item of cases.values()) {
+      if (item.leadId === agent.id || item.peerId === agent.id) {
+        clearBodies(item);
+        item.dirty = true;
+      }
+    }
     for (const key of leadStarts.keys()) if (key.startsWith(`${agent.id}\0`)) leadStarts.delete(key);
     for (const key of startMeta.keys()) if (key.startsWith(`${agent.id}\0`)) startMeta.delete(key);
     openTurns.delete(agent.id);
-    enqueue({ t: "archive", order: ++order, agent });
   }
 
   function onStart(event: TurnStarted): void {
@@ -435,22 +543,15 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     lastPaseo = paseo;
     const routes = shadowRoutes();
     if (!captureAllowed()) {
-      // Gate down is DAEMON-GLOBAL — the Jev capability/key/target gate is
-      // shared by every route (spec §Configuration: a failed gate "does
-      // not retain new message bodies or spend on assessments while
-      // delivery is impossible" — the clause is not lead-scoped, so every
-      // open case must drop retained bodies at detection, not only the
-      // Lead whose event happened to observe the failure). Nothing is
-      // appended and bodies already captured are dropped NOW; each case is
-      // flagged so the dropped window reads as uncertainty, never as
-      // silence that could look complete.
-      for (const item of cases.values()) {
-        if (!item.evidence.flags.includes(VISIBILITY.capturePaused)) item.evidence.flags.push(VISIBILITY.capturePaused);
-        // clearBodies bumps evidenceVersion — the mutation invalidates
-        // any in-flight assessment at accept-time.
-        clearBodies(item);
-        item.dirty = true;
-      }
+      // observeGate already ran the ONE global purge (all open cases
+      // flagged capture-paused + bodies cleared + queued captures
+      // scrubbed — spec §Configuration: a failed gate "does not retain new
+      // message bodies or spend on assessments while delivery is
+      // impossible"; the Jev gate is daemon-global, not lead-scoped).
+      // This event contributes no evidence — record the drop so the
+      // paused window is inspectable.
+      diagnostics.droppedEvents += 1;
+      diag(VISIBILITY.capturePaused);
       return;
     }
     // Peer membership: known-verified pairs observe directly; unknown pairs
@@ -461,7 +562,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     if (leadId === null || !routes.has(leadId)) return;
     const isLeadEvent = event.agent.id === leadId;
     if (isLeadEvent && tombstoned(leadId)) {
-      enqueue({ t: "restore-lead", order: ++order, leadId, gen: archiveGeneration.get(leadId) });
+      enqueue({ t: "restore-lead", order: ++order, leadId, gen: archiveGen.get(leadId) });
       return; // the capture is dropped — a pre-restore turn cannot be trusted
     }
     if (!isLeadEvent) {
@@ -475,11 +576,17 @@ export function createSupervisionObserver(deps: ObserverDeps) {
         // for a stale-generation peer would fabricate an observation for a
         // turn the archive boundary already invalidated.
         diag("peer-archived");
-        enqueue({ t: "verify-peer", order: ++order, leadId, peerId: event.agent.id, gen: archiveGeneration.get(event.agent.id) });
+        enqueue({
+          t: "verify-peer", order: ++order, leadId, peerId: event.agent.id,
+          peerGen: archiveGen.get(event.agent.id), leadGen: archiveGen.get(leadId),
+        });
         return;
       }
       if (peers.get(event.agent.id) !== leadId) {
-        enqueue({ t: "verify-peer", order: ++order, leadId, peerId: event.agent.id, gen: archiveGeneration.get(event.agent.id) });
+        enqueue({
+          t: "verify-peer", order: ++order, leadId, peerId: event.agent.id,
+          peerGen: archiveGen.get(event.agent.id), leadGen: archiveGen.get(leadId),
+        });
       }
     }
     const captured = capture(event, new Set(routes.keys()));
@@ -494,7 +601,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
       openTurns.get(leadId)?.delete(captured.turnId as string);
     }
     enqueue({
-      t: "turn-end", order: seq, capture: captured,
+      t: "turn-end", order: seq, leadId: captured.leadId, capture: captured,
       startSeq: captured.kind === "lead" ? meta?.seq ?? null : null,
       overlap: captured.kind === "lead" ? meta?.overlapped ?? false : false,
     });
@@ -504,7 +611,18 @@ export function createSupervisionObserver(deps: ObserverDeps) {
 
   function enqueue(job: Job): void {
     if (signal.aborted) return;
+    // Invalidation precedes the drop decision — a queue-full drop still
+    // means "an event existed that no evaluation basis may ignore": the
+    // global version re-arms drain scheduling, the per-lead pending
+    // counter keeps every in-flight basis stale, and the overflow marks
+    // below carry the per-case flags.
+    version++;
+    const pendingLead = jobLead(job);
+    if (pendingLead !== null) enqPending.set(pendingLead, (enqPending.get(pendingLead) ?? 0) + 1);
     if (jobs.length >= MAX_QUEUE) {
+      // Never lands — unwind the pending count; the overflow flags below
+      // still mark affected cases through evidenceVersion.
+      if (pendingLead !== null) enqPending.set(pendingLead, Math.max(0, (enqPending.get(pendingLead) ?? 1) - 1));
       diagnostics.droppedEvents += 1;
       diag(VISIBILITY.queueOverflow);
       // Metadata-only diagnostic record for a dropped capture — the case
@@ -544,7 +662,6 @@ export function createSupervisionObserver(deps: ObserverDeps) {
       return;
     }
     jobs.push(job);
-    version++;
     if (!running) {
       running = true;
       queueMicrotask(() => { void drain(); });
@@ -553,6 +670,8 @@ export function createSupervisionObserver(deps: ObserverDeps) {
 
   async function apply(job: Job): Promise<void> {
     const paseo = lastPaseo;
+    const pendingLead = jobLead(job);
+    if (pendingLead !== null) enqPending.set(pendingLead, Math.max(0, (enqPending.get(pendingLead) ?? 1) - 1));
     if (job.t === "tick") {
       for (const item of cases.values()) {
         if (!item.timerUsed && item.due <= now()) {
@@ -566,16 +685,17 @@ export function createSupervisionObserver(deps: ObserverDeps) {
       return;
     }
     if (job.t === "archive") {
+      // Bookkeeping only — the tombstone, peers sweep, and body purge all
+      // ran synchronously in onArchived (a dropped job can never leave
+      // bodies retained). What remains is the ring close per case.
       const { agent } = job;
-      if (peers.get(agent.id) !== undefined) peers.delete(agent.id);
       if (isSlpLead(agent.provider)) {
-        routeReasons.set(agent.id, "lead-archived");
-        for (const [id, item] of cases) if (item.leadId === agent.id) {
+        for (const [, item] of cases) if (item.leadId === agent.id) {
           clearBodies(item);
           closeCase(item, "unknown", "lead-archived");
         }
       } else {
-        for (const [id, item] of cases) if (item.peerId === agent.id) {
+        for (const [, item] of cases) if (item.peerId === agent.id) {
           clearBodies(item);
           closeCase(item, "unknown", "peer-archived");
         }
@@ -587,47 +707,76 @@ export function createSupervisionObserver(deps: ObserverDeps) {
       // Enqueue-time generation check: an archive landing while this job
       // sat queued already invalidated the question it answers — discard
       // before spending a refresh on a stale generation.
-      if (archiveGeneration.get(job.leadId) !== job.gen) return;
+      if (archiveGen.get(job.leadId) !== job.gen) return;
       try {
         const result = await bounded(paseo.agents.ref(job.leadId).refresh(), signal);
         // Strict compare — also catches "archived while the refresh was in
-        // flight" (undefined → 1). job.gen is always defined here (restore
-        // jobs are only enqueued for tombstoned leads), so the compare
-        // rejects both a queued-time and a mid-flight archive.
-        if (archiveGeneration.get(job.leadId) !== job.gen) return;
+        // flight". Generations are monotonic, so an era-1 job can never
+        // alias era 2 (ABA-safe).
+        if (archiveGen.get(job.leadId) !== job.gen) return;
         const agent = result?.agent;
         if (!agent || agent.archivedAt !== null || agent.status === "closed" || !isSlpLead(agent.provider)) return;
-        archiveGeneration.delete(job.leadId);
+        archivedNow.delete(job.leadId);
       } catch { /* stays tombstoned — visibility gap recorded on next view */ }
       return;
     }
     if (job.t === "verify-peer") {
       if (paseo === undefined) return;
-      // Enqueue-time generation check: an archive landing while this job
-      // sat queued already invalidated the question it answers — discard
-      // before spending a refresh on a stale generation. Tombstoned peers
-      // enqueued with their CURRENT generation may still restore through
-      // this job — that is the refresh-verified self-heal path, not an
-      // old event claiming membership.
-      if (archiveGeneration.get(job.peerId) !== job.gen) return;
+      // Both generations were sampled at enqueue — an archived lead cannot
+      // adopt a peer (the membership would feed a dead lead's cases), and
+      // a peer archived while the job sat queued is a stale question.
+      // A tombstoned lead at commit time rejects regardless of the gen
+      // compare — the tombstone flag, not the era, is what blocks.
+      if (archiveGen.get(job.peerId) !== job.peerGen ||
+          archiveGen.get(job.leadId) !== job.leadGen ||
+          archivedNow.has(job.leadId)) return;
       try {
         const result = await bounded(paseo.agents.ref(job.peerId).refresh(), signal);
-        // Post-await strict compare — an archive landing mid-refresh
-        // discards the verification too; a raced live-looking snapshot
-        // must never admit an agent that is tombstoned again.
-        if (archiveGeneration.get(job.peerId) !== job.gen) return;
+        // Post-await strict compare on BOTH ids — an archive landing
+        // mid-refresh discards the verification; a raced live-looking
+        // snapshot must never admit an agent that is tombstoned again.
+        if (archiveGen.get(job.peerId) !== job.peerGen ||
+            archiveGen.get(job.leadId) !== job.leadGen ||
+            archivedNow.has(job.leadId)) return;
         const agent = result?.agent;
         if (!agent || agent.archivedAt !== null || agent.status === "closed" || !isSlpPeer(agent.provider)) return;
         const parent = agent.labels?.["paseo.parent-agent-id"] ?? null;
         if (parent !== job.leadId) return;
-        archiveGeneration.delete(job.peerId);
+        archivedNow.delete(job.peerId);
         peers.set(job.peerId, job.leadId);
       } catch { /* unverified — subsequent turn events retry */ }
       return;
     }
     // turn-end
     const event = job.capture;
+    // Job-top fail-closed: a gate-down edge observed here already ran the
+    // global purge — and this job's queued capture was body-scrubbed by it.
+    // The event contributes no evidence, same drop semantics as the hook.
+    if (!observeGate().ok) { diag(VISIBILITY.capturePaused); return; }
+    // A lead archived between enqueue and apply must not grow a case —
+    // the archive's synchronous purge already ran; the queued job closes
+    // the rows.
+    if (tombstoned(event.leadId)) { diag("lead-archived"); return; }
     if (event.kind === "peer") {
+      if (tombstoned(event.peerId)) {
+        // Captured live, archived while queued — record a metadata-only
+        // row so the lost observation stays inspectable (an event ARRIVING
+        // tombstoned drops at the hook instead, no row).
+        const entries = loadRing();
+        const stamp = new Date(now()).toISOString();
+        entries.set(event.id, {
+          fingerprint: event.id, leadAgentId: event.leadId, peerId: event.peerId,
+          peerTurnId: event.turnId, observedAt: stamp, updatedAt: stamp,
+          messageIds: { brief: null, handback: null, sendCallIds: [], sendTurnIds: [] },
+          state: "unknown", reason: "peer-archived",
+          visibility: ["peer-archived"],
+          counts: { roomMessages: 0, uncertainRoomMessages: 0, otherRoomMessages: 0, reportMessages: 0, peerSends: 0 },
+          assessmentsUsed: 0, lastAssessment: null,
+        });
+        ringDirty = true;
+        persistRing();
+        return;
+      }
       if (peers.get(event.peerId) !== event.leadId) {
         // Unverified membership — persist a metadata-only unknown, no bodies.
         const entries = loadRing();
@@ -711,13 +860,24 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     const newFlags = new Set(event.flags);
     const roomFor = new Map<string, MessageRef[]>();
     const reports: MessageRef[] = [];
+    // callIds consumed into a lane during THIS gather — committed to
+    // `sentCalls` only if the gather commits, so a discarded gather never
+    // burns a call's dedup slot (a later identical capture may retry it).
+    const accepted = new Set<string>();
+    // The gather's own basis: a purge landing mid-gather invalidates every
+    // lane assembled from pre-purge prompts.
+    const purgeAt = purgeCount;
     for (const send of sends) {
       if (signal.aborted) return;
+      // Per-iteration gate read — the funnel purges globally on a down
+      // edge, so a send classified after a mid-loop gate-down (observed or
+      // file-only) never lands a body.
+      if (!observeGate().ok) { newFlags.add(VISIBILITY.capturePaused); break; }
       const callKey = `${event.leadId}\0${send.callId}`;
-      if (sentCalls.has(callKey)) continue;
-      sentCalls.add(callKey);
+      if (sentCalls.has(callKey) || accepted.has(callKey)) continue;
       if (route.supervisorAgentId !== null && send.recipient === route.supervisorAgentId) {
         reports.push({ callId: send.callId, turnId: event.turnId, recipient: send.recipient, prompt: send.prompt });
+        accepted.add(callKey);
         continue;
       }
       if (send.recipient === event.leadId) continue;
@@ -732,13 +892,17 @@ export function createSupervisionObserver(deps: ObserverDeps) {
           newFlags.add(VISIBILITY.recipientInactive);
           continue;
         }
-        const gen = archiveGeneration.get(send.recipient);
+        const gen = archiveGen.get(send.recipient);
         try {
           const result = await bounded(lastPaseo.agents.ref(send.recipient).refresh(), signal);
+          if (signal.aborted) return;
+          // Post-await, gate first: a mid-await gate-down already ran the
+          // global purge — this prompt must not become a fresh body.
+          if (!observeGate().ok) { newFlags.add(VISIBILITY.capturePaused); break; }
           // Post-await generation compare — an archive landing mid-refresh
           // makes the returned snapshot stale; treat it as refresh failure,
           // never admit the send.
-          if (archiveGeneration.get(send.recipient) !== gen) {
+          if (archiveGen.get(send.recipient) !== gen) {
             newFlags.add(VISIBILITY.recipientRefreshFailed);
             continue;
           }
@@ -752,19 +916,30 @@ export function createSupervisionObserver(deps: ObserverDeps) {
             peers.set(send.recipient, event.leadId);
           }
         } catch {
+          if (signal.aborted) return;
           newFlags.add(VISIBILITY.recipientRefreshFailed);
           continue;
         }
-        // The drain suspended on that await — if the gate went down during
-        // it, every case was already flagged capture-paused and cleared;
-        // a send observed now cannot append a fresh body post-gate-down.
-        if (!captureAllowed()) continue;
       }
       if (leadOfRecipient !== event.leadId) continue; // unrelated recipient — never proof
       const list = roomFor.get(send.recipient) ?? [];
       list.push({ callId: send.callId, turnId: event.turnId, recipient: send.recipient, prompt: send.prompt });
       roomFor.set(send.recipient, list);
+      accepted.add(callKey);
     }
+    // Commit segment — NO await between this validation and the mutations.
+    // A gate-down observed here, a purge boundary crossed mid-gather, a
+    // lead archive, or a route removal/supervisor change all invalidate
+    // the assembled lanes — the purge/archive already flagged and cleared
+    // every affected case, so the gather is simply dropped.
+    if (signal.aborted) return;
+    const routeNow = shadowRoutes().get(event.leadId);
+    if (!observeGate().ok || purgeCount !== purgeAt || tombstoned(event.leadId) ||
+        routeNow === undefined || routeNow.supervisorAgentId !== route.supervisorAgentId) {
+      for (const item of cases.values()) if (item.leadId === event.leadId) item.dirty = true;
+      return;
+    }
+    for (const callKey of accepted) sentCalls.add(callKey);
     const subsequent = job.startSeq !== null && !job.overlap;
     if (job.startSeq === null || job.overlap) newFlags.add(VISIBILITY.leadStartUnmatched);
     for (const item of cases.values()) {
@@ -827,7 +1002,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
   async function evaluateCase(item: Case): Promise<void> {
     const route = shadowRoutes().get(item.leadId);
     if (route === undefined) { closeCase(item, "unknown", "route-removed"); return; }
-    const gate = jevGate();
+    const gate = observeGate();
     if (!gate.ok) {
       // A failed gate pauses the route: record the reason, drop every
       // captured body, keep the metadata-only ring row (spec: "does not
@@ -859,6 +1034,50 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     // an archived agent").
     if (tombstoned(item.leadId)) { clearBodies(item); closeCase(item, "unknown", "lead-archived"); return; }
     if (tombstoned(item.peerId)) { clearBodies(item); closeCase(item, "unknown", "peer-archived"); return; }
+
+    // Evaluation basis — sampled BEFORE the first await so every
+    // dimension's invalidation window covers the whole suspension (spec:
+    // "New evidence arriving during an assessment invalidates that
+    // assessment"). Dimensions:
+    //   pending    — this lead's enqueued-not-applied jobs. Per-LEAD
+    //                scoping (not the global queue version): an unrelated
+    //                lead's enqueue or a tick must not discard a paid
+    //                assessment of THIS case.
+    //   evidence   — in-place case mutations (lane pushes, body clears,
+    //                flag adds, pending-elapsed flips).
+    //   leadGen / peerGen — monotonic archive generations.
+    //   purge      — observed gate-down edges; closes the down→up ABA that
+    //                a gate re-read cannot see.
+    //   routeStamp / gateStamp — the config files can flip without any
+    //                event reaching this observer.
+    const basis = {
+      pending: enqPending.get(item.leadId) ?? 0,
+      evidence: item.evidenceVersion,
+      leadGen: archiveGen.get(item.leadId),
+      peerGen: archiveGen.get(item.peerId),
+      purge: purgeCount,
+      routeStamp: routesCache?.stamp ?? "-",
+      gateStamp: gateCache?.stamp ?? "-",
+    };
+    // Evidence inbound for this lead — defer rather than assess a
+    // snapshot the queue is about to change.
+    if (basis.pending !== 0) { item.dirty = true; return; }
+    // Refreshes the file-stamp caches so a config rewrite inside any
+    // suspension still invalidates. Gate SEMANTICS are bracketed by the
+    // observeGate calls at each checkpoint — a down edge purges globally
+    // before any compare runs.
+    const basisStale = (): boolean => {
+      shadowRoutes();
+      jevGate();
+      return (enqPending.get(item.leadId) ?? 0) !== basis.pending ||
+        item.evidenceVersion !== basis.evidence ||
+        archiveGen.get(item.leadId) !== basis.leadGen ||
+        archiveGen.get(item.peerId) !== basis.peerGen ||
+        purgeCount !== basis.purge ||
+        (routesCache?.stamp ?? "-") !== basis.routeStamp ||
+        (gateCache?.stamp ?? "-") !== basis.gateStamp;
+    };
+
     let leadSnap, peerSnap;
     try {
       [leadSnap, peerSnap] = await Promise.all([
@@ -866,20 +1085,36 @@ export function createSupervisionObserver(deps: ObserverDeps) {
         bounded(paseo.agents.ref(item.peerId).refresh(), signal),
       ]);
     } catch {
+      if (signal.aborted) return;
       item.disposition = "unknown";
       recordRing(item, "unknown", VISIBILITY.recipientRefreshFailed);
       ringDirty = true;
       return;
     }
     if (signal.aborted) return;
-    // Archive-generation re-check after the await: onArchived tombstones
-    // synchronously at hook time, so an archive landing while this refresh
-    // was in flight is already visible here even though its job is still
-    // queued behind this evaluation. A snapshot returned for a stale
-    // generation is never trusted — close on the archive boundary (spec:
-    // "Archive generations invalidate pending work").
+    // Post-await archive re-check: onArchived tombstones synchronously at
+    // hook time, so an archive landing mid-refresh is visible here even
+    // though its job is still queued behind this evaluation. A snapshot
+    // returned for a stale generation is never trusted — close on the
+    // archive boundary (spec: "Archive generations invalidate pending
+    // work").
     if (tombstoned(item.leadId)) { clearBodies(item); closeCase(item, "unknown", "lead-archived"); return; }
     if (tombstoned(item.peerId)) { clearBodies(item); closeCase(item, "unknown", "peer-archived"); return; }
+    // A gate-down edge during the refresh already ran the global purge —
+    // this case included. Close unknown with the gate reason rather than
+    // assessing a cleared payload.
+    const gateMid = observeGate();
+    if (!gateMid.ok) {
+      routeReasons.set(item.leadId, gateMid.reason);
+      item.disposition = "unknown";
+      closeCase(item, "unknown", gateMid.reason);
+      return;
+    }
+    // Route presence before the generic basis compare — a removed route
+    // closes with its own reason instead of discarding into a deferred
+    // re-evaluation that would close on it anyway one pass later.
+    if (shadowRoutes().get(item.leadId) === undefined) { closeCase(item, "unknown", "route-removed"); return; }
+    if (basisStale()) { item.dirty = true; return; }
     const lead = leadSnap?.agent;
     if (!lead || lead.archivedAt !== null || lead.status === "closed" ||
         !isSlpLead(lead.provider) || lead.workspaceId !== route.leadWorkspaceId) {
@@ -896,8 +1131,12 @@ export function createSupervisionObserver(deps: ObserverDeps) {
       closeCase(item, "unknown", "peer-inactive");
       return;
     }
-    const payload = buildEvidencePayload(item, route);
-    const gateReason = localGate(payload);
+    // Re-resolve the route for the payload — the bound supervisor id is
+    // part of the evidence contract and may have changed mid-refresh.
+    const routeNow = shadowRoutes().get(item.leadId);
+    if (routeNow === undefined) { closeCase(item, "unknown", "route-removed"); return; }
+    const payload = buildEvidencePayload(item, routeNow);
+    const gateReason = evidenceGate(payload);
     if (gateReason !== null) {
       item.gatedReason = gateReason;
       item.disposition = "unknown";
@@ -911,23 +1150,29 @@ export function createSupervisionObserver(deps: ObserverDeps) {
       closeCase(item, "unknown", VISIBILITY.evidenceOversize);
       return;
     }
-    // Stale-detection: evidence arriving during the assessment invalidates
-    // it before any conclusion is stored (spec: "invalidates the assessment
-    // before delivery"). Two generations: `version` covers evidence still
-    // QUEUED (enqueue bumps); `item.evidenceVersion` covers in-place
-    // mutations that never enqueue (gate-down, queue-overflow marks, lane
-    // pushes, body clears, pending-elapsed flips).
-    const pre = version;
-    const preEvidence = item.evidenceVersion;
+    // Spec: "Before every prompt, re-read the gates and refresh the
+    // recipient" — recipients were refreshed above; the gate is re-read
+    // NOW, immediately before the spend, and the freshly read object is
+    // what the ask uses. The final basis validation sits in the same
+    // synchronous segment as `assessments += 1` — no await can slip
+    // between validation and spend.
+    const gateNow = observeGate();
+    if (!gateNow.ok) {
+      routeReasons.set(item.leadId, gateNow.reason);
+      item.disposition = "unknown";
+      closeCase(item, "unknown", gateNow.reason);
+      return;
+    }
+    if (basisStale()) { item.dirty = true; return; }
     item.assessments += 1;
     let assessment: { answers: AssessmentAnswers; model: string; usage: { input_tokens: number; output_tokens: number } | null } | null = null;
     let failed = "jev-request-failed";
     try {
-      const envelope = await ask(gate.provider, gate.authorization, {
+      const envelope = await ask(gateNow.provider, gateNow.authorization, {
         state: payload,
         questions: SUPERVISION_QUESTIONS,
       }, { timeoutMs: httpTimeoutMs, signal });
-      const parsed = parseAssessmentResponse(envelope.raw, gate.provider);
+      const parsed = parseAssessmentResponse(envelope.raw, gateNow.provider);
       if (parsed !== null) {
         assessment = { answers: parsed.answers, model: parsed.model, usage: parsed.usage };
       } else {
@@ -939,8 +1184,24 @@ export function createSupervisionObserver(deps: ObserverDeps) {
         : error instanceof JevRequestError ? error.code : "jev-request-failed";
     }
     if (signal.aborted) return;
-    if (version !== pre || item.evidenceVersion !== preEvidence) {
-      // Evidence changed mid-flight — discard; the newer batch re-arms dirty.
+    // Post-ask revalidation, ordered so the most precise close reason wins:
+    // a down edge purges (and explains itself), a removed route closes
+    // route-removed, an archive closes on its boundary, and any remaining
+    // basis drift discards the paid-for assessment (the spend is still
+    // counted — the ceiling exists to bound calls, not verdicts).
+    const gateAfter = observeGate();
+    if (!gateAfter.ok) {
+      routeReasons.set(item.leadId, gateAfter.reason);
+      item.disposition = "unknown";
+      closeCase(item, "unknown", gateAfter.reason);
+      return;
+    }
+    if (shadowRoutes().get(item.leadId) === undefined) { closeCase(item, "unknown", "route-removed"); return; }
+    if (tombstoned(item.leadId)) { clearBodies(item); closeCase(item, "unknown", "lead-archived"); return; }
+    if (tombstoned(item.peerId)) { clearBodies(item); closeCase(item, "unknown", "peer-archived"); return; }
+    if (basisStale()) {
+      // Evidence/config changed mid-flight — discard; the newer batch
+      // re-arms dirty and the case re-evaluates on the next drain pass.
       item.dirty = true;
       return;
     }
@@ -1016,7 +1277,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     if (!Number.isFinite(next)) return;
     timer = setTimeout(() => {
       timer = undefined;
-      enqueue({ t: "tick", order: ++order });
+      enqueue({ t: "tick", order: ++order, leadId: null });
     }, Math.max(0, next - now()));
   }
 
@@ -1028,7 +1289,9 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     const entries = [...loadRing().values()]
       .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
     const gates: Record<string, string | null> = {};
-    const gate = jevGate();
+    // A view that observes a down edge is a detection point like any
+    // other — the funnel runs the same global purge.
+    const gate = observeGate();
     for (const leadId of shadowRoutes().keys()) {
       gates[leadId] = routeReasons.get(leadId) ?? (gate.ok ? null : gate.reason);
     }
@@ -1049,6 +1312,8 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     while (running) await new Promise(resolve => setTimeout(resolve, 10));
     cases.clear();
     peers.clear();
+    enqPending.clear();
+    archivedNow.clear();
     leadStarts.clear();
     startMeta.clear();
     openTurns.clear();

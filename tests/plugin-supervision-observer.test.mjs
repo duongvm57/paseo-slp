@@ -115,7 +115,7 @@ const jevResponse = (leadBrief, peerHandback, leadHandling, over = {}) => ({
 const ALL_HANDLED = jevResponse('satisfied', 'satisfied', 'handled');
 const ALL_DRIFT = jevResponse('satisfied', 'satisfied', 'drift');
 
-const makeObserver = (t, { home, gate = GATE_OK, ask, agents = {} } = {}) => {
+const makeObserver = (t, { home, gate = GATE_OK, ask, agents = {}, localGate } = {}) => {
   const stableRoot = join(home, 'slp-runtime');
   const observer = createSupervisionObserver({
     stableRoot,
@@ -123,6 +123,7 @@ const makeObserver = (t, { home, gate = GATE_OK, ask, agents = {} } = {}) => {
     // gate mid-flight (the file-stamp cache still applies between calls).
     gate: typeof gate === 'function' ? gate : () => gate,
     ask: ask ?? (async () => { throw new Error('ask-not-stubbed'); }),
+    ...(localGate === undefined ? {} : { localGate }),
   });
   const paseo = makePaseo(agents);
   t.after(() => observer.stop());
@@ -954,7 +955,9 @@ test('observer: archive during peer-refresh — a stale verification cannot admi
   const rows = ringRows(home);
   assert.ok(rows.length > 0, 'the dropped turn still records a metadata row — vacuous every() must not pass on empty');
   assert.ok(rows.every(row => row.state === 'unknown'), 'pre-archive evidence can only record unknown');
-  assert.ok(rows.every(row => row.reason === 'recipient-refresh-failed'));
+  // The queued turn applies AFTER the tombstone landed — the row records
+  // the archive boundary, not a refresh failure.
+  assert.ok(rows.every(row => row.reason === 'peer-archived'));
 });
 
 test('observer: gate-down clears retained bodies globally — the Jev gate is daemon-global', async t => {
@@ -1286,4 +1289,374 @@ test('observer: ring rows persisted before the new fields existed still load', a
   assert.equal(row.counts.otherRoomMessages, 0, 'new count field defaults to zero');
   assert.equal(row.lastAssessment, null, 'a legacy assessment shape reads as null, not a dropped row');
   assert.deepEqual(row.messageIds, { brief: null, handback: null, sendCallIds: [], sendTurnIds: [] });
+});
+
+// ---------------------------------------------------------------------------
+// Suspension-site × invalidation matrix — round-5 acceptance gate.
+// Every suspension site where the drain can interleave an invalidation is
+// exercised against the full invalidation catalog. Invariants per cell: no
+// body append/retention past an invalidation, no Jev spend while the gate
+// is down, no verdict commit on a stale basis, correct visibility flags.
+// ---------------------------------------------------------------------------
+
+const PEER3 = '77777777-7777-4777-8777-777777777777';
+
+const deferred = () => {
+  let resolve;
+  const p = new Promise(r => { resolve = r; });
+  return { p, resolve };
+};
+
+// A paseo double whose ref().refresh() suspends when shouldBlock(id, n) —
+// n is the 1-based call count for that id — until release() resolves.
+const blockingPaseo = (agents, shouldBlock = () => false) => {
+  const seen = new Map();
+  const suspended = [];
+  const gate = deferred();
+  const paseo = {
+    agents: {
+      ref: id => ({
+        refresh: async () => {
+          const n = (seen.get(id) ?? 0) + 1;
+          seen.set(id, n);
+          if (shouldBlock(id, n)) { suspended.push(id); await gate.p; }
+          return { agent: agents[id] ?? null };
+        },
+      }),
+    },
+  };
+  return { paseo, suspended, release: gate.resolve };
+};
+
+// Gate stub + file-stamp busting: each flip rewrites jev.json with a unique
+// size so the mtime+size cache never aliases two states.
+const matrixGateCtl = home => {
+  let current = GATE_OK;
+  let n = 0;
+  const bust = () => writeJev(home, { ...JEV_CFG, pad: 'x'.repeat(++n) });
+  return {
+    get: () => current,
+    down: (reason = 'jev-key-missing') => { current = { ok: false, reason }; bust(); },
+    up: () => { current = GATE_OK; bust(); },
+  };
+};
+
+const until = async cond => { while (!cond()) await sleep(2); };
+
+const MATRIX_SITES = ['S0a', 'S0b', 'S3', 'S4', 'S5'];
+const MATRIX_INVS = [
+  'gate-down-event', 'gate-down-file', 'gate-aba',
+  'archive-lead', 'archive-peer', 'archive-recipient',
+  'route-removed', 'evidence-enqueued', 'overflow', 'tick',
+];
+
+/** Runs one suspension-site × invalidation cell. Sites:
+ *   S0a — peer turn-end queued behind a blocked verify-peer refresh
+ *   S0b — lead turn-end queued behind a blocked verify-peer refresh
+ *   S3  — send-loop recipient refresh await
+ *   S4  — evaluation liveness Promise.all await
+ *   S5  — the Jev ask await
+ * Returns the post-resolution state for per-cell assertions. */
+const matrixCell = async (t, site, inv) => {
+  const home = makeHome(t);
+  const isEvalSite = site === 'S4' || site === 'S5';
+  const routes = [route({ pendingDelayMs: isEvalSite ? 0 : 60_000 })];
+  // `tick` needs a second case whose pending timer fires mid-suspension.
+  if (inv === 'tick') routes.push(route({ leadAgentId: OTHER_LEAD, pendingDelayMs: 25 }));
+  writeRoutes(home, routes);
+
+  const agents = liveAgents({
+    [OTHER_LEAD]: snap(OTHER_LEAD, 'slp-codex-lead'),
+    [OTHER]: snap(OTHER, 'slp-codex-peer', { labels: { 'paseo.parent-agent-id': LEAD } }),
+    [PEER3]: snap(PEER3, 'slp-codex-peer', { labels: { 'paseo.parent-agent-id': OTHER_LEAD } }),
+  });
+
+  const ctl = matrixGateCtl(home);
+  const shouldBlock =
+    site === 'S0a' || site === 'S0b' ? id => id === PEER2 :
+    site === 'S3' ? id => id === OTHER :
+    site === 'S4' ? (id, n) => id === PEER && n === 2 :
+    () => false;
+  const blk = blockingPaseo(agents, shouldBlock);
+  const paseo = blk.paseo;
+
+  const calls = [];
+  const askGate = deferred();
+  const ask = async (provider, auth, request) => {
+    calls.push(request);
+    if (site === 'S5') await askGate.p;
+    return { model: PROVIDER.model, answers: ALL_HANDLED.answers, usage: ALL_HANDLED.usage, raw: ALL_HANDLED };
+  };
+
+  const observer = createSupervisionObserver({
+    stableRoot: join(home, 'slp-runtime'),
+    gate: ctl.get,
+    ask,
+    // On this host every real capture carries report-route-unverifiable —
+    // the seam lets S4/S5 reach the liveness/ask suspension sites.
+    ...(isEvalSite ? { localGate: () => null } : {}),
+  });
+  t.after(() => observer.stop());
+
+  // --- reach the suspension site ----------------------------------------
+  observer.onCreated(peerHook(PEER), paseo);
+  await observer.idle(); // PEER verified (refresh #1)
+
+  if (inv === 'tick') {
+    observer.onCreated(peerHook(PEER3, { parentAgentId: OTHER_LEAD }), paseo);
+    await observer.idle();
+    observer.onTurn(peerEnd([userMsg('q'), asstMsg('a')], { peerId: PEER3, turnId: 'turn-x', agent: { parentAgentId: OTHER_LEAD } }), paseo);
+    await observer.idle(); // OTHER_LEAD case open, due in ~25ms
+  }
+
+  if (site === 'S0a') {
+    observer.onCreated(peerHook(PEER2), paseo); // verify-peer blocks inside apply
+    await until(() => blk.suspended.includes(PEER2));
+    observer.onTurn(peerTurn(), paseo);         // target turn-end queues behind
+  } else if (site === 'S0b') {
+    observer.onTurn(peerTurn(), paseo);
+    await observer.idle();                      // case created, drain free
+    observer.onCreated(peerHook(PEER2), paseo);
+    await until(() => blk.suspended.includes(PEER2));
+    observer.onStart(leadStart('turn-l1'));
+    observer.onTurn(leadEnd([userMsg('w'), codexSend('call-1', PEER, 'handle this')], { turnId: 'turn-l1' }), paseo);
+  } else if (site === 'S3') {
+    observer.onTurn(peerTurn(), paseo);
+    await observer.idle();                      // case created (60s delay → no eval)
+    observer.onStart(leadStart('turn-l3'));
+    observer.onTurn(leadEnd([userMsg('w'), codexSend('call-o', OTHER, 'msg for other')], { turnId: 'turn-l3' }), paseo);
+    await until(() => blk.suspended.includes(OTHER)); // send-loop suspended on the recipient refresh
+  } else {
+    observer.onTurn(peerTurn(), paseo); // case → eval → suspends at liveness (S4) or ask (S5)
+    if (site === 'S4') await until(() => blk.suspended.includes(PEER));
+    else await until(() => calls.length === 1);
+  }
+
+  // --- inject the invalidation while suspended ---------------------------
+  switch (inv) {
+    case 'gate-down-event':
+      ctl.down();
+      observer.onTurn(leadEnd([], { turnId: 'turn-gd' }), paseo); // the event observes the edge → global purge
+      break;
+    case 'gate-down-file':
+      ctl.down(); // file/config change only — the site's next gate read observes it
+      break;
+    case 'gate-aba':
+      ctl.down();
+      observer.onTurn(leadEnd([], { turnId: 'turn-gd' }), paseo);
+      ctl.up();
+      break;
+    case 'archive-lead': observer.onArchived(leadHook(), paseo); break;
+    case 'archive-peer': observer.onArchived(peerHook(), paseo); break;
+    case 'archive-recipient': observer.onArchived(peerHook(OTHER), paseo); break;
+    case 'route-removed': writeRoutes(home, []); break;
+    case 'evidence-enqueued':
+      observer.onStart(leadStart('turn-late'));
+      observer.onTurn(leadEnd([userMsg('late'), codexSend('call-late', PEER, 'late evidence')], { turnId: 'turn-late' }), paseo);
+      break;
+    case 'overflow': {
+      // Fill the queue with unrelated archive bookkeeping, then a same-lead
+      // turn-end drops — the drop must still invalidate (flag + basis).
+      for (let i = 0; i < 130; i += 1) observer.onArchived(agent(`flood-${i}`, 'slp-codex-peer'), paseo);
+      observer.onStart(leadStart('turn-ovf'));
+      observer.onTurn(leadEnd([userMsg('x'), codexSend('call-ovf', PEER, 'lost send')], { turnId: 'turn-ovf' }), paseo);
+      break;
+    }
+    case 'tick': await sleep(60); break; // the OTHER_LEAD case's timer fires mid-suspension
+    default: assert.fail(`unknown invalidation ${inv}`);
+  }
+
+  // --- release and settle ------------------------------------------------
+  blk.release();
+  if (site === 'S5') askGate.resolve();
+  await observer.idle();
+  await sleep(40); // let a late tick's eval drain too
+  await observer.idle();
+
+  const rows = ringRows(home);
+  const main = rows.find(r => r.leadAgentId === LEAD && r.peerId === PEER);
+  const other = rows.find(r => r.leadAgentId === OTHER_LEAD);
+  const fp = main?.fingerprint;
+  const diag = observer.shadow(join(home, 'slp-runtime'))?.diagnostics ?? { reasons: [] };
+  return { rows, main, other, fp, calls, diag, observer };
+};
+
+test('observer: suspension-site × invalidation matrix — unified basis validation', async t => {
+  let cells = 0;
+  for (const site of MATRIX_SITES) {
+    for (const inv of MATRIX_INVS) {
+      const tag = `${site}×${inv}`;
+      const r = await matrixCell(t, site, inv);
+      cells += 1;
+
+      if (site === 'S0a') {
+        if (inv === 'gate-down-event' || inv === 'gate-down-file' || inv === 'archive-lead' || inv === 'route-removed') {
+          assert.equal(r.main, undefined, `${tag}: no case may form`);
+          assert.equal(r.rows.length, 0, `${tag}: no row written`);
+        } else if (inv === 'archive-peer') {
+          assert.ok(r.main, `${tag}: the lost observation keeps a metadata row`);
+          assert.equal(r.main.reason, 'peer-archived', tag);
+          assert.equal(r.main.state, 'unknown', tag);
+        } else if (inv === 'gate-aba') {
+          assert.ok(r.main, `${tag}: the capture still forms a case post-recovery`);
+          assert.equal(r.observer.retainedBodies(r.fp), 0, `${tag}: purge scrubbed the queued capture's bodies`);
+          assert.ok(r.main.visibility.includes('capture-paused'), `${tag}: the purge window is flagged`);
+        } else {
+          // archive-recipient / evidence-enqueued / overflow / tick — no invalidation of this cell
+          assert.ok(r.main, `${tag}: the queued turn still forms a case`);
+          assert.ok(r.observer.retainedBodies(r.fp) > 0, `${tag}: bodies retained — no invalidation`);
+          if (inv === 'evidence-enqueued') assert.equal(r.main.counts.roomMessages, 1, `${tag}: the late send lands after resume`);
+          if (inv === 'overflow') assert.ok(r.diag.reasons.includes('queue-overflow'), `${tag}: the drop is recorded`);
+          if (inv === 'tick') assert.ok(r.other, `${tag}: the ticking case exists`);
+        }
+      }
+
+      if (site === 'S0b') {
+        if (inv === 'gate-down-event' || inv === 'gate-down-file') {
+          assert.ok(r.main, `${tag}: the pre-existing case stays visible`);
+          assert.equal(r.main.counts.roomMessages, 0, `${tag}: no send may append past the gate edge`);
+          assert.equal(r.observer.retainedBodies(r.fp), 0, `${tag}: purge emptied retained bodies`);
+          assert.ok(r.main.visibility.includes('capture-paused'), tag);
+        } else if (inv === 'gate-aba') {
+          assert.ok(r.main, tag);
+          assert.equal(r.main.counts.roomMessages, 1, `${tag}: scrubbed sends may append metadata`);
+          assert.equal(r.observer.retainedBodies(r.fp), 0, `${tag}: appended prompts are empty — no bodies`);
+          assert.ok(r.main.visibility.includes('capture-paused'), tag);
+        } else if (inv === 'archive-lead') {
+          assert.ok(r.main, tag);
+          assert.equal(r.main.reason, 'lead-archived', tag);
+          assert.equal(r.observer.retainedBodies(r.fp), null, `${tag}: the case closed — bodies gone`);
+        } else if (inv === 'archive-peer') {
+          assert.ok(r.main, tag);
+          assert.equal(r.main.reason, 'peer-archived', tag);
+          assert.equal(r.main.counts.roomMessages, 0, `${tag}: no send to a tombstoned peer lands`);
+        } else if (inv === 'route-removed') {
+          assert.ok(r.main, tag);
+          assert.equal(r.main.counts.roomMessages, 0, `${tag}: no append without a route`);
+        } else {
+          // archive-recipient / evidence-enqueued / overflow / tick
+          assert.ok(r.main, tag);
+          const expected = inv === 'evidence-enqueued' ? 2 : 1;
+          assert.equal(r.main.counts.roomMessages, expected, `${tag}: sends land in order`);
+          if (inv === 'overflow') assert.ok(r.main.visibility.includes('queue-overflow'), `${tag}: the dropped event marked the case`);
+          if (inv === 'tick') assert.ok(r.other, tag);
+        }
+      }
+
+      if (site === 'S3') {
+        if (inv === 'gate-down-event' || inv === 'gate-down-file' || inv === 'gate-aba') {
+          assert.ok(r.main, tag);
+          assert.equal(r.main.counts.otherRoomMessages, 0, `${tag}: no lane append across a purge boundary`);
+          assert.equal(r.observer.retainedBodies(r.fp), 0, `${tag}: bodies purged`);
+          assert.ok(r.main.visibility.includes('capture-paused'), tag);
+        } else if (inv === 'archive-lead') {
+          assert.equal(r.main.reason, 'lead-archived', tag);
+          assert.equal(r.main.counts.otherRoomMessages, 0, tag);
+        } else if (inv === 'archive-peer') {
+          assert.equal(r.main.reason, 'peer-archived', tag);
+        } else if (inv === 'archive-recipient') {
+          assert.ok(r.main, tag);
+          assert.equal(r.main.counts.otherRoomMessages, 0, `${tag}: archived recipient — send never admitted`);
+          assert.ok(r.main.visibility.includes('recipient-refresh-failed'), tag);
+        } else if (inv === 'route-removed') {
+          assert.ok(r.main, tag);
+          assert.equal(r.main.counts.otherRoomMessages, 0, `${tag}: gather discarded when the route vanished`);
+        } else {
+          // evidence-enqueued / overflow / tick — gather commits
+          assert.ok(r.main, tag);
+          assert.equal(r.main.counts.otherRoomMessages, 1, `${tag}: the send lands`);
+          if (inv === 'evidence-enqueued') assert.equal(r.main.counts.roomMessages, 1, `${tag}: the queued evidence applies too`);
+          if (inv === 'overflow') assert.ok(r.main.visibility.includes('queue-overflow'), tag);
+          if (inv === 'tick') assert.ok(r.other, tag);
+        }
+      }
+
+      if (site === 'S4') {
+        if (inv === 'gate-down-event' || inv === 'gate-down-file') {
+          assert.ok(r.main, tag);
+          assert.equal(r.main.reason, 'jev-key-missing', `${tag}: gate-down mid-refresh closes on the gate reason`);
+          assert.equal(r.calls.length, 0, `${tag}: no spend while the gate is down`);
+          assert.equal(r.main.lastAssessment, null, tag);
+        } else if (inv === 'archive-lead') {
+          assert.equal(r.main.reason, 'lead-archived', tag);
+          assert.equal(r.calls.length, 0, `${tag}: no spend on a stale generation`);
+        } else if (inv === 'archive-peer') {
+          assert.equal(r.main.reason, 'peer-archived', tag);
+          assert.equal(r.calls.length, 0, tag);
+        } else if (inv === 'route-removed') {
+          assert.equal(r.main.reason, 'route-removed', tag);
+          assert.equal(r.calls.length, 0, tag);
+        } else if (inv === 'gate-aba') {
+          // The purge bumps purgeCount mid-refresh → the frame discards
+          // pre-ask; no new job exists to re-arm the drain, so the case
+          // stays dirty+flagged rather than committing a stale verdict.
+          assert.ok(r.main, tag);
+          assert.equal(r.calls.length, 0, `${tag}: no spend across a purge boundary`);
+          assert.equal(r.main.lastAssessment, null, `${tag}: no verdict on a stale basis`);
+          assert.ok(r.main.visibility.includes('capture-paused'), tag);
+        } else if (inv === 'overflow' || inv === 'evidence-enqueued') {
+          // The stale-basis attempt discards before spend; the re-evaluation
+          // sees post-invalidation evidence and accepts.
+          assert.ok(r.main, tag);
+          assert.notEqual(r.main.lastAssessment, null, `${tag}: verdict commits only on the fresh basis`);
+          assert.equal(r.calls.length, 1, `${tag}: exactly one spend — the invalidated frame never reached ask`);
+          if (inv === 'evidence-enqueued') assert.equal(r.main.counts.roomMessages, 1, `${tag}: the accepted verdict saw the late send`);
+          if (inv === 'overflow') assert.ok(r.main.visibility.includes('queue-overflow'), tag);
+        } else {
+          // archive-recipient / tick — no invalidation of this case
+          assert.ok(r.main, tag);
+          assert.notEqual(r.main.lastAssessment, null, `${tag}: verdict accepted — unrelated churn must not discard`);
+          assert.equal(r.calls.length, inv === 'tick' ? 2 : 1, `${tag}: tick spends only on its own case`);
+          if (inv === 'tick') assert.ok(r.other, tag);
+        }
+      }
+
+      if (site === 'S5') {
+        if (inv === 'gate-down-event' || inv === 'gate-down-file') {
+          assert.ok(r.main, tag);
+          assert.equal(r.main.reason, 'jev-key-missing', `${tag}: post-ask gate read closes on the gate reason`);
+          assert.equal(r.calls.length, 1, `${tag}: the ask fired before the gate fell — spend counted, verdict dropped`);
+          assert.equal(r.main.lastAssessment, null, `${tag}: no verdict commit across the edge`);
+        } else if (inv === 'archive-lead') {
+          assert.equal(r.main.reason, 'lead-archived', tag);
+          assert.equal(r.main.lastAssessment, null, tag);
+        } else if (inv === 'archive-peer') {
+          assert.equal(r.main.reason, 'peer-archived', tag);
+          assert.equal(r.main.lastAssessment, null, tag);
+        } else if (inv === 'route-removed') {
+          assert.equal(r.main.reason, 'route-removed', tag);
+          assert.equal(r.main.lastAssessment, null, tag);
+        } else if (inv === 'gate-aba') {
+          // The purge's bump invalidates the in-flight ask — the paid-for
+          // assessment is discarded and NOT committed; with nothing left
+          // queued the case stays dirty+flagged rather than re-spending on
+          // evidence the purge already cleared.
+          assert.ok(r.main, tag);
+          assert.equal(r.calls.length, 1, `${tag}: exactly one spend — the stale ask never committed`);
+          assert.equal(r.main.lastAssessment, null, `${tag}: no verdict commit across the purge boundary`);
+          assert.ok(r.main.visibility.includes('capture-paused'), tag);
+        } else if (inv === 'evidence-enqueued' || inv === 'overflow') {
+          // The paid-for assessment is discarded on the stale basis; the
+          // queued work then applies, re-arms dirty, and the re-evaluation
+          // spends again on post-invalidation evidence.
+          assert.ok(r.main, tag);
+          assert.equal(r.calls.length, 2, `${tag}: stale ask discarded, fresh ask committed`);
+          assert.equal(r.main.assessmentsUsed, 2, `${tag}: both spends count against the ceiling`);
+          assert.notEqual(r.main.lastAssessment, null, tag);
+          if (inv === 'evidence-enqueued') assert.equal(r.main.counts.roomMessages, 1, `${tag}: the accepted verdict saw the late send`);
+          if (inv === 'overflow') assert.ok(r.main.visibility.includes('queue-overflow'), tag);
+        } else {
+          // archive-recipient / tick — per-lead basis: unrelated churn must
+          // NOT invalidate this case's assessment.
+          assert.ok(r.main, tag);
+          assert.equal(r.calls.length, inv === 'tick' ? 2 : 1, tag);
+          assert.notEqual(r.main.lastAssessment, null, `${tag}: verdict accepted — no spurious discard`);
+          assert.equal(r.main.reason, 'assessment-inconclusive', tag);
+          if (inv === 'tick') assert.ok(r.other, tag);
+        }
+      }
+    }
+  }
+  assert.equal(cells, MATRIX_SITES.length * MATRIX_INVS.length,
+    `executed ${cells} cells — expected ${MATRIX_SITES.length}×${MATRIX_INVS.length}`);
 });
