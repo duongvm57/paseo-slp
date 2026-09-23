@@ -440,3 +440,46 @@ test('doctrine: work-tracking.md self-gates, keeps [verify] markers and the neve
   assert.match(body, /BEADS_ACTOR=slp-<role>-<agent id>/);
   assert.match(body, /--actor slp-<role>-<agent id>/);
 });
+
+// ---------------------------------------------------------------------------
+// T7 — plugin reader ↔ package reader parity on the same fixture files.
+// The plugin cannot import package code (no-cross-boundary), so the two
+// readers are maintained mirrors; this test pins identical answers.
+// ---------------------------------------------------------------------------
+
+test('parity: plugin and package readers answer identically on the same fixtures (T7)', async t => {
+  const plugin = await import('../plugin/server/work-tracker.ts');
+  const home = tmpHome(t);
+  const stableRoot = join(home, 'slp-runtime');
+  const cases = [
+    ['absent file', undefined],
+    ['enabled', { schemaVersion: 1, tracker: 'beads', enabled: true }],
+    ['disabled', { schemaVersion: 1, tracker: 'beads', enabled: false }],
+    ['corrupt JSON', '{corrupt'],
+    ['array', [1]],
+    ['wrong schemaVersion', { schemaVersion: 2, tracker: 'beads', enabled: true }],
+    ['foreign tracker', { schemaVersion: 1, tracker: 'linear', enabled: true }],
+    ['non-boolean enabled', { schemaVersion: 1, tracker: 'beads', enabled: 'yes' }],
+    ['extra key', { schemaVersion: 1, tracker: 'beads', enabled: true, extra: 1 }],
+  ];
+  for (const [name, value] of cases) {
+    if (value === undefined) rmSync(settingPath(home), { force: true });
+    else writeSetting(home, value);
+    const src = readWorkTrackerSetting(home);
+    const plg = plugin.readWorkTrackerSetting(stableRoot);
+    assert.equal(plg.enabled, src.enabled, `${name}: enabled diverged`);
+    assert.equal(plg.error, src.error, `${name}: error diverged`);
+  }
+  // beadsSeatEnv parity: same inputs, same overlay — including the
+  // Human-set-env precedence rules.
+  for (const env of [{}, { BD_AGENT_PROFILE: 'aggressive' }, { BEADS_ACTOR: 'x', BD_DISABLE_METRICS: '0' }]) {
+    assert.deepEqual(
+      plugin.beadsSeatEnv({ role: 'lead', agentId: 'a1', env }),
+      beadsSeatEnv({ role: 'lead', agentId: 'a1', env }),
+    );
+  }
+  // findBd parity: same PATH scan result on the same fixture.
+  const bd = fakeBd(t, {});
+  assert.equal(plugin.findBd({ PATH: bd.dir }), findBd({ PATH: bd.dir }));
+  assert.equal(plugin.findBd({ PATH: 'relative' }), findBd({ PATH: 'relative' }));
+});

@@ -42,6 +42,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { PluginBeforeRequests } from "@getpaseo/plugin/server";
 import { HOOK_PROVIDER_ID_RE, ROLES, WRAPPER_PROVIDER_ID_RE } from "../shared/families.ts";
+import { beadsSeatEnv } from "./work-tracker.ts";
 
 type AgentCreateRequest = PluginBeforeRequests["agent.create"];
 type SessionOpenRequest = PluginBeforeRequests["agent.session_open"];
@@ -87,6 +88,12 @@ export interface RoleInjectionDeps {
   importModule?: (specifier: string) => Promise<RoleBundleModule>;
   /** Grant-token derivation seam for tests; must return a non-empty token. */
   grantToken?: (request: { agentId: string; reason: string }) => string;
+  /** Work-tracker enablement for the seat env overlay (spec §6.3).
+   *  Production wires work-tracker.ts readWorkTrackerEnabled against the
+   *  resolved daemon home's stable root. Absent dep or any read error →
+   *  disabled: sessionOpen emits only the grant overlay, exactly as before
+   *  the feature. */
+  readWorkTrackerEnabled?: () => boolean;
 }
 
 // The id classes derive from the family registry (shared/families.ts): hook
@@ -202,15 +209,28 @@ export function createRoleInjection(deps: RoleInjectionDeps) {
     },
 
     /** agent.session_open before-hook: overlay the per-open grant onto the
-     *  provider env for hook-family managed ids. All other fields are
-     *  returned unchanged (the host rejects changes beyond env). Runs for
-     *  every open reason — create, resume, refresh, import. */
+     *  provider env for hook-family managed ids — plus the beads seat env
+     *  (BEADS_ACTOR and the two BD_* defaults) when the manager-owned
+     *  work-tracker setting is enabled. A disabled/absent/corrupt setting
+     *  emits only the grant overlay: any read error is a gap, never an
+     *  aborted open. All other fields are returned unchanged (the host
+     *  rejects changes beyond env). Runs for every open reason — create,
+     *  resume, refresh, import — so a resumed seat keeps its actor. */
     sessionOpen(input: { request: SessionOpenRequest }) {
       const request = input.request;
-      if (!HOOK_FAMILY_PROVIDER.test(request.provider)) return;
+      const owned = HOOK_FAMILY_PROVIDER.exec(request.provider);
+      if (owned === null) return;
+      let enabled = false;
+      try {
+        enabled = deps.readWorkTrackerEnabled?.() === true;
+      } catch { /* a setting read failure must never abort the open */ }
       return {
         ...request,
-        env: { ...request.env, SLP_SESSION_OPEN_GRANT: grantToken(request) },
+        env: {
+          ...(request.env ?? {}),
+          ...(enabled ? beadsSeatEnv({ role: owned[2], agentId: request.agentId, env: request.env ?? {} }) : {}),
+          SLP_SESSION_OPEN_GRANT: grantToken(request),
+        },
       };
     },
   };

@@ -6,7 +6,7 @@ import type { PluginServerContribution } from "@getpaseo/plugin/server";
 import { homedir } from "node:os";
 import { realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { activate, reconcile, deactivate, status, localTarget, catalog, setLanguage, getRoleRouting, setRoleRouting, getPeerPool, setPeerPool, getJev, setJev, setJevKey, testJev } from "./shared/contracts.ts";
+import { activate, reconcile, deactivate, status, localTarget, catalog, setLanguage, getRoleRouting, setRoleRouting, getPeerPool, setPeerPool, getJev, setJev, setJevKey, testJev, getWorkTracker, setWorkTracker } from "./shared/contracts.ts";
 import type { Manager } from "./shared/contracts.ts";
 import { loadCatalog } from "./server/provider-catalog.ts";
 import { createManager } from "./server/manager.ts";
@@ -18,6 +18,7 @@ import { createExecutableResolver } from "./server/executables.ts";
 import { createLauncherBuilder } from "./server/launchers.ts";
 import { createJournal } from "./server/journal.ts";
 import { createRoleInjection } from "./server/role-injection.ts";
+import { createWorkTracker, readWorkTrackerEnabled } from "./server/work-tracker.ts";
 // Host note: this must stay a hoisted function declaration, not a const —
 // the daemon compiler's Hermes interop eagerly copies export values before
 // module bodies run, so `export default const` evaluates to undefined.
@@ -50,6 +51,11 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   server.handle(setJev, input => jev.setJev(input));
   server.handle(setJevKey, input => jev.setJevKey(input));
   server.handle(testJev, input => jev.testJev(input));
+  // Beads work tracker — same plugin-owned state class (no journal/mutex/
+  // authority gate); bd detection is read-only and never fails the RPC.
+  const tracker = createWorkTracker();
+  server.handle(getWorkTracker, input => tracker.getWorkTracker(input));
+  server.handle(setWorkTracker, input => tracker.setWorkTracker(input));
   // Phase 2 (settings-driven-providers.md §6): the hook-family thin aliases
   // need the two halves the sentinel gate cannot supply — role-bundle
   // injection at agent.create and the session-open grant overlay. Both hooks
@@ -59,6 +65,11 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   const journal = createJournal();
   const injection = createRoleInjection({
     readActiveBinding: () => readActiveBinding(journal),
+    // Same daemon-home resolution as readActiveBinding: the setting lives at
+    // <canonical home>/slp-runtime/state/work-tracker.json. A throw here is
+    // converted to "disabled" inside sessionOpen — never aborts an open.
+    readWorkTrackerEnabled: () =>
+      readWorkTrackerEnabled(join(realpathSync(detectDaemonHome().daemonHome), "slp-runtime")),
     // O1: the create-hook re-verifies the published candidate (cached once
     // per sha) before importing its role bundle — same verifyPublished the
     // management plane uses; covers the gate transitively (see
