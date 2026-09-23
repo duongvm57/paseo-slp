@@ -976,13 +976,20 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     }
     // Per-recipient tombstone sweep: a recipient archived while a LATER
     // send's refresh was in flight invalidates the lane accepted earlier —
-    // drop it and flag, same as the in-loop recipient-inactive path.
+    // drop it and flag, same as the in-loop recipient-inactive path. The
+    // uncertain lane follows the same rule — an unconfirmed send to an
+    // agent on the archive boundary retains no body either.
     for (const recipient of roomFor.keys()) {
       if (tombstoned(recipient)) { roomFor.delete(recipient); newFlags.add(VISIBILITY.recipientInactive); }
     }
     for (let i = reports.length - 1; i >= 0; i -= 1) {
       if (tombstoned(reports[i].recipient)) { reports.splice(i, 1); newFlags.add(VISIBILITY.recipientInactive); }
     }
+    const uncertainKept = uncertain.filter(send => {
+      if (!tombstoned(send.recipient)) return true;
+      newFlags.add(VISIBILITY.recipientInactive);
+      return false;
+    });
     // Verified memberships commit only inside the guard — and only for
     // recipients still outside the tombstone set.
     for (const [id, lead] of pendingPeers) if (!tombstoned(id)) peers.set(id, lead);
@@ -1015,10 +1022,10 @@ export function createSupervisionObserver(deps: ObserverDeps) {
           item.evidence.uncertainRoomMessages.push(...list);
         }
       }
-      if (uncertain.length > 0) {
+      if (uncertainKept.length > 0) {
         mutated = true;
         item.evidence.uncertainRoomMessages.push(
-          ...uncertain.map(s => ({ callId: s.callId, turnId: event.turnId, recipient: s.recipient, prompt: s.prompt })),
+          ...uncertainKept.map(s => ({ callId: s.callId, turnId: event.turnId, recipient: s.recipient, prompt: s.prompt })),
         );
       }
       if (reports.length > 0) {

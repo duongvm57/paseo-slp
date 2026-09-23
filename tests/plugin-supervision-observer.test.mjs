@@ -69,6 +69,12 @@ const codexSend = (callId, recipient, prompt, over = {}) => ({
   detail: { type: 'unknown', input: { agentId: recipient, prompt }, output: { isError: false, structuredContent: { success: true } } },
   ...over,
 });
+// Devin-family send — the probe records every parsed call UNCONFIRMED
+// (transport success only), so it lands in the uncertain lane.
+const devinSend = (callId, recipient, prompt) => ({
+  type: 'tool_call', callId, name: 'Calling send_agent_prompt from paseo', status: 'completed', error: null,
+  detail: { type: 'unknown', input: { agentId: recipient, prompt }, output: null },
+});
 
 const peerEnd = (timeline, over = {}) => ({
   agent: peerHook(over.peerId ?? PEER, over.agent ?? {}),
@@ -1350,6 +1356,7 @@ const MATRIX_SITES = ['S0a', 'S0b', 'S3', 'S4', 'S5'];
 const MATRIX_INVS = [
   'gate-down-event', 'gate-down-file', 'gate-aba', 'gate-down-orphan',
   'archive-lead', 'archive-lead-aba', 'archive-peer', 'archive-accepted', 'archive-recipient',
+  'archive-supervisor', 'archive-uncertain-recipient',
   'route-removed', 'evidence-enqueued', 'overflow', 'tick',
 ];
 
@@ -1424,7 +1431,11 @@ const matrixCell = async (t, site, inv) => {
     observer.onCreated(peerHook(PEER2), paseo);
     await until(() => blk.suspended.includes(PEER2));
     observer.onStart(leadStart('turn-l1'));
-    observer.onTurn(leadEnd([userMsg('w'), codexSend('call-1', PEER, 'handle this')], { turnId: 'turn-l1' }), paseo);
+    // archive-uncertain-recipient carries an UNCONFIRMED send to OTHER —
+    // the devin family shape keeps it in the uncertain lane.
+    observer.onTurn(inv === 'archive-uncertain-recipient'
+      ? leadEnd([userMsg('w'), devinSend('call-u', OTHER, 'unconfirmed send')], { turnId: 'turn-l1', agent: { provider: 'slp-devin-lead' } })
+      : leadEnd([userMsg('w'), codexSend('call-1', PEER, 'handle this')], { turnId: 'turn-l1' }), paseo);
   } else if (site === 'S3') {
     observer.onTurn(peerTurn(), paseo);
     await observer.idle();                      // case created (60s delay → no eval)
@@ -1434,7 +1445,10 @@ const matrixCell = async (t, site, inv) => {
     observer.onCreated(peerHook(OTHER, { parentAgentId: LEAD }), paseo);
     await observer.idle();
     observer.onStart(leadStart('turn-l3'));
+    // archive-supervisor also carries a report send — assembled BEFORE the
+    // suspension, so its lane must be swept at commit when SUP is archived.
     observer.onTurn(leadEnd([userMsg('w'),
+      ...(inv === 'archive-supervisor' ? [codexSend('call-r', SUP, 'report for supervisor')] : []),
       codexSend('call-o', OTHER, 'msg for other'),
       codexSend('call-o2', OTHER2, 'msg for other2'),
     ], { turnId: 'turn-l3' }), paseo);
@@ -1491,6 +1505,16 @@ const matrixCell = async (t, site, inv) => {
       // S3: archive the recipient whose refresh is in flight; elsewhere an
       // unrelated peer.
       observer.onArchived(peerHook(site === 'S3' ? OTHER2 : OTHER), paseo);
+      break;
+    case 'archive-supervisor':
+      // S3: archive the report recipient mid-await — the reports lane was
+      // already staged and must be swept at commit. Elsewhere unrelated.
+      observer.onArchived(agent(SUP, 'slp-codex-supervisor'), paseo);
+      break;
+    case 'archive-uncertain-recipient':
+      // S0b: archive the unconfirmed send's recipient while the devin turn-end
+      // is queued; elsewhere an unrelated peer.
+      observer.onArchived(peerHook(site === 'S0b' ? OTHER : PEER3), paseo);
       break;
     case 'route-removed': writeRoutes(home, []); break;
     case 'evidence-enqueued':
@@ -1554,8 +1578,9 @@ test('observer: suspension-site × invalidation matrix — unified basis validat
           assert.ok(!r.main.messageIds.sendCallIds.includes('call-orph'), `${tag}: the dropped turn never lands`);
           assert.ok(r.main.visibility.includes('capture-paused'), `${tag}: the purge window is flagged`);
         } else {
-          // archive-accepted / archive-recipient / evidence-enqueued /
-          // overflow / tick — no invalidation of this cell
+          // archive-accepted / archive-recipient / archive-supervisor /
+          // archive-uncertain-recipient / evidence-enqueued / overflow /
+          // tick — no invalidation of this cell
           assert.ok(r.main, `${tag}: the queued turn still forms a case`);
           assert.ok(r.observer.retainedBodies(r.fp) > 0, `${tag}: bodies retained — no invalidation`);
           if (inv === 'evidence-enqueued') assert.equal(r.main.counts.roomMessages, 1, `${tag}: the late send lands after resume`);
@@ -1595,9 +1620,17 @@ test('observer: suspension-site × invalidation matrix — unified basis validat
         } else if (inv === 'route-removed') {
           assert.ok(r.main, tag);
           assert.equal(r.main.counts.roomMessages, 0, `${tag}: no append without a route`);
+        } else if (inv === 'archive-uncertain-recipient') {
+          // The unconfirmed send's recipient was archived while the turn-end
+          // sat in the queue — the commit sweep drops it from the uncertain
+          // lane and flags the case.
+          assert.ok(r.main, tag);
+          assert.equal(r.main.counts.uncertainRoomMessages, 0, `${tag}: no uncertain append to a tombstoned recipient`);
+          assert.ok(r.main.visibility.includes('recipient-inactive'), tag);
+          assert.ok(!r.main.messageIds.sendCallIds.includes('call-u'), `${tag}: the swept send's id never commits`);
         } else {
-          // archive-accepted / archive-recipient / evidence-enqueued /
-          // overflow / tick
+          // archive-accepted / archive-recipient / archive-supervisor /
+          // evidence-enqueued / overflow / tick
           assert.ok(r.main, tag);
           const expected = inv === 'evidence-enqueued' ? 2 : 1;
           assert.equal(r.main.counts.roomMessages, expected, `${tag}: sends land in order`);
@@ -1648,6 +1681,14 @@ test('observer: suspension-site × invalidation matrix — unified basis validat
           assert.ok(r.main.visibility.includes('recipient-refresh-failed'), tag);
           assert.ok(r.main.messageIds.sendCallIds.includes('call-o'), `${tag}: OTHER's send commits`);
           assert.ok(!r.main.messageIds.sendCallIds.includes('call-o2'), `${tag}: OTHER2's send never admitted`);
+        } else if (inv === 'archive-supervisor') {
+          // SUP archived mid-await — the reports lane was staged before the
+          // suspension and must be swept at commit; the room lanes commit.
+          assert.ok(r.main, tag);
+          assert.equal(r.main.counts.reportMessages, 0, `${tag}: no report append to a tombstoned supervisor`);
+          assert.ok(r.main.visibility.includes('recipient-inactive'), tag);
+          assert.ok(!r.main.messageIds.sendCallIds.includes('call-r'), `${tag}: the swept report's id never commits`);
+          assert.equal(r.main.counts.otherRoomMessages, 2, `${tag}: both room lanes still land`);
         } else if (inv === 'route-removed') {
           assert.ok(r.main, tag);
           assert.equal(r.main.counts.otherRoomMessages, 0, `${tag}: gather discarded when the route vanished`);
@@ -1703,8 +1744,8 @@ test('observer: suspension-site × invalidation matrix — unified basis validat
           if (inv === 'evidence-enqueued') assert.equal(r.main.counts.roomMessages, 1, `${tag}: the accepted verdict saw the late send`);
           if (inv === 'overflow') assert.ok(r.main.visibility.includes('queue-overflow'), tag);
         } else {
-          // archive-accepted / archive-recipient / tick — no invalidation
-          // of this case
+          // archive-accepted / archive-recipient / archive-supervisor /
+          // archive-uncertain-recipient / tick — no invalidation of this case
           assert.ok(r.main, tag);
           assert.notEqual(r.main.lastAssessment, null, `${tag}: verdict accepted — unrelated churn must not discard`);
           assert.equal(r.calls.length, inv === 'tick' ? 2 : 1, `${tag}: tick spends only on its own case`);
@@ -1757,7 +1798,8 @@ test('observer: suspension-site × invalidation matrix — unified basis validat
           if (inv === 'evidence-enqueued') assert.equal(r.main.counts.roomMessages, 1, `${tag}: the accepted verdict saw the late send`);
           if (inv === 'overflow') assert.ok(r.main.visibility.includes('queue-overflow'), tag);
         } else {
-          // archive-accepted / archive-recipient / tick — per-lead basis:
+          // archive-accepted / archive-recipient / archive-supervisor /
+          // archive-uncertain-recipient / tick — per-lead basis:
           // unrelated churn must NOT invalidate this case's assessment.
           assert.ok(r.main, tag);
           assert.equal(r.calls.length, inv === 'tick' ? 2 : 1, tag);
