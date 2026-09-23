@@ -13,7 +13,8 @@ import { createManager } from "./server/manager.ts";
 import { createJev } from "./server/jev.ts";
 import { createStateStore } from "./server/state-store.ts";
 import { createSupervisionState } from "./server/supervision/state.ts";
-import { detectDaemonHome } from "./server/daemon-home.ts";
+import { createSupervisionObserver, type SupervisionObserver } from "./server/supervision/observer.ts";
+import { detectDaemonHome, resolveDaemonHome } from "./server/daemon-home.ts";
 import { createMaterializer } from "./server/materializer.ts";
 import { embeddedPayload } from "./server/generated/runtime-payload.ts";
 import { createExecutableResolver } from "./server/executables.ts";
@@ -56,8 +57,26 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   // private supervision.json under the SERVED daemon home — the store binds
   // the state path to the home this process actually serves (PASEO_HOME env),
   // refusing reads/writes it cannot verify. Agent validation on save goes
-  // through the connected SDK; no lifecycle hook calls Jev yet.
-  const supervision = createSupervisionState();
+  // through the connected SDK.
+  // Phase B shadow observer: lifecycle hooks capture the minimal normalized
+  // communication synchronously; a serialized plugin-lifetime queue owns SDK
+  // refreshes, Jev HTTP (via the gated supervision resolver) and the bounded
+  // metadata ring. `notify` routes are never observed; no send() exists here.
+  // An unverifiable served home leaves the observer inert (shadow = null).
+  let observer: SupervisionObserver | null = null;
+  try {
+    const served = detectDaemonHome();
+    const binding = resolveDaemonHome(
+      { hostId: "local", daemonHome: served.daemonHome },
+      "config.json must be a regular file, not a link",
+    );
+    observer = createSupervisionObserver({ stableRoot: binding.stableRoot });
+  } catch {
+    observer = null;
+  }
+  const supervision = createSupervisionState({
+    shadow: stableRoot => observer?.shadow(stableRoot) ?? null,
+  });
   server.handle(getSupervision, input => supervision.getSupervision(input));
   server.handle(setSupervision, (input, { paseo }) => supervision.setSupervision(input, paseo));
   // Phase 2 (settings-driven-providers.md §6): the hook-family thin aliases
@@ -78,9 +97,21 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   });
   const offAgentCreate = server.before("agent.create", injection.agentCreate);
   const offSessionOpen = server.before("agent.session_open", injection.sessionOpen);
+  // Shadow-observer lifecycle hooks — synchronous capture only; every async
+  // step (refresh, Jev HTTP, ring write) runs on the observer's own queue.
+  const ob = observer;
+  const offCreated = ob === null ? null : server.on("agent.created", event => ob.onCreated(event.agent));
+  const offArchived = ob === null ? null : server.on("agent.archived", (event, { paseo }) => ob.onArchived(event.agent, paseo));
+  const offStarted = ob === null ? null : server.on("agent.turn_started", event => ob.onStart(event));
+  const offEnded = ob === null ? null : server.on("agent.turn_ended", (event, { paseo }) => ob.onTurn(event, paseo));
   return () => {
     offAgentCreate();
     offSessionOpen();
+    offCreated?.();
+    offArchived?.();
+    offStarted?.();
+    offEnded?.();
+    void ob?.stop();
     manager.close();
   };
 }

@@ -58,8 +58,8 @@
         "sendAgentPrompt": true,
         "recipientAgentId": "22222222-2222-4222-8222-222222222222",
         "prompt": "Sanitized fixture prompt — a Peer report or Lead instruction body appears here verbatim. No real session content.",
-        "confirmed": true,
-        "successEvidence": "status === 'completed' only — the MCP result body is dropped (output: null), so structuredContent.success is NOT observable for devin; 'completed' is transport-level success",
+        "confirmed": false,
+        "successEvidence": "status === 'completed' only — the MCP result body is dropped (output: null), so structuredContent.success is NOT observable for devin; 'completed' is transport-level success. Delivery-confirmation semantics: an unobservable result is uncertain, never confirmed.",
         "caveat": "name is a human title ('Calling <tool> from <server>'), not the tool id; a failed call carrying text content normalizes to detail.type 'plain_text' instead of 'unknown'"
       }
     }

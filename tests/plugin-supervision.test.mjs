@@ -74,7 +74,10 @@ test('absent file reads as unconfigured: empty routes, null sha, no error', asyn
   const home = makeHome(t);
   const state = stateFor(home);
   const view = await get(state, home);
-  assert.deepEqual(view, { schemaVersion: 1, routes: [], sha256: null, error: null });
+  assert.deepEqual(view, {
+    schemaVersion: 1, routes: [], sha256: null,
+    observations: null, gates: null, diagnostics: null, error: null,
+  });
   assert.equal(existsSync(fileOf(home)), false);
 });
 

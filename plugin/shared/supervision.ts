@@ -75,13 +75,90 @@ export const SupervisionFileSchema = z
   .strict();
 export type SupervisionFile = z.infer<typeof SupervisionFileSchema>;
 
+// ---------------------------------------------------------------------------
+// Shadow-observer metadata (spec §Shadow evidence and operator surface) —
+// METADATA ONLY: no message bodies, no keys. The bounded ring
+// (state/supervision-cases.json, ≤200 entries or 30 days) survives restarts
+// so a shadow pilot keeps its review trail.
+// ---------------------------------------------------------------------------
+
+/** UI-visible case states (spec: "distinguish observed, evaluated, unknown,
+ *  suspected drift, and notification delivery uncertain"). The last exists
+ *  in the vocabulary but is never emitted — notification delivery is not
+ *  implemented in this build. */
+export const SupervisionCaseState = z.enum([
+  "observed",
+  "evaluated",
+  "unknown",
+  "suspected_drift",
+  "notification_uncertain",
+]);
+export type SupervisionCaseState = z.infer<typeof SupervisionCaseState>;
+
+export const SupervisionAssessmentSummary = z.object({
+  at: z.string(),
+  model: z.string(),
+  usage: z.object({
+    input_tokens: z.number().int().nonnegative(),
+    output_tokens: z.number().int().nonnegative(),
+  }).nullable(),
+  choices: z.object({
+    leadBrief: z.string(),
+    peerHandback: z.string(),
+    leadHandling: z.string(),
+  }).strict(),
+}).strict();
+export type SupervisionAssessmentSummary = z.infer<typeof SupervisionAssessmentSummary>;
+
+export const SupervisionObservation = z.object({
+  fingerprint: Sha,
+  leadAgentId: Id,
+  peerId: Id,
+  peerTurnId: z.string().nullable(),
+  observedAt: z.string(),
+  updatedAt: z.string(),
+  state: SupervisionCaseState,
+  /** Bounded local reason code when state is "unknown"/"suspected_drift" —
+   *  never carries message text. */
+  reason: z.string().max(400).nullable(),
+  /** Visibility-limit flags (bounded vocabulary from capture.ts). */
+  visibility: z.array(z.string().max(80)),
+  counts: z.object({
+    roomMessages: z.number().int().nonnegative(),
+    uncertainRoomMessages: z.number().int().nonnegative(),
+    reportMessages: z.number().int().nonnegative(),
+    peerSends: z.number().int().nonnegative(),
+  }).strict(),
+  assessmentsUsed: z.number().int().nonnegative(),
+  lastAssessment: SupervisionAssessmentSummary.nullable(),
+}).strict();
+export type SupervisionObservation = z.infer<typeof SupervisionObservation>;
+
+/** Bounded observer diagnostics — dropped-event / ceiling reasons only. */
+export const SupervisionDiagnostics = z.object({
+  droppedEvents: z.number().int().nonnegative(),
+  reasons: z.array(z.string().max(200)),
+}).strict();
+export type SupervisionDiagnostics = z.infer<typeof SupervisionDiagnostics>;
+
+/** Per-route gate reason — null means the gate is green; a string is the
+ *  paused reason the Manager must show (spec: a failed gate "pauses capture
+ *  for that route and shows a reason in the Manager"). */
+export const SupervisionGates = z.record(z.string(), z.string().nullable());
+export type SupervisionGates = z.infer<typeof SupervisionGates>;
+
 // routes: null = the file is invalid or the target is not the served daemon
 // home — off with a visible error, never presented as an empty saved list.
 // sha256: raw-file CAS token (null when no file exists).
+// observations/gates/diagnostics: the live observer's shadow-only readout;
+// null when the observer is not running for that home.
 export const GetSupervisionOutput = z.object({
   schemaVersion: z.literal(1),
   routes: z.array(SupervisionRoute).nullable(),
   sha256: Sha.nullable(),
+  observations: z.array(SupervisionObservation).nullable(),
+  gates: SupervisionGates.nullable(),
+  diagnostics: SupervisionDiagnostics.nullable(),
   error: z.string().nullable(),
 }).strict();
 export type GetSupervisionResult = z.infer<typeof GetSupervisionOutput>;

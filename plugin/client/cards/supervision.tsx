@@ -23,6 +23,7 @@ import type {
   SetSupervisionRequest,
   SetSupervisionResult,
   SupervisionMode,
+  SupervisionObservation,
   SupervisionRoute,
 } from "../../shared/supervision.ts";
 import { errorMessage } from "../manager-state.ts";
@@ -101,6 +102,87 @@ const gateStatus = (jevView: JevCardState["view"]): { label: string; tone: "neut
   }
   return { label: "Jev supervision capability armed — explicit routes still required", tone: "good" };
 };
+
+// The five spec states on the observation list — Badge tones are limited to
+// the existing vocabulary, so the label carries the distinction.
+const observationTone = (state: SupervisionObservation["state"]): { label: string; tone: "neutral" | "good" | "draft" | "bad" } => {
+  switch (state) {
+    case "observed": return { label: "observed", tone: "draft" };
+    case "evaluated": return { label: "evaluated", tone: "good" };
+    case "unknown": return { label: "unknown", tone: "neutral" };
+    case "suspected_drift": return { label: "suspected drift", tone: "bad" };
+    // In the vocabulary for forward compat — never emitted by this build.
+    case "notification_uncertain": return { label: "notification delivery uncertain", tone: "neutral" };
+  }
+};
+
+const shortId = (id: string): string => id.length > 13 ? `${id.slice(0, 8)}…` : id;
+
+function ObservationList({ colors, data }: { colors: Colors; data: GetSupervisionResult }) {
+  const observations = data.observations;
+  const gates = data.gates;
+  const diagnostics = data.diagnostics;
+  if (observations === null && gates === null) {
+    return (
+      <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+        No live observer readout — the shadow observer is not running for this home.
+      </Text>
+    );
+  }
+  return (
+    <View style={{ gap: 6 }}>
+      <Text style={[styles.legend, { color: colors.foregroundMuted }]}>Shadow observations (metadata only)</Text>
+      {gates !== null && Object.keys(gates).length > 0 ? (
+        <View style={{ gap: 2 }}>
+          {Object.entries(gates).map(([leadId, reason]) => (
+            <Text key={leadId} style={[styles.mutedSmall, { color: reason === null ? colors.statusSuccess : colors.statusWarning }]}>
+              Route {shortId(leadId)}: {reason === null ? "gate green" : `paused — ${reason}`}
+            </Text>
+          ))}
+        </View>
+      ) : null}
+      {diagnostics !== null && (diagnostics.droppedEvents > 0 || diagnostics.reasons.length > 0) ? (
+        <Text style={[styles.mutedSmall, { color: colors.statusWarning }]}>
+          Observer diagnostics: {diagnostics.droppedEvents} dropped event(s)
+          {diagnostics.reasons.length > 0 ? ` — ${diagnostics.reasons.join(", ")}` : ""}
+        </Text>
+      ) : null}
+      {(observations ?? []).length === 0 ? (
+        <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>No cases recorded yet.</Text>
+      ) : (
+        (observations ?? []).map(entry => {
+          const tone = observationTone(entry.state);
+          return (
+            <View key={entry.fingerprint} style={[styles.noticeBox, { borderColor: colors.border, backgroundColor: colors.surface2 }]}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <Badge colors={colors} label={tone.label} tone={tone.tone} />
+                <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                  peer {shortId(entry.peerId)} · lead {shortId(entry.leadAgentId)} · {entry.updatedAt}
+                </Text>
+              </View>
+              <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                case {shortId(entry.fingerprint)} · room {entry.counts.roomMessages} / uncertain {entry.counts.uncertainRoomMessages} / reports {entry.counts.reportMessages} / peer-sends {entry.counts.peerSends} · assessments {entry.assessmentsUsed}
+              </Text>
+              {entry.reason !== null ? (
+                <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>reason: {entry.reason}</Text>
+              ) : null}
+              {entry.visibility.length > 0 ? (
+                <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                  visibility: {entry.visibility.join(", ")}
+                </Text>
+              ) : null}
+              {entry.lastAssessment !== null ? (
+                <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+                  last assessment {entry.lastAssessment.model}: brief={entry.lastAssessment.choices.leadBrief} handback={entry.lastAssessment.choices.peerHandback} handling={entry.lastAssessment.choices.leadHandling}
+                </Text>
+              ) : null}
+            </View>
+          );
+        })
+      )}
+    </View>
+  );
+}
 
 export function useSupervisionCard({ target, targetKey, isCurrentKey, callGetSupervision, callSetSupervision, update }: {
   target: TargetValue | null;
@@ -285,6 +367,8 @@ export function SupervisionCard({ colors, target, jev, supervision }: {
           writes it back as shadow.
         </Text>
       ) : null}
+
+      {supervision.data !== null ? <ObservationList colors={colors} data={supervision.data} /> : null}
 
       {supervision.readError !== null ? (
         <View style={[styles.noticeBox, { borderColor: colors.statusDanger, backgroundColor: colors.surface2 }]}>

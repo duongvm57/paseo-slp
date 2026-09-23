@@ -96,7 +96,18 @@ async function refreshAgent(paseo: PaseoLike, agentId: string): Promise<unknown>
   return result?.agent ?? null;
 }
 
-export function createSupervisionState(deps: { servedHome?: ServedHome; uuid?: () => string } = {}) {
+export function createSupervisionState(deps: {
+  servedHome?: ServedHome;
+  uuid?: () => string;
+  /** Live shadow-observer readout for the served home — the observer injects
+   *  it at registration; null when no observer runs (tests, a disabled
+   *  build). Metadata only — never bodies or keys. */
+  shadow?: (stableRoot: string) => {
+    observations: GetSupervisionResult["observations"];
+    gates: GetSupervisionResult["gates"];
+    diagnostics: GetSupervisionResult["diagnostics"];
+  } | null;
+} = {}) {
   const servedHome = deps.servedHome ?? detectDaemonHome;
   const uuid = deps.uuid ?? randomUUID;
 
@@ -194,15 +205,19 @@ export function createSupervisionState(deps: { servedHome?: ServedHome; uuid?: (
     }
   }
 
+  const shadowFor = (stableRoot: string) =>
+    deps.shadow?.(stableRoot) ?? { observations: null, gates: null, diagnostics: null };
+
   async function getSupervision(input: unknown): Promise<GetSupervisionResult> {
     const parsed = GetSupervisionInput.safeParse(input);
     if (!parsed.success) throw invalid("get-supervision", parsed.error);
     const binding = servedBinding(parsed.data.target);
     if (binding.error !== null) {
-      return { schemaVersion: 1, routes: null, sha256: null, error: binding.error };
+      return { schemaVersion: 1, routes: null, sha256: null, observations: null, gates: null, diagnostics: null, error: binding.error };
     }
     const stored = readSupervisionFile(supervisionPath(binding.stableRoot));
-    return { schemaVersion: 1, routes: stored.routes, sha256: stored.sha256, error: stored.error };
+    const shadow = shadowFor(binding.stableRoot);
+    return { schemaVersion: 1, routes: stored.routes, sha256: stored.sha256, ...shadow, error: stored.error };
   }
 
   async function setSupervision(input: unknown, paseo: PaseoLike): Promise<GetSupervisionResult> {
@@ -230,7 +245,8 @@ export function createSupervisionState(deps: { servedHome?: ServedHome; uuid?: (
     }
     const body = `${JSON.stringify({ schemaVersion: 1, routes: parsed.data.routes }, null, 2)}\n`;
     writePrivate(binding.stableRoot, SUPERVISION_FILE, body, uuid);
-    return { schemaVersion: 1, routes: parsed.data.routes, sha256: sha256Hex(body), error: null };
+    const shadow = shadowFor(binding.stableRoot);
+    return { schemaVersion: 1, routes: parsed.data.routes, sha256: sha256Hex(body), ...shadow, error: null };
   }
 
   return { getSupervision, setSupervision };

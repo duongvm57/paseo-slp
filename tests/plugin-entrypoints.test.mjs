@@ -1,8 +1,9 @@
 // tests/plugin-entrypoints.test.mjs — §13 row 1 coverage: the shipped
 // paseo-plugin.json parses through the host's REAL manifest validator
 // (readPluginManifest from the installed @getpaseo/server), and the real
-// contribution function in plugin/index.server.ts registers exactly the five
-// RPCs and returns a working cleanup.
+// contribution function in plugin/index.server.ts registers the full RPC set,
+// the two before-hooks, and the shadow-observer lifecycle hooks, and returns
+// a working cleanup.
 //
 // contribute() itself only CONSTRUCTS its lane deps — the resolve hook below
 // substitutes a specifier ONLY when the real lane module fails to resolve
@@ -143,8 +144,22 @@ test('contribute() registers the RPCs plus the two before-hooks, cleanup unregis
   const contribute = await importContribute(t);
   assert.equal(typeof contribute, 'function');
 
+  // Point the served-home detection at an isolated temp home so the shadow
+  // observer resolves deterministically (a missing/unreadable home leaves it
+  // inert and the on-hooks never register).
+  const home = mkdtempSync(join(tmpdir(), 'paseo-entry-'));
+  writeFileSync(join(home, 'config.json'), '{}\n');
+  const prevHome = process.env.PASEO_HOME;
+  process.env.PASEO_HOME = home;
+  t.after(() => {
+    if (prevHome === undefined) delete process.env.PASEO_HOME;
+    else process.env.PASEO_HOME = prevHome;
+    rmSync(home, { recursive: true, force: true });
+  });
+
   const registrations = [];
   const beforeHooks = [];
+  const onHooks = [];
   const unregistered = [];
   const server = {
     handle(contract, handler) {
@@ -152,6 +167,10 @@ test('contribute() registers the RPCs plus the two before-hooks, cleanup unregis
     },
     before(name, handler) {
       beforeHooks.push({ name, handler });
+      return () => unregistered.push(name);
+    },
+    on(name, handler) {
+      onHooks.push({ name, handler });
       return () => unregistered.push(name);
     },
   };
@@ -188,9 +207,20 @@ test('contribute() registers the RPCs plus the two before-hooks, cleanup unregis
   for (const { handler } of beforeHooks) {
     assert.equal(typeof handler, 'function');
   }
+  // Shadow-observer lifecycle hooks (Phase B): synchronous capture only.
+  assert.deepEqual(
+    onHooks.map(h => h.name).sort(),
+    ['agent.archived', 'agent.created', 'agent.turn_ended', 'agent.turn_started'],
+  );
+  for (const { handler } of onHooks) {
+    assert.equal(typeof handler, 'function');
+  }
   assert.equal(typeof cleanup, 'function');
   assert.doesNotThrow(() => cleanup());
-  assert.deepEqual(unregistered.sort(), ['agent.create', 'agent.session_open']);
+  assert.deepEqual(
+    unregistered.sort(),
+    ['agent.archived', 'agent.create', 'agent.created', 'agent.session_open', 'agent.turn_ended', 'agent.turn_started'],
+  );
   assert.doesNotThrow(() => cleanup(), 'cleanup must be idempotent');
 });
 
@@ -204,6 +234,7 @@ test('the catalog RPC passes per-model thinking options through to CatalogOutput
   const cleanup = contribute({
     handle: (contract, handler) => registrations.push({ name: contract.name, handler }),
     before: () => () => {},
+    on: () => () => {},
   });
   t.after(() => cleanup());
   const catalogHandler = registrations.find(r => r.name === 'catalog')?.handler;

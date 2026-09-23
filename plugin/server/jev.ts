@@ -27,6 +27,7 @@ import {
   TestJevInput,
   type GetJevResult,
   type JevConfigValue,
+  type JevProviderValue,
   type JevViewValue,
   type SetJevResult,
   type SetJevKeyResult,
@@ -255,3 +256,211 @@ export function createJev(deps: JevDeps = {}) {
   return { getJev, setJev, setJevKey, testJev };
 }
 export type Jev = ReturnType<typeof createJev>;
+
+// ---------------------------------------------------------------------------
+// Supervision decision requests (Phase B) — the observer's only HTTP path.
+// Parity with src/jev.mjs resolveJev/askJev/postDecision: same endpoint join
+// (baseUrl + kind endpoint), same requestExtras, same credential preflight
+// over the assembled body, same envelope rule (model + answers record).
+// Differences are the spec's: NO automatic retry (observer evaluation is
+// single-shot), and an AbortSignal for plugin-stop instead of
+// AbortSignal.timeout alone.
+// ---------------------------------------------------------------------------
+
+export class JevRequestError extends Error {
+  readonly code: string;
+  constructor(code: string, message: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+// Endpoint join parity: baseUrl path prefix is kept (string concat, matching
+// src/jev.mjs resolveJev). openrouter pins provider.allow_fallbacks off;
+// typesafe sends no provider field.
+const SUPERVISION_TRANSPORTS: Record<JevProviderValue["kind"], { endpoint: string; requestExtras: Record<string, unknown> }> = {
+  openrouter: { endpoint: "/api/alpha/decisions", requestExtras: { provider: { allow_fallbacks: false } } },
+  typesafe: { endpoint: "/v1/systemone", requestExtras: {} },
+};
+
+export type SupervisionGate =
+  | { ok: true; provider: JevProviderValue; authorization: string }
+  | { ok: false; reason: string };
+
+/** Fail-closed resolver for the supervision capability — config must exist,
+ *  be enabled, hold capabilities.supervision === true, and carry a readable
+ *  0600 key. Mirrors resolveJev(home, 'supervision') — allowShadow is NOT
+ *  honored here: an unarmed capability must not evaluate. Reason codes are
+ *  bounded strings safe for the Manager surface. */
+export function resolveSupervision(stableRoot: string): SupervisionGate {
+  let read: { config: JevConfigValue | null; error: string | null };
+  try {
+    read = readConfig(stableRoot);
+  } catch {
+    return { ok: false, reason: "jev-config-unreadable" };
+  }
+  const { config, error } = read;
+  if (config === null) return { ok: false, reason: error !== null ? "jev-config-invalid" : "jev-unconfigured" };
+  if (config.enabled !== true) return { ok: false, reason: "jev-disabled" };
+  if (config.capabilities.supervision !== true) return { ok: false, reason: "jev-capability-off" };
+  const transport = SUPERVISION_TRANSPORTS[config.provider.kind];
+  if (transport === undefined) return { ok: false, reason: "jev-provider-unsupported" };
+  const probe = keyProbe(stableRoot, config.provider.kind);
+  if (!probe.hasKey) return { ok: false, reason: "jev-key-missing" };
+  if (probe.keyPermissionsOk !== true) return { ok: false, reason: "jev-key-permissions" };
+  let key: string;
+  try {
+    key = readFileSync(join(stableRoot, keyFileName(config.provider.kind)), "utf8").trim();
+  } catch {
+    return { ok: false, reason: "jev-key-unreadable" };
+  }
+  if (key === "" || /\s/.test(key)) return { ok: false, reason: "jev-key-invalid" };
+  return { ok: true, provider: config.provider, authorization: `Bearer ${key}` };
+}
+
+// Credential preflight over the assembled outbound payload — parity with
+// src/jev.mjs assertRedacted: string values AND object keys are tested; the
+// error names only the pattern class + JSON path, never the matched text.
+const credentialPatterns: { name: string; pattern: RegExp }[] = [
+  { name: "openrouter-key", pattern: openRouterKeyPattern },
+  { name: "typesafe-key", pattern: /\bts-[A-Za-z0-9_-]{12,}/ },
+  { name: "openai-style-key", pattern: /\bsk-[A-Za-z0-9_-]{20,}/ },
+  { name: "bearer-token", pattern: /Bearer\s+[A-Za-z0-9._~+/=-]{16,}/i },
+  { name: "private-key-block", pattern: privateKeyPattern },
+  { name: "aws-access-key", pattern: awsKeyPattern },
+  { name: "github-token", pattern: /\bgh[pousr]_[A-Za-z0-9]{20,}/ },
+  { name: "slack-token", pattern: /\bxox[baprs]-[A-Za-z0-9-]{10,}/ },
+  { name: "google-api-key", pattern: /\bAIza[0-9A-Za-z_-]{35}\b/ },
+  { name: "jwt", pattern: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}\b/ },
+];
+
+export function assertRedacted(payload: unknown): void {
+  const check = (text: string, path: string, what: string) => {
+    for (const { name, pattern } of credentialPatterns) {
+      if (pattern.test(text)) {
+        throw new JevRequestError("jev-redacted", `Refusing to send: credential-shaped ${what} (${name}) at ${path === "" ? "<root>" : path}`);
+      }
+    }
+  };
+  const walk = (value: unknown, path: string): void => {
+    if (typeof value === "string") return check(value, path, "string");
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => walk(item, `${path}[${index}]`));
+      return;
+    }
+    if (isRecord(value)) {
+      for (const [key, item] of Object.entries(value)) {
+        check(key, path, "object key");
+        walk(item, path === "" ? key : `${path}.${key}`);
+      }
+    }
+  };
+  walk(payload, "");
+}
+
+export interface JevDecisionRequest {
+  state: unknown;
+  questions: Record<string, { type: string; instructions: unknown; criteria: unknown }>;
+}
+
+export interface JevDecisionEnvelope {
+  model: string;
+  answers: Record<string, unknown>;
+  usage: unknown;
+  raw: Record<string, unknown>;
+}
+
+/** Single-shot Jev decision POST — the spec's "no automatic retry for
+ *  observer evaluation" (retries=0, unlike the generic transport's one
+ *  bounded retry). AbortSignal.timeout bounds the wait; the caller's signal
+ *  aborts on plugin stop. Errors are JevRequestError with sanitized remote
+ *  text — never key material, never the request body. */
+export async function askJevDecision(
+  provider: JevProviderValue,
+  authorization: string,
+  request: JevDecisionRequest,
+  opts: { fetchImpl?: typeof fetch; timeoutMs?: number; signal?: AbortSignal } = {},
+): Promise<JevDecisionEnvelope> {
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const timeoutMs = opts.timeoutMs ?? 5000;
+  const transport = SUPERVISION_TRANSPORTS[provider.kind];
+  if (transport === undefined) throw new JevRequestError("jev-request-invalid", `provider kind ${provider.kind} has no decision endpoint`);
+  if (typeof request.state !== "string" && !isRecord(request.state) && !Array.isArray(request.state)) {
+    throw new JevRequestError("jev-request-invalid", "state must be a string, object or array");
+  }
+  if (!isRecord(request.questions) || Object.keys(request.questions).length === 0) {
+    throw new JevRequestError("jev-request-invalid", "questions must be a nonempty record");
+  }
+  for (const [name, question] of Object.entries(request.questions)) {
+    if (!isRecord(question) || question.type !== "choice") {
+      throw new JevRequestError("jev-request-invalid", `Question ${name}: type must be choice`);
+    }
+    if (typeof question.instructions !== "string" || question.instructions.trim() === "") {
+      throw new JevRequestError("jev-request-invalid", `Question ${name}: instructions required`);
+    }
+    if (!isRecord(question.criteria) || Object.keys(question.criteria).length === 0 ||
+        Object.keys(question.criteria).some(key => key.trim() === "") ||
+        Object.values(question.criteria).some(value => typeof value !== "string" || value.trim() === "")) {
+      throw new JevRequestError("jev-request-invalid", `Question ${name}: choice criteria must be a nonempty record of candidates`);
+    }
+  }
+  const body = { model: provider.model, state: request.state, questions: request.questions, ...transport.requestExtras };
+  // Redaction runs over the exact outbound payload — after assembly, before
+  // any network call (src/jev.mjs askJev parity).
+  assertRedacted(body);
+  const endpoint = provider.baseUrl.replace(/\/+$/, "") + transport.endpoint;
+  // ES2022 lib lacks AbortSignal.any/timeout — own the controller: the
+  // timeout bounds the wait, the caller's signal aborts on plugin stop.
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
+  const onOuterAbort = () => controller.abort();
+  opts.signal?.addEventListener("abort", onOuterAbort, { once: true });
+  let response: Response;
+  try {
+    response = await fetchImpl(endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    const err = error as Error;
+    if (opts.signal?.aborted) throw new JevRequestError("jev-abort", "Jev request aborted — plugin stopping");
+    if (timedOut || err.name === "TimeoutError" || err.name === "AbortError") {
+      throw new JevRequestError("jev-timeout", `Jev request timed out after ${timeoutMs}ms`);
+    }
+    throw new JevRequestError("jev-network", `Jev request failed: ${sanitizeRemoteText(err.message)}`);
+  } finally {
+    clearTimeout(timer);
+    opts.signal?.removeEventListener("abort", onOuterAbort);
+  }
+  if (!response.ok) {
+    let detail = "";
+    try {
+      const parsed: unknown = await response.json();
+      if (isRecord(parsed) && isRecord(parsed.error)) {
+        const remote = parsed.error;
+        detail = typeof remote.message === "string" && remote.message !== ""
+          ? `: ${sanitizeRemoteText(remote.message)}`
+          : typeof remote.code === "string" && remote.code !== ""
+            ? ` (code ${sanitizeRemoteText(remote.code, 64)})`
+            : "";
+      }
+    } catch { /* body not JSON */ }
+    throw new JevRequestError("jev-http", `Jev request failed with HTTP ${response.status}${detail}`);
+  }
+  let parsedJson: unknown;
+  try {
+    parsedJson = await response.json();
+  } catch {
+    throw new JevRequestError("jev-response", "Jev response is not valid JSON");
+  }
+  if (!isRecord(parsedJson) || typeof parsedJson.model !== "string" || parsedJson.model === "" || !isRecord(parsedJson.answers)) {
+    throw new JevRequestError("jev-response", "Jev response requires model and answers");
+  }
+  return { model: parsedJson.model, answers: parsedJson.answers, usage: parsedJson.usage, raw: parsedJson };
+}
