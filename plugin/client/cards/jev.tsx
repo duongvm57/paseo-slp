@@ -439,17 +439,26 @@ export function JevCard({ colors, target, jev }: {
               enforced by JevConfig — aliases never reach the view), and the
               private key is in place; earlier it would arm a dead flag.
               Default off, and it never enables supervision by itself — that
-              needs an explicit Lead→Supervisor route. */}
+              needs an explicit Lead→Supervisor route. A key that exists but
+              fails the server's permission check surfaces the gate reason
+              instead of looking saveable — resolveSupervision rejects it
+              with jev-key-permissions. */}
           {jev.view?.configured === true && jev.view.enabled === true &&
-            jev.view.provider !== null && jev.view.hasKey === true && jev.view.error === null ? (
-            <SwitchRow
-              colors={colors}
-              checked={jev.supervisionOn}
-              disabled={!target || jev.busy || !jev.enabledOn}
-              onToggle={next => { jev.setSupervisionOn(next); }}
-              title="Supervision assessments"
-              hint="Grants the shadow observer access to this Jev key for explicitly bound Leads. Capability alone observes nothing — a saved route is still required."
-            />
+            jev.view.provider !== null && jev.view.error === null ? (
+            jev.view.hasKey === true && jev.view.keyPermissionsOk === false ? (
+              <Text style={[styles.mutedSmall, { color: colors.statusDanger }]} accessibilityLiveRegion="polite">
+                Jev key file is group/other-accessible — supervision stays off (chmod 600 the jev key file).
+              </Text>
+            ) : jev.view.hasKey === true ? (
+              <SwitchRow
+                colors={colors}
+                checked={jev.supervisionOn}
+                disabled={!target || jev.busy || !jev.enabledOn}
+                onToggle={next => { jev.setSupervisionOn(next); }}
+                title="Supervision assessments"
+                hint="Grants the shadow observer access to this Jev key for explicitly bound Leads. Capability alone observes nothing — a saved route is still required."
+              />
+            ) : null
           ) : null}
           {jev.saved && !jev.dirty ? (
             <Text style={[styles.mutedSmall, { color: colors.statusSuccess }]} accessibilityLiveRegion="polite">Saved.</Text>

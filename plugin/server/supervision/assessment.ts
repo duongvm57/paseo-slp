@@ -131,7 +131,9 @@ export interface EvidencePayload {
   brief: { text: string; messageId: string | null; visibility: string[] } | null;
   handback: { text: string; messageId: string | null } | null;
   roomMessages: { callId: string; turnId: string | null; prompt: string }[];
-  uncertainRoomMessages: { callId: string; turnId: string | null }[];
+  // Sends whose chronology/delivery could not be proven — ids plus recipient
+  // (which may be the case Peer, another direct Peer, or the Supervisor).
+  uncertainRoomMessages: { callId: string; turnId: string | null; recipient: string }[];
   reportMessages: { callId: string; turnId: string | null; recipient: string; prompt: string }[];
   // Confirmed Lead sends to OTHER verified direct Peers of the same Lead —
   // ids only, no bodies: observable room activity that can support a
@@ -204,21 +206,44 @@ export function decide(
   if (leadBrief.choice === "unknown" || peerHandback.choice === "unknown" || leadHandling.choice === "unknown") {
     return "unknown";
   }
+  // "A confident repaired case closes only when the repair is observable and
+  // correlated" (spec §Jev): the ONLY repair is a qualified confirmed send
+  // to THIS case's Peer (roomMessages). When one exists, "a correlated
+  // observable repair suppresses" every alert axis — a brief/handback gap
+  // or a drift claim can no longer alert — and the case closes handled only
+  // when the model also judged the handling axis handled.
+  const repaired = evidence.roomMessages.length > 0;
+  if (repaired) return leadHandling.choice === "handled" ? "handled" : "unknown";
   if (leadBrief.choice === "drift" || peerHandback.choice === "drift") return "suspected_drift";
+  // A handled claim without an observable correlated repair cannot close —
+  // the repair must be observed, not asserted by the model.
+  if (leadHandling.choice === "handled") return "unknown";
   if (leadHandling.choice === "drift") {
     // "Require observable supporting communication for a handling-drift
-    // alert" and "delay never turns silence into handling drift": a
-    // drift judgment needs observable Lead activity in the room (sends
-    // to this Peer, other direct Peers, or the route Supervisor). A
-    // canceled/failed Lead turn also cannot support an absence proof —
-    // its confirmed sends still count as handling, but truncation means
-    // silence inside it stays unknown.
-    const supporting = evidence.roomMessages.length + evidence.otherRoomMessages.length + evidence.reportMessages.length;
-    if (supporting === 0 || evidence.flags.includes(VISIBILITY.leadTurnNotCompleted)) return "unknown";
+    // alert" and "delay never turns silence into handling drift" (spec §Jev):
+    // support is observable post-handback Lead communication that is
+    // provably NOT a repair to this Peer — qualified sends to OTHER direct
+    // Peers of the same Lead (otherRoomMessages) and confirmed reports to
+    // the route Supervisor (reportMessages). Ruling on the open question:
+    // reports COUNT as support — spec 195 keeps them as observable Lead
+    // communication evidence ("a separate communication class", separate
+    // from room HANDLING, not from observability), and the support axis is
+    // exactly "the Lead was observably communicative post-handback yet
+    // produced no repair to this Peer". Dropping them would let a Lead who
+    // demonstrably engaged the case upward while leaving the Peer
+    // unanswered read identically to silence — the pattern this detector
+    // exists to surface. The report's content stays unjudged, so the
+    // verdict remains "suspected" for Human review, never a violation.
+    // Sends delivered on a canceled/failed Lead turn are delivery-proven
+    // and still count (spec 193 "Successful individual sends on
+    // failed/canceled turns still count") — lead-turn-not-completed stays
+    // a visibility flag, never a verdict veto; a truncated turn simply
+    // cannot prove an ABSENCE of sends.
+    const supporting = evidence.otherRoomMessages.length + evidence.reportMessages.length;
+    if (supporting === 0) return "unknown";
     return "suspected_drift";
   }
   // "pending" after the delay already elapsed cannot be closed — stay
   // unknown rather than infer drift from timing alone.
-  if (leadHandling.choice === "pending") return "unknown";
-  return "handled";
+  return "unknown";
 }

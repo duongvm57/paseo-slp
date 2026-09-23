@@ -117,19 +117,26 @@ export const SupervisionAssessmentSummary = z.object({
 }).strict();
 export type SupervisionAssessmentSummary = z.infer<typeof SupervisionAssessmentSummary>;
 
+// Ring-row compatibility: fields added after the first persisted format are
+// optional-with-default (never silently drop a readable older row — a strict
+// rejection would reset the whole ring file on load). `.catch(null)` keeps
+// an older lastAssessment shape readable as "no summary" instead of losing
+// the entire observation.
 export const SupervisionObservation = z.object({
   fingerprint: Sha,
   leadAgentId: Id,
   peerId: Id,
   peerTurnId: z.string().nullable(),
   /** Turn/message IDs where available (spec §Shadow evidence): the brief and
-   *  handback message ids plus the observed send call ids — bounded, ids
-   *  only, never bodies. */
+   *  handback message ids plus the observed send call ids AND the Lead turn
+   *  ids that issued them — bounded, ids only, never bodies. sendTurnIds is
+   *  index-aligned with sendCallIds. */
   messageIds: z.object({
     brief: z.string().nullable(),
     handback: z.string().nullable(),
     sendCallIds: z.array(z.string().max(200)).max(24),
-  }).strict(),
+    sendTurnIds: z.array(z.string().max(200).nullable()).max(24).default([]),
+  }).strict().default({ brief: null, handback: null, sendCallIds: [], sendTurnIds: [] }),
   observedAt: z.string(),
   updatedAt: z.string(),
   state: SupervisionCaseState,
@@ -139,14 +146,14 @@ export const SupervisionObservation = z.object({
   /** Visibility-limit flags (bounded vocabulary from capture.ts). */
   visibility: z.array(z.string().max(80)),
   counts: z.object({
-    roomMessages: z.number().int().nonnegative(),
-    uncertainRoomMessages: z.number().int().nonnegative(),
-    otherRoomMessages: z.number().int().nonnegative(),
-    reportMessages: z.number().int().nonnegative(),
-    peerSends: z.number().int().nonnegative(),
-  }).strict(),
-  assessmentsUsed: z.number().int().nonnegative(),
-  lastAssessment: SupervisionAssessmentSummary.nullable(),
+    roomMessages: z.number().int().nonnegative().default(0),
+    uncertainRoomMessages: z.number().int().nonnegative().default(0),
+    otherRoomMessages: z.number().int().nonnegative().default(0),
+    reportMessages: z.number().int().nonnegative().default(0),
+    peerSends: z.number().int().nonnegative().default(0),
+  }).strict().default({ roomMessages: 0, uncertainRoomMessages: 0, otherRoomMessages: 0, reportMessages: 0, peerSends: 0 }),
+  assessmentsUsed: z.number().int().nonnegative().default(0),
+  lastAssessment: SupervisionAssessmentSummary.nullable().catch(null).default(null),
 }).strict();
 export type SupervisionObservation = z.infer<typeof SupervisionObservation>;
 

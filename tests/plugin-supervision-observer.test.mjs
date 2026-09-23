@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createSupervisionObserver } from '../plugin/server/supervision/observer.ts';
+import { createSupervisionObserver, buildEvidencePayload } from '../plugin/server/supervision/observer.ts';
 import { capture, extractSends } from '../plugin/server/supervision/capture.ts';
 import { parseAssessmentResponse, decide, localGate } from '../plugin/server/supervision/assessment.ts';
 import { resolveSupervision, askJevDecision, assertRedacted, JevRequestError } from '../plugin/server/jev.ts';
@@ -302,14 +302,44 @@ const fullEvidence = (over = {}) => ({
   ...over,
 });
 
-test('evidence payload carries only the allowed fields', () => {
+test('evidence payload carries only the allowed fields — asserted on the production builder', () => {
+  // The allowlist is enforced on the REAL buildEvidencePayload (exported from
+  // observer.ts), not a re-declared literal: any field added to the outbound
+  // state must fail this test (spec §Jev: "The outbound state contains only
+  // the bound Lead/Peer IDs, case and turn/message IDs, the complete
+  // captured brief and session handback bodies, confirmed room/report
+  // prompts, and visibility flags").
+  const payload = buildEvidencePayload(
+    {
+      id: 'case-x', leadId: LEAD, peerId: PEER, peerTurnId: 'turn-p1',
+      evidence: {
+        brief: { text: 'brief body', messageId: 'm-brief', flags: [] },
+        handback: { text: 'handback body', messageId: 'm-handback' },
+        roomMessages: [{ callId: 'c1', turnId: 'turn-l1', recipient: PEER, prompt: 'ack' }],
+        uncertainRoomMessages: [{ callId: 'c2', turnId: 'turn-l2', recipient: PEER2, prompt: 'q' }],
+        otherRoomMessages: [{ callId: 'c3', turnId: 'turn-l1', recipient: PEER2, prompt: 'other' }],
+        reportMessages: [{ callId: 'c4', turnId: 'turn-l1', recipient: SUP, prompt: 'report' }],
+        peerSends: [{ callId: 'c5', turnId: 'turn-p1', recipient: LEAD, prompt: 'report' }],
+        flags: ['report-route-unverifiable'],
+        pendingDelayElapsed: true,
+      },
+    },
+    { supervisorAgentId: SUP },
+  );
   assert.deepEqual(
-    Object.keys(fullEvidence()).sort(),
+    Object.keys(payload).sort(),
     ['bound', 'brief', 'caseId', 'flags', 'handback', 'otherRoomMessages',
       'peerSends', 'peerTurnId', 'pendingWindowElapsed', 'reportMessages',
       'roomMessages', 'uncertainRoomMessages'],
   );
-  assert.deepEqual(Object.keys(fullEvidence().bound).sort(), ['leadAgentId', 'peerId', 'supervisorAgentId']);
+  assert.deepEqual(Object.keys(payload.bound).sort(), ['leadAgentId', 'peerId', 'supervisorAgentId']);
+  // Per-lane shapes stay inside the allowlist too — no recipient on the
+  // repair lane, ids+recipient only on the uncertain/other lanes.
+  assert.deepEqual(Object.keys(payload.roomMessages[0]).sort(), ['callId', 'prompt', 'turnId']);
+  assert.deepEqual(Object.keys(payload.uncertainRoomMessages[0]).sort(), ['callId', 'recipient', 'turnId']);
+  assert.deepEqual(Object.keys(payload.otherRoomMessages[0]).sort(), ['callId', 'recipient', 'turnId']);
+  assert.deepEqual(Object.keys(payload.reportMessages[0]).sort(), ['callId', 'prompt', 'recipient', 'turnId']);
+  assert.deepEqual(Object.keys(payload.peerSends[0]).sort(), ['callId', 'prompt', 'recipient']);
 });
 
 test('localGate: every delivery-ambiguity flag blocks the single verdict', () => {
@@ -343,36 +373,80 @@ test('decide: silence never becomes drift — empty evidence lanes stay unknown'
   const drift = parseAssessmentResponse(ALL_DRIFT, PROVIDER).answers;
   // Pending window elapsed, no observable Lead communication at all.
   assert.equal(decide(drift, fullEvidence(), null), 'unknown');
+  // Uncertain-chronology sends never count as support either — ambiguous
+  // evidence is not observable support.
+  const uncertainOnly = fullEvidence({
+    uncertainRoomMessages: [{ callId: 'c9', turnId: null, recipient: PEER }],
+  });
+  assert.equal(decide(drift, uncertainOnly, null), 'unknown');
 });
 
-test('decide: true same-room drift needs observable supporting Lead activity', () => {
+test('decide: a qualified room repair suppresses drift and never counts as drift support', () => {
+  // Spec: "an observable correlated repair that re-engages the Peer"
+  // resolves a case — the same send cannot also support the drift it
+  // repairs. Repaired + Jev drift → unknown (never suspected_drift).
   const drift = parseAssessmentResponse(ALL_DRIFT, PROVIDER).answers;
-  const supported = fullEvidence({
+  const repaired = fullEvidence({ roomMessages: [{ callId: 'c1', turnId: 't1', prompt: 'ack' }] });
+  assert.equal(decide(drift, repaired, null), 'unknown', 'repair suppresses drift');
+  // Even a brief/handback drift verdict is suppressed by observable repair.
+  const briefGap = parseAssessmentResponse(jevResponse('drift', 'satisfied', 'pending'), PROVIDER).answers;
+  assert.equal(decide(briefGap, repaired, null), 'unknown');
+});
+
+test('decide: drift support comes from other-room/report activity', () => {
+  const drift = parseAssessmentResponse(ALL_DRIFT, PROVIDER).answers;
+  // Observable Lead communication elsewhere post-handback supports the
+  // handling-drift judgment (spec: "require observable supporting
+  // communication"). Decision recorded in assessment.ts: report sends
+  // count — spec line 195 makes them a separate communication CLASS,
+  // separate from Peer-handling, not from observable Lead activity.
+  const otherRoom = fullEvidence({
     otherRoomMessages: [{ callId: 'c2', turnId: 'turn-l1', recipient: PEER2 }],
   });
-  assert.equal(decide(drift, supported, null), 'suspected_drift');
-  // A confirmed send to this Peer or the route Supervisor also supports it.
-  assert.equal(decide(drift, fullEvidence({ roomMessages: [{ callId: 'c3', turnId: 't', prompt: 'x' }] }), null), 'suspected_drift');
-  assert.equal(decide(drift, fullEvidence({ reportMessages: [{ callId: 'c4', turnId: 't', recipient: SUP, prompt: 'x' }] }), null), 'suspected_drift');
+  assert.equal(decide(drift, otherRoom, null), 'suspected_drift');
+  const reports = fullEvidence({
+    reportMessages: [{ callId: 'c4', turnId: 't', recipient: SUP, prompt: 'x' }],
+  });
+  assert.equal(decide(drift, reports, null), 'suspected_drift');
+  // Brief/handback gaps can alert on Jev classification alone (spec:
+  // "even if delivery or Lead handling is unknown") — with no repair to
+  // suppress them.
+  const briefGap = parseAssessmentResponse(jevResponse('drift', 'satisfied', 'pending'), PROVIDER).answers;
+  assert.equal(decide(briefGap, fullEvidence(), null), 'suspected_drift');
 });
 
-test('decide: a truncated Lead turn cannot support a drift judgment', () => {
+test('decide: a canceled Lead turn never vetoes delivery — flag is informative only', () => {
+  // Spec 187: "A confirmed send on a failed or canceled Lead turn still
+  // counts as delivery." The flag informs humans, it is not a veto in
+  // either direction.
   const drift = parseAssessmentResponse(ALL_DRIFT, PROVIDER).answers;
-  const ev = fullEvidence({
+  const supportedCanceled = fullEvidence({
     otherRoomMessages: [{ callId: 'c2', turnId: 'turn-l1', recipient: PEER2 }],
     flags: ['lead-turn-not-completed'],
   });
-  assert.equal(decide(drift, ev, null), 'unknown');
+  assert.equal(decide(drift, supportedCanceled, null), 'suspected_drift');
+  const handled = parseAssessmentResponse(ALL_HANDLED, PROVIDER).answers;
+  const repairedCanceled = fullEvidence({
+    roomMessages: [{ callId: 'c1', turnId: 't1', prompt: 'ack' }],
+    flags: ['lead-turn-not-completed'],
+  });
+  assert.equal(decide(handled, repairedCanceled, null), 'handled');
 });
 
-test('decide: handled requires high confidence on all axes; pending-after-elapsed stays unknown', () => {
+test('decide: handled requires an observable repair plus high-confidence Jev handled', () => {
   const handled = parseAssessmentResponse(ALL_HANDLED, PROVIDER).answers;
-  const ev = fullEvidence({ roomMessages: [{ callId: 'c1', turnId: 't', prompt: 'ack' }] });
-  assert.equal(decide(handled, ev, null), 'handled');
+  // Jev says handled but no observable room repair exists → unknown.
+  assert.equal(decide(handled, fullEvidence(), null), 'unknown');
+  const repaired = fullEvidence({ roomMessages: [{ callId: 'c1', turnId: 't', prompt: 'ack' }] });
+  assert.equal(decide(handled, repaired, null), 'handled');
   const pending = parseAssessmentResponse(jevResponse('satisfied', 'satisfied', 'pending'), PROVIDER).answers;
-  assert.equal(decide(pending, ev, null), 'unknown');
+  assert.equal(decide(pending, repaired, null), 'unknown');
+  // Low-confidence handled is not a verdict even when repaired.
+  const low = parseAssessmentResponse(jevResponse('satisfied', 'satisfied', 'handled'), PROVIDER).answers;
+  low.leadHandling.confidence = 0.5;
+  assert.equal(decide(low, repaired, null), 'unknown');
   // Any gate reason resolves the single verdict to unknown before answers.
-  assert.equal(decide(handled, ev, 'report-route-unverifiable'), 'unknown');
+  assert.equal(decide(handled, repaired, 'report-route-unverifiable'), 'unknown');
 });
 
 // ---------------------------------------------------------------------------
@@ -422,6 +496,28 @@ test('jev askJevDecision: endpoint join, extras, single-shot (no retry)', async 
   const body = JSON.parse(seen[0].init.body);
   assert.equal(body.model, PROVIDER.model);
   assert.deepEqual(body.provider, { allow_fallbacks: false });
+  assert.equal(out.answers.q.choice, 'a');
+});
+
+test('jev askJevDecision: typesafe transport hits /v1/systemone without a provider field', async t => {
+  // Transport parity (spec §Jev: the same TypeSafe Jev request format the
+  // routing path uses): the typesafe endpoint takes NO provider object —
+  // sending OpenRouter's allow_fallbacks pin would corrupt the request.
+  const provider = { kind: 'typesafe', baseUrl: 'https://typesafe.example/base', model: 'typesafe/jev-1.13' };
+  const seen = [];
+  const fetchImpl = async (url, init) => {
+    seen.push({ url, init });
+    return { ok: true, status: 200, json: async () => ({ model: provider.model, answers: { q: { type: 'choice', choice: 'a', confidence: 1 } } }) };
+  };
+  const out = await askJevDecision(provider, 'Bearer ts-key', {
+    state: { caseId: 'c1' },
+    questions: { q: { type: 'choice', instructions: 'pick', criteria: { a: 'a', b: 'b' } } },
+  }, { fetchImpl });
+  assert.equal(seen.length, 1, 'single-shot — no retry');
+  assert.equal(seen[0].url, 'https://typesafe.example/base/v1/systemone');
+  const body = JSON.parse(seen[0].init.body);
+  assert.equal(body.model, provider.model);
+  assert.equal('provider' in body, false, 'typesafe requests carry no provider field');
   assert.equal(out.answers.q.choice, 'a');
 });
 
@@ -514,7 +610,7 @@ const GATED = 'report-route-unverifiable';
 
 test('observer: evidence lands — confirmed post-handback send recorded, gate closes unknown', async t => {
   const { observer, paseo, home, calls } = await baseSetup(t);
-  observer.onCreated(peerHook());
+  observer.onCreated(peerHook(), paseo);
   observer.onTurn(peerTurn(), paseo);
   await observer.idle();
   observer.onStart(leadStart('turn-l1'));
@@ -527,7 +623,7 @@ test('observer: evidence lands — confirmed post-handback send recorded, gate c
   assert.equal(rows[0].reason, GATED);
   // The confirmed send still landed in the room lane — capture is intact.
   assert.equal(rows[0].counts.roomMessages, 1);
-  assert.deepEqual(rows[0].messageIds, { brief: 'm-user', handback: 'm-asst', sendCallIds: ['c1'] });
+  assert.deepEqual(rows[0].messageIds, { brief: 'm-user', handback: 'm-asst', sendCallIds: ['c1'], sendTurnIds: ['turn-l1'] });
   assert.equal(rows[0].assessmentsUsed, 0);
 });
 
@@ -538,7 +634,7 @@ test('observer scenario 1: different room — send to an active Peer of another 
     [OTHER]: snap(OTHER, 'slp-codex-peer', { labels: { 'paseo.parent-agent-id': OTHER_LEAD } }),
   });
   const { observer, paseo, home, calls } = await baseSetup(t, { responses: [ALL_DRIFT], agents });
-  observer.onCreated(peerHook());
+  observer.onCreated(peerHook(), paseo);
   observer.onTurn(peerTurn(), paseo);
   await observer.idle();
   observer.onStart(leadStart('turn-l1'));
@@ -555,7 +651,7 @@ test('observer scenario 1: different room — send to an active Peer of another 
 
 test('observer scenario 2: unobserved direct action — Lead turn without send_agent_prompt stays unknown', async t => {
   const { observer, paseo, home, calls } = await baseSetup(t, { responses: [ALL_DRIFT] });
-  observer.onCreated(peerHook());
+  observer.onCreated(peerHook(), paseo);
   observer.onTurn(peerTurn(), paseo);
   await observer.idle();
   observer.onStart(leadStart('turn-l1'));
@@ -569,7 +665,7 @@ test('observer scenario 2: unobserved direct action — Lead turn without send_a
 
 test('observer scenario 3: assignmentFile pointer — local gate, Jev never called', async t => {
   const { observer, paseo, home, calls } = await baseSetup(t, { route: { pendingDelayMs: 0 } });
-  observer.onCreated(peerHook());
+  observer.onCreated(peerHook(), paseo);
   observer.onTurn(peerEnd([
     userMsg('Work the assignment file at .local-checks/brief.md'),
     asstMsg('Done'),
@@ -583,7 +679,7 @@ test('observer scenario 3: assignmentFile pointer — local gate, Jev never call
 
 test('observer scenario 4: final-only handback — assistant prose without a tool call is not delivery', async t => {
   const { observer, paseo, home, calls } = await baseSetup(t, { responses: [ALL_DRIFT] });
-  observer.onCreated(peerHook());
+  observer.onCreated(peerHook(), paseo);
   observer.onTurn(peerTurn(), paseo);
   await observer.idle();
   // Lead answers in prose only — no send_agent_prompt anywhere.
@@ -599,7 +695,7 @@ test('observer scenario 4: final-only handback — assistant prose without a too
 
 test('observer scenario 5: overlapping Lead turns — send start ambiguous → uncertain, no violation', async t => {
   const { observer, paseo, home, calls } = await baseSetup(t);
-  observer.onCreated(peerHook());
+  observer.onCreated(peerHook(), paseo);
   observer.onTurn(peerTurn(), paseo);
   await observer.idle();
   // Two overlapping Lead turns: start A, start B, then A ends with the send.
@@ -616,7 +712,7 @@ test('observer scenario 5: overlapping Lead turns — send start ambiguous → u
 
 test('observer scenario 6: failed tool send — no structured success, not proof of either verdict', async t => {
   const { observer, paseo, home, calls } = await baseSetup(t, { responses: [ALL_DRIFT] });
-  observer.onCreated(peerHook());
+  observer.onCreated(peerHook(), paseo);
   observer.onTurn(peerTurn(), paseo);
   await observer.idle();
   observer.onStart(leadStart('turn-l1'));
@@ -635,7 +731,7 @@ test('observer scenario 7: canceled Lead turn — confirmed send still lands as 
   // is visibility, not a blanket block. On this host the case still resolves
   // unknown via report-route-unverifiable before any Jev call.
   const { observer, paseo, home, calls } = await baseSetup(t);
-  observer.onCreated(peerHook());
+  observer.onCreated(peerHook(), paseo);
   observer.onTurn(peerTurn(), paseo);
   await observer.idle();
   observer.onStart(leadStart('turn-l1'));
@@ -657,7 +753,7 @@ test('observer scenario 8 (doc): stale-assessment invalidation is unreachable wh
   // — no test-only seam is added just to reach it (Lead ruling). What IS
   // observable here: evidence still lands, the gate still closes unknown.
   const { observer, paseo, home, calls } = await baseSetup(t);
-  observer.onCreated(peerHook());
+  observer.onCreated(peerHook(), paseo);
   observer.onTurn(peerTurn(), paseo);
   await observer.idle();
   observer.onStart(leadStart('turn-l1'));
@@ -672,7 +768,7 @@ test('observer scenario 8 (doc): stale-assessment invalidation is unreachable wh
 
 test('observer scenario 9: archive/restore — tombstone drops work, refresh verifies restoration', async t => {
   const { observer, paseo, home } = await baseSetup(t);
-  observer.onCreated(peerHook());
+  observer.onCreated(peerHook(), paseo);
   observer.onTurn(peerTurn(), paseo);
   await observer.idle();
   observer.onArchived(leadHook(), paseo);
@@ -684,10 +780,10 @@ test('observer scenario 9: archive/restore — tombstone drops work, refresh ver
   // queued restore job verifies liveness before re-admission.
   observer.onTurn(leadEnd([codexSend('c3', PEER, 'ghost')]), paseo);
   await observer.idle();
-  observer.onCreated(leadHook());
+  observer.onCreated(leadHook(), paseo);
   await observer.idle();
   // A new peer turn for the restored lead observes again.
-  observer.onCreated(peerHook(PEER2));
+  observer.onCreated(peerHook(PEER2), paseo);
   observer.onTurn(peerEnd([userMsg('new brief'), asstMsg('done')], { peerId: PEER2, turnId: 'turn-p2' }), paseo);
   await settle(observer);
   rows = ringRows(home);
@@ -710,7 +806,7 @@ test('observer: failed Jev gate pauses capture entirely', async t => {
     gate: { ok: false, reason: 'jev-capability-off' },
     ask: async () => { calls.push(1); throw new Error('unreachable'); },
   });
-  observer.onCreated(peerHook());
+  observer.onCreated(peerHook(), paseo);
   observer.onTurn(peerTurn(), paseo);
   await observer.idle();
   assert.equal(calls.length, 0);
@@ -724,7 +820,7 @@ test('observer: notify-mode routes are never observed', async t => {
   writeRoutes(home, [route({ mode: 'notify' })]);
   const calls = [];
   const { observer, paseo } = makeObserver(t, { home, agents: liveAgents(), ask: async () => { calls.push(1); throw new Error('unreachable'); } });
-  observer.onCreated(peerHook());
+  observer.onCreated(peerHook(), paseo);
   observer.onTurn(peerTurn(), paseo);
   await observer.idle();
   assert.equal(calls.length, 0);
@@ -736,7 +832,7 @@ test('observer: pending delay gates evaluation until elapsed', async t => {
   writeRoutes(home, [route({ pendingDelayMs: 60 })]);
   const { ask, calls } = makeAsk([ALL_HANDLED]);
   const { observer, paseo } = makeObserver(t, { home, agents: liveAgents(), ask });
-  observer.onCreated(peerHook());
+  observer.onCreated(peerHook(), paseo);
   observer.onTurn(peerTurn(), paseo);
   await observer.idle();
   assert.equal(ringRows(home)[0].state, 'observed', 'no evaluation before the delay elapses');
@@ -750,7 +846,7 @@ test('observer: pending delay gates evaluation until elapsed', async t => {
 
 test('observer: ring persists metadata only — no bodies, survives reload', async t => {
   const { observer, paseo, home } = await baseSetup(t);
-  observer.onCreated(peerHook());
+  observer.onCreated(peerHook(), paseo);
   observer.onTurn(peerTurn(), paseo);
   await observer.idle();
   const file = join(home, 'slp-runtime', 'state', 'supervision-cases.json');
@@ -768,8 +864,8 @@ test('observer: confirmed send to another direct Peer lands in otherRoomMessages
   // Observable room activity that can SUPPORT a drift judgment — never
   // handling for this case. On this host the gate still closes unknown.
   const { observer, paseo, home, calls } = await baseSetup(t);
-  observer.onCreated(peerHook());
-  observer.onCreated(peerHook(PEER2));
+  observer.onCreated(peerHook(), paseo);
+  observer.onCreated(peerHook(PEER2), paseo);
   observer.onTurn(peerTurn(), paseo);
   await observer.idle();
   observer.onStart(leadStart('turn-l1'));
@@ -793,7 +889,7 @@ test('observer: a Jev-gate failure mid-flight pauses capture — no new evidence
     gate: () => currentGate,
     ask: async () => { calls.push(1); throw new Error('unreachable'); },
   });
-  observer.onCreated(peerHook());
+  observer.onCreated(peerHook(), paseo);
   observer.onTurn(peerTurn(), paseo);
   await observer.idle();
   // Gate flips off — the file-stamp cache busts when jev.json appears.
@@ -812,7 +908,7 @@ test('observer: a Jev-gate failure mid-flight pauses capture — no new evidence
 
 test('observer: UTF-8 byte ceiling — a unicode payload over 64KiB gates before Jev', async t => {
   const { observer, paseo, home, calls } = await baseSetup(t, { route: { pendingDelayMs: 0 } });
-  observer.onCreated(peerHook());
+  observer.onCreated(peerHook(), paseo);
   // 'é' is 2 UTF-8 bytes per unit: 33 000 units is ~66 000 serialized bytes
   // but only ~33k UTF-16 length — a string-length check would let it through.
   observer.onTurn(peerEnd([userMsg('brief'), asstMsg('é'.repeat(33_000))]), paseo);
@@ -868,7 +964,7 @@ test('observer: a Peer in an unverified family resolves unknown via family-shape
     [PI_PEER]: snap(PI_PEER, 'slp-pi-peer', { labels: { 'paseo.parent-agent-id': LEAD } }),
   });
   const { observer, paseo, home, calls } = await baseSetup(t, { agents });
-  observer.onCreated(peerHook(PI_PEER, { provider: 'slp-pi-peer' }));
+  observer.onCreated(peerHook(PI_PEER, { provider: 'slp-pi-peer' }), paseo);
   const piSend = {
     type: 'tool_call', callId: 'p1', name: 'paseo.send_agent_prompt', status: 'completed', error: null,
     detail: {
@@ -891,7 +987,7 @@ test('observer: route removed between capture and evaluation → unknown, no Jev
   writeRoutes(home, [route({ pendingDelayMs: 60 })]);
   const { ask, calls } = makeAsk([ALL_HANDLED]);
   const { observer, paseo } = makeObserver(t, { home, agents: liveAgents(), ask });
-  observer.onCreated(peerHook());
+  observer.onCreated(peerHook(), paseo);
   observer.onTurn(peerTurn(), paseo);
   await observer.idle();
   writeRoutes(home, []); // route removed before the delay elapsed
@@ -899,4 +995,178 @@ test('observer: route removed between capture and evaluation → unknown, no Jev
   await observer.idle();
   assert.equal(calls.length, 0);
   assert.equal(ringRows(home)[0].reason, 'route-removed');
+});
+
+// ---------------------------------------------------------------------------
+// correction round 3 — symmetric lanes, verified creation, per-case basis
+// ---------------------------------------------------------------------------
+
+test('observer: agent.created never trusts the payload — membership needs refresh-verified parentage', async t => {
+  // S6: on this host agent.created also fires when ensureAgentLoaded
+  // re-creates a persisted agent (agent-loading.ts → createAgent emits the
+  // same event), so the payload's parentAgentId is a persisted claim to
+  // verify — never fresh-creation proof. A created Peer whose refreshed
+  // snapshot names a DIFFERENT parent is never registered.
+  const agents = liveAgents({
+    [PEER]: snap(PEER, 'slp-codex-peer', { labels: { 'paseo.parent-agent-id': OTHER_LEAD } }),
+  });
+  const { observer, paseo, home, calls } = await baseSetup(t, { agents });
+  observer.onCreated(peerHook(), paseo); // payload CLAIMS parent LEAD
+  await observer.idle();
+  assert.ok(paseo.refreshed.includes(PEER), 'created peer went through refresh verification');
+  observer.onTurn(peerTurn(), paseo);
+  await settle(observer);
+  const rows = ringRows(home);
+  assert.equal(rows[0].state, 'unknown');
+  assert.equal(rows[0].reason, 'recipient-refresh-failed', 'refreshed parentage disagrees — never registered');
+  assert.equal(calls.length, 0);
+});
+
+test('observer: agent.created admits a peer once refresh verifies the claimed parent', async t => {
+  const { observer, paseo, home } = await baseSetup(t);
+  observer.onCreated(peerHook(), paseo);
+  await observer.idle();
+  assert.ok(paseo.refreshed.includes(PEER), 'membership was verified, not trusted');
+  observer.onTurn(peerTurn(), paseo);
+  await settle(observer);
+  const rows = ringRows(home);
+  assert.equal(rows[0].state, 'unknown');
+  assert.equal(rows[0].reason, GATED, 'a real case was created — not the unverified-membership stub');
+  assert.ok(!rows[0].visibility.includes('recipient-refresh-failed'));
+});
+
+test('observer: gate-down empties retained bodies at detection, not at evaluation', async t => {
+  // Spec §Configuration: a failed Jev gate "does not retain new message
+  // bodies" — the privacy boundary drops already-captured bodies when the
+  // gate is SEEN down, not lazily later.
+  const home = makeHome(t);
+  writeRoutes(home, [route({ pendingDelayMs: 60_000 })]);
+  writeJev(home, JEV_CFG);
+  let currentGate = GATE_OK;
+  const { observer, paseo } = makeObserver(t, {
+    home, agents: liveAgents(),
+    gate: () => currentGate,
+    ask: async () => { throw new Error('unreachable'); },
+  });
+  observer.onCreated(peerHook(), paseo);
+  observer.onTurn(peerTurn(), paseo);
+  await observer.idle();
+  const fp = ringRows(home)[0].fingerprint;
+  assert.ok(observer.retainedBodies(fp) > 0, 'bodies retained while the gate is green');
+  // Gate flips down — the next event detects it and clears synchronously.
+  // The added key file changes the gate stamp, busting the cache.
+  currentGate = { ok: false, reason: 'jev-key-missing' };
+  writeJev(home, JEV_CFG, { key: 'k'.repeat(32) });
+  observer.onTurn(leadEnd([codexSend('c9', PEER, 'post-gate send')]), paseo);
+  assert.equal(observer.retainedBodies(fp), 0, 'retained bodies emptied at gate-down detection');
+  assert.equal(ringRows(home)[0].counts.roomMessages, 0, 'nothing appended while the gate is down');
+  const rows = ringRows(home);
+  assert.ok(rows[0].state === 'observed' || rows[0].state === 'unknown');
+});
+
+test('observer: an in-place mutation lands synchronously and re-arms the case (evidence-basis invalidation)', async t => {
+  // The accept-time discard needs an in-flight Jev call; every case on this
+  // host gates at localGate first (report-route-unverifiable), so — like
+  // scenario 8 — the full path is unreachable here and the discard branch
+  // stands by construction: `preEvidence` is captured before ask and
+  // compared to `item.evidenceVersion`, which every mutation site bumps
+  // (gate-down clearBodies, queue-overflow marks, lane pushes, pending-
+  // elapsed flips). The reachable half IS asserted: a mid-open mutation
+  // lands synchronously, re-arms the case dirty, and the case re-evaluates
+  // on the NEW basis — it closes on capture-paused, never on stale
+  // pre-mutation evidence.
+  const home = makeHome(t);
+  writeRoutes(home, [route({ pendingDelayMs: 40 })]);
+  let currentGate = GATE_OK;
+  const { observer, paseo } = makeObserver(t, {
+    home, agents: liveAgents(),
+    gate: () => currentGate,
+    ask: async () => { throw new Error('unreachable'); },
+  });
+  observer.onCreated(peerHook(), paseo);
+  observer.onTurn(peerTurn(), paseo);
+  await observer.idle();
+  const fp = ringRows(home)[0].fingerprint;
+  currentGate = { ok: false, reason: 'jev-key-missing' };
+  writeJev(home, JEV_CFG, { key: 'k'.repeat(32) });
+  observer.onTurn(leadEnd([codexSend('c9', PEER, 'dropped')]), paseo);
+  assert.equal(observer.retainedBodies(fp), 0);
+  // Gate recovers — the case evaluates on the mutated basis and gates on
+  // the capture-paused flag the mutation added. A different key size makes
+  // the stamp change deterministic (same-mtime identical rewrites can keep
+  // a cached gate — the cache is stamp-keyed, not clock-keyed).
+  currentGate = GATE_OK;
+  writeJev(home, JEV_CFG, { key: 'z'.repeat(64) });
+  await settle(observer);
+  const rows = ringRows(home);
+  assert.equal(rows[0].state, 'unknown');
+  // capture-paused is recorded on the case; the earlier-ordered report
+  // flag wins the single reason code.
+  assert.equal(rows[0].reason, GATED);
+  assert.ok(rows[0].visibility.includes('capture-paused'));
+  assert.equal(observer.retainedBodies(fp), null, 'closed case is gone from the open map');
+});
+
+test('observer: a non-qualifying report send lands in the uncertain lane, symmetric with room sends', async t => {
+  // One chronology rule for every send class: a send whose matching Lead
+  // turn-start was NOT observed strictly after the Peer handback is
+  // uncertain — never report evidence and never drift support.
+  const { observer, paseo, home } = await baseSetup(t);
+  observer.onCreated(peerHook(), paseo);
+  observer.onTurn(peerTurn(), paseo);
+  await observer.idle();
+  // NO leadStart — the send's chronology cannot qualify. Both a Supervisor
+  // report and a room send land in the uncertain lane together.
+  observer.onTurn(leadEnd([
+    codexSend('c1', SUP, 'status report'),
+    codexSend('c2', PEER, 'maybe-early ack'),
+  ]), paseo);
+  await settle(observer);
+  const rows = ringRows(home);
+  assert.equal(rows[0].counts.reportMessages, 0, 'non-qualifying report is never report evidence');
+  assert.equal(rows[0].counts.roomMessages, 0, 'non-qualifying room send is never repair evidence');
+  assert.equal(rows[0].counts.uncertainRoomMessages, 2, 'both land in the uncertain lane');
+  assert.ok(rows[0].visibility.includes('lead-start-unmatched'));
+  assert.equal(rows[0].reason, 'lead-start-unmatched');
+});
+
+test('observer: a qualifying report send lands in the report lane', async t => {
+  const { observer, paseo, home } = await baseSetup(t);
+  observer.onCreated(peerHook(), paseo);
+  observer.onTurn(peerTurn(), paseo);
+  await observer.idle();
+  observer.onStart(leadStart('turn-l1'));
+  observer.onTurn(leadEnd([codexSend('c1', SUP, 'status report')]), paseo);
+  await settle(observer);
+  const rows = ringRows(home);
+  assert.equal(rows[0].counts.reportMessages, 1);
+  assert.equal(rows[0].counts.uncertainRoomMessages, 0);
+  assert.equal(rows[0].messageIds.sendCallIds.includes('c1'), true);
+  assert.equal(rows[0].messageIds.sendTurnIds.includes('turn-l1'), true,
+    'the issuing Lead turn id persists beside the call id');
+});
+
+test('observer: ring rows persisted before the new fields existed still load', async t => {
+  // Schema compat: new fields are optional-with-default — a readable older
+  // row keeps its data instead of dropping the whole ring file.
+  const home = makeHome(t);
+  const dir = join(home, 'slp-runtime', 'state');
+  mkdirSync(dir, { recursive: true });
+  const oldRow = {
+    fingerprint: 'a'.repeat(64), leadAgentId: LEAD, peerId: PEER, peerTurnId: 'turn-p1',
+    observedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    state: 'unknown', reason: 'report-route-unverifiable',
+    visibility: ['report-route-unverifiable'],
+    counts: { roomMessages: 1, uncertainRoomMessages: 0, reportMessages: 0, peerSends: 0 },
+    assessmentsUsed: 0, lastAssessment: { at: 'x', model: 'm', usage: null, choices: { leadBrief: 'satisfied' } },
+  };
+  writeFileSync(join(dir, 'supervision-cases.json'), JSON.stringify({ schemaVersion: 1, cases: [oldRow] }, null, 2));
+  const { observer } = makeObserver(t, { home, agents: liveAgents() });
+  const view = observer.shadow(join(home, 'slp-runtime'));
+  assert.equal(view.observations.length, 1, 'older ring rows load, never silently dropped');
+  const row = view.observations[0];
+  assert.equal(row.counts.roomMessages, 1, 'existing data survives');
+  assert.equal(row.counts.otherRoomMessages, 0, 'new count field defaults to zero');
+  assert.equal(row.lastAssessment, null, 'a legacy assessment shape reads as null, not a dropped row');
+  assert.deepEqual(row.messageIds, { brief: null, handback: null, sendCallIds: [], sendTurnIds: [] });
 });

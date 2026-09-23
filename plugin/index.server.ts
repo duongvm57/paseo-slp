@@ -106,7 +106,7 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   // Shadow-observer lifecycle hooks — synchronous capture only; every async
   // step (refresh, Jev HTTP, ring write) runs on the observer's own queue.
   const ob = observer;
-  const offCreated = ob === null ? null : server.on("agent.created", event => ob.onCreated(event.agent));
+  const offCreated = ob === null ? null : server.on("agent.created", (event, { paseo }) => ob.onCreated(event.agent, paseo));
   const offArchived = ob === null ? null : server.on("agent.archived", (event, { paseo }) => ob.onArchived(event.agent, paseo));
   const offStarted = ob === null ? null : server.on("agent.turn_started", event => ob.onStart(event));
   const offEnded = ob === null ? null : server.on("agent.turn_ended", (event, { paseo }) => ob.onTurn(event, paseo));

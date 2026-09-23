@@ -53,9 +53,9 @@ const CASES_FILE = join("state", "supervision-cases.json");
 // Case model + bounded metadata ring
 // ---------------------------------------------------------------------------
 
-interface MessageRef { callId: string; turnId: string | null; recipient: string; prompt: string }
+export interface MessageRef { callId: string; turnId: string | null; recipient: string; prompt: string }
 
-interface CaseEvidence {
+export interface CaseEvidence {
   brief: { text: string; messageId: string | null; flags: string[] } | null;
   handback: { text: string; messageId: string | null } | null;
   roomMessages: MessageRef[];          // confirmed Lead→Peer sends after the handback
@@ -78,6 +78,14 @@ interface Case {
   timerUsed: boolean;
   handbackOrder: number;
   dirty: boolean;
+  /** Per-case evaluation-basis generation — bumped on EVERY mutation an
+   *  assessment could see (evidence appends, flag changes, body clears,
+   *  pending-elapsed flips). The global `version` only covers evidence
+   *  still QUEUED; this counter covers in-place mutations that never pass
+   *  an enqueue (gate-down, queue-overflow, lane pushes). An in-flight Jev
+   *  ask compares it at accept-time — spec: "New evidence arriving during
+   *  an assessment invalidates that assessment." */
+  evidenceVersion: number;
   gatedReason: string | null;
   disposition: "observed" | "unknown" | "suspected_drift";
   assessments: number;
@@ -96,6 +104,37 @@ type Job =
   | { t: "verify-peer"; order: number; leadId: string; peerId: string }
   | { t: "restore-lead"; order: number; leadId: string }
   | { t: "archive"; order: number; agent: PluginHookAgent };
+
+/** The exact outbound evidence state (spec §Jev: bound ids, case and
+ *  turn/message ids, the complete captured brief and session handback
+ *  bodies, confirmed room/report prompts, and visibility flags — nothing
+ *  else). Module-level so the field-allowlist test exercises THIS function,
+ *  not a re-declared literal: adding a field here must fail that test. */
+export function buildEvidencePayload(
+  item: {
+    id: string; leadId: string; peerId: string; peerTurnId: string | null;
+    evidence: CaseEvidence;
+  },
+  route: Pick<SupervisionRoute, "supervisorAgentId">,
+): EvidencePayload {
+  return {
+    bound: { leadAgentId: item.leadId, peerId: item.peerId, supervisorAgentId: route.supervisorAgentId },
+    caseId: item.id,
+    peerTurnId: item.peerTurnId,
+    brief: item.evidence.brief === null ? null : {
+      text: item.evidence.brief.text, messageId: item.evidence.brief.messageId,
+      visibility: item.evidence.brief.flags,
+    },
+    handback: item.evidence.handback,
+    roomMessages: item.evidence.roomMessages.map(m => ({ callId: m.callId, turnId: m.turnId, prompt: m.prompt })),
+    uncertainRoomMessages: item.evidence.uncertainRoomMessages.map(m => ({ callId: m.callId, turnId: m.turnId, recipient: m.recipient })),
+    otherRoomMessages: item.evidence.otherRoomMessages.map(m => ({ callId: m.callId, turnId: m.turnId, recipient: m.recipient })),
+    reportMessages: item.evidence.reportMessages.map(m => ({ callId: m.callId, turnId: m.turnId, recipient: m.recipient, prompt: m.prompt })),
+    peerSends: item.evidence.peerSends.map(m => ({ callId: m.callId, recipient: m.recipient, prompt: m.prompt })),
+    pendingWindowElapsed: item.evidence.pendingDelayElapsed,
+    flags: item.evidence.flags,
+  };
+}
 
 // The SDK does not offer cancellation on refresh — bound our wait and detach
 // on stop (spec: "bound SDK waits"). An already issued request cannot be
@@ -208,7 +247,10 @@ export function createSupervisionObserver(deps: ObserverDeps) {
   const statStamp = (file: string): string => {
     try {
       const stat = lstatSync(file);
-      return `${stat.mtimeMs}:${stat.size}`;
+      // mode included — chmod changes keyPermissionsOk (a gate input)
+      // without touching mtime or size, so a permission-only change must
+      // still bust the cache.
+      return `${stat.mtimeMs}:${stat.size}:${stat.mode}`;
     } catch {
       return "-";
     }
@@ -254,18 +296,23 @@ export function createSupervisionObserver(deps: ObserverDeps) {
   };
 
   // Turn/message IDs where available — ids only, bounded (spec §Shadow
-  // evidence: "turn/message IDs where available").
-  const messageIdsOf = (item: Case): Observation["messageIds"] => ({
-    brief: item.evidence.brief?.messageId ?? null,
-    handback: item.evidence.handback?.messageId ?? null,
-    sendCallIds: [
+  // evidence: "turn/message IDs where available"). sendTurnIds stays
+  // index-aligned with sendCallIds: the Lead turn that issued each send.
+  const messageIdsOf = (item: Case): Observation["messageIds"] => {
+    const sends = [
       ...item.evidence.roomMessages,
       ...item.evidence.uncertainRoomMessages,
       ...item.evidence.otherRoomMessages,
       ...item.evidence.reportMessages,
       ...item.evidence.peerSends,
-    ].map(message => message.callId).slice(0, 24),
-  });
+    ].slice(0, 24);
+    return {
+      brief: item.evidence.brief?.messageId ?? null,
+      handback: item.evidence.handback?.messageId ?? null,
+      sendCallIds: sends.map(message => message.callId),
+      sendTurnIds: sends.map(message => message.turnId),
+    };
+  };
 
   const recordRing = (item: Case, state: Observation["state"], reason: string | null): void => {
     const entries = loadRing();
@@ -307,25 +354,26 @@ export function createSupervisionObserver(deps: ObserverDeps) {
   const startKey = (leadId: string, turnId: string | null): string | null =>
     turnId === null ? null : `${leadId}\0${turnId}`;
 
-  function onCreated(agent: PluginHookAgent): void {
+  function onCreated(agent: PluginHookAgent, paseo: PaseoApi): void {
     if (signal.aborted) return;
+    lastPaseo = paseo;
     const routes = shadowRoutes();
     if (isSlpPeer(agent.provider) && agent.parentAgentId !== null && routes.has(agent.parentAgentId)) {
-      // Fresh creation — the hook payload's parentAgentId is authoritative.
-      // Host-verified contract (paseo packages/server agent-manager.ts):
-      // "agent.created" is emitted exactly once inside createAgentInternal
-      // after registerSession succeeds; resumeAgentFromPersistence emits
-      // nothing and the plugin runtime only dispatches live events to
-      // currently-registered hooks — there is no replay/backfill on plugin
-      // reload, so this payload can never arrive stale for a pre-existing
-      // agent. Post-restart discovery of unknown pairs instead goes through
-      // the refresh-verified verify-peer job below.
-      // Tombstoned ids re-enter only through the refresh-verified restore job.
-      if (tombstoned(agent.id)) {
-        enqueue({ t: "verify-peer", order: ++order, leadId: agent.parentAgentId, peerId: agent.id });
-      } else {
-        peers.set(agent.id, agent.parentAgentId);
-      }
+      // agent.created is NOT creation-proof on this host: when a persisted
+      // record lacks a provider persistence handle, ensureAgentLoaded
+      // recreates the agent through createAgent, which emits the same event
+      // (paseo packages/server agent-loading.ts:104-128 →
+      // agent-manager.ts:1258; describeHookAgent maps parentAgentId from the
+      // persisted label, lifecycle/index.ts:85). The payload's
+      // parentAgentId is therefore a persisted claim, never fresh-creation
+      // proof — verify membership through the same bounded refresh path as
+      // post-restart discovery before registering (spec §Observation point
+      // 1: "Peer membership still requires that Lead's actual parent
+      // link"). A failed/inactive refresh leaves the pair unregistered;
+      // the next peer turn records the visibility reason instead of
+      // trusting the event payload. Tombstoned ids ride the same job —
+      // its generation compare discards stale verifications.
+      enqueue({ t: "verify-peer", order: ++order, leadId: agent.parentAgentId, peerId: agent.id });
       return;
     }
     if (isSlpLead(agent.provider) && routes.has(agent.id) && tombstoned(agent.id)) {
@@ -379,15 +427,20 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     lastPaseo = paseo;
     const routes = shadowRoutes();
     if (!captureAllowed()) {
-      // Gate down: capture pauses — nothing is appended and no bodies are
-      // retained (spec: a failed gate "does not retain new message bodies").
-      // Open cases of the affected Lead are flagged so the dropped window
-      // reads as uncertainty, never as silence that could look complete.
+      // Gate down: capture pauses — nothing is appended AND bodies already
+      // captured are dropped NOW (spec §Configuration: a failed gate "does
+      // not retain new message bodies" — the privacy boundary empties
+      // retained bodies at detection, not at some later evaluation). Open
+      // cases of the affected Lead are flagged so the dropped window reads
+      // as uncertainty, never as silence that could look complete.
       const gatedLeadId = isSlpLead(event.agent.provider) ? event.agent.id : event.agent.parentAgentId;
       if (gatedLeadId !== null && routes.has(gatedLeadId)) {
         for (const item of cases.values()) {
           if (item.leadId !== gatedLeadId) continue;
           if (!item.evidence.flags.includes(VISIBILITY.capturePaused)) item.evidence.flags.push(VISIBILITY.capturePaused);
+          // clearBodies bumps evidenceVersion — the mutation invalidates
+          // any in-flight assessment at accept-time.
+          clearBodies(item);
           item.dirty = true;
         }
       }
@@ -449,7 +502,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
           leadAgentId: job.capture.leadId,
           peerId: job.capture.peerId,
           peerTurnId: job.capture.turnId,
-          messageIds: { brief: null, handback: null, sendCallIds: [] },
+          messageIds: { brief: null, handback: null, sendCallIds: [], sendTurnIds: [] },
           observedAt: stamp, updatedAt: stamp,
           state: "unknown", reason: VISIBILITY.queueOverflow,
           visibility: [VISIBILITY.queueOverflow],
@@ -461,10 +514,15 @@ export function createSupervisionObserver(deps: ObserverDeps) {
       }
       // A dropped lead turn-end loses sends for every open case of that
       // lead — mark them so evaluation sees the gap instead of silence.
+      // The flag mutation bumps evidenceVersion: an in-flight assessment
+      // must not accept against the pre-gap basis (spec §Observation:
+      // "New evidence arriving during an assessment invalidates that
+      // assessment" — a LOST event changes the basis too).
       if (job.t === "turn-end" && job.capture.kind === "lead") {
         for (const item of cases.values()) {
           if (item.leadId !== job.capture.leadId) continue;
           if (!item.evidence.flags.includes(VISIBILITY.queueOverflow)) item.evidence.flags.push(VISIBILITY.queueOverflow);
+          item.evidenceVersion += 1;
           item.dirty = true;
         }
       }
@@ -485,6 +543,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
         if (!item.timerUsed && item.due <= now()) {
           item.timerUsed = true;
           item.evidence.pendingDelayElapsed = true;
+          item.evidenceVersion += 1;
           item.dirty = true;
         }
         if (item.expiresAt <= now()) closeCase(item, "unknown", VISIBILITY.caseExpired);
@@ -550,7 +609,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
         entries.set(event.id, {
           fingerprint: event.id, leadAgentId: event.leadId, peerId: event.peerId,
           peerTurnId: event.turnId, observedAt: stamp, updatedAt: stamp,
-          messageIds: { brief: null, handback: null, sendCallIds: [] },
+          messageIds: { brief: null, handback: null, sendCallIds: [], sendTurnIds: [] },
           state: "unknown", reason: VISIBILITY.recipientRefreshFailed,
           visibility: [VISIBILITY.recipientRefreshFailed],
           counts: { roomMessages: 0, uncertainRoomMessages: 0, otherRoomMessages: 0, reportMessages: 0, peerSends: 0 },
@@ -567,7 +626,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
         entries.set(event.id, {
           fingerprint: event.id, leadAgentId: event.leadId, peerId: event.peerId,
           peerTurnId: event.turnId, observedAt: stamp, updatedAt: stamp,
-          messageIds: { brief: null, handback: null, sendCallIds: [] },
+          messageIds: { brief: null, handback: null, sendCallIds: [], sendTurnIds: [] },
           state: "unknown", reason: VISIBILITY.caseCeiling,
           visibility: [VISIBILITY.caseCeiling],
           counts: { roomMessages: 0, uncertainRoomMessages: 0, otherRoomMessages: 0, reportMessages: 0, peerSends: 0 },
@@ -599,6 +658,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
         timerUsed: false,
         handbackOrder: job.order,
         dirty: true,
+        evidenceVersion: 0,
         gatedReason: null,
         disposition: "observed",
         assessments: 0,
@@ -607,7 +667,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
       };
       // 64 KiB of SERIALIZED bytes — JS string length counts UTF-16 code
       // units, so multibyte text would slip past a `.length` check.
-      if (Buffer.byteLength(JSON.stringify(buildEvidence(item, route)), "utf8") > MAX_EVIDENCE_BYTES) {
+      if (Buffer.byteLength(JSON.stringify(buildEvidencePayload(item, route)), "utf8") > MAX_EVIDENCE_BYTES) {
         item.evidence.flags.push(VISIBILITY.evidenceOversize);
         item.gatedReason = VISIBILITY.evidenceOversize;
       }
@@ -664,24 +724,43 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     for (const item of cases.values()) {
       if (item.leadId !== event.leadId) continue;
       const qualifies = subsequent && (job.startSeq as number) > item.handbackOrder;
-      // A send proves handling only for the case of its actual Peer
-      // recipient — a send to Peer X is not evidence about Peer Y's case.
-      // Sends to OTHER verified direct Peers are observable room activity:
-      // they can SUPPORT a handling-drift judgment but never prove handling
-      // for this case (spec: "require observable supporting communication").
+      // One chronology rule for EVERY send class (spec §Observation point
+      // 5: "A Lead send is subsequent handling only when its matching
+      // non-null turn-start event was observed strictly after the Peer
+      // handback"). A qualifying send to THIS case's Peer is the repair
+      // lane; to another verified direct Peer it is room activity
+      // (drift-supporting, never handling); to the route Supervisor it is
+      // the separate report class. ANY non-qualifying send — regardless of
+      // recipient — lands in the uncertain lane: ambiguous chronology can
+      // never count as handling or as drift support.
+      let mutated = false;
       for (const [recipient, list] of roomFor) {
-        if (recipient === item.peerId) {
-          (qualifies ? item.evidence.roomMessages : item.evidence.uncertainRoomMessages).push(...list);
-        } else if (qualifies) {
-          item.evidence.otherRoomMessages.push(...list);
+        if (list.length === 0) continue;
+        mutated = true;
+        if (qualifies) {
+          (recipient === item.peerId ? item.evidence.roomMessages : item.evidence.otherRoomMessages).push(...list);
+        } else {
+          item.evidence.uncertainRoomMessages.push(...list);
         }
       }
-      item.evidence.uncertainRoomMessages.push(
-        ...uncertain.map(s => ({ callId: s.callId, turnId: event.turnId, recipient: s.recipient, prompt: s.prompt })),
-      );
-      item.evidence.reportMessages.push(...reports);
-      for (const flag of newFlags) if (!item.evidence.flags.includes(flag)) item.evidence.flags.push(flag);
-      if (sends.length || uncertain.length || reports.length) item.dirty = true;
+      if (uncertain.length > 0) {
+        mutated = true;
+        item.evidence.uncertainRoomMessages.push(
+          ...uncertain.map(s => ({ callId: s.callId, turnId: event.turnId, recipient: s.recipient, prompt: s.prompt })),
+        );
+      }
+      if (reports.length > 0) {
+        mutated = true;
+        (qualifies ? item.evidence.reportMessages : item.evidence.uncertainRoomMessages).push(...reports);
+      }
+      for (const flag of newFlags) {
+        if (!item.evidence.flags.includes(flag)) { item.evidence.flags.push(flag); mutated = true; }
+      }
+      // Every applied mutation bumps the case's evaluation basis — an
+      // in-flight assessment must not accept against stale evidence
+      // (spec: "New evidence arriving during an assessment invalidates
+      // that assessment").
+      if (mutated) { item.evidenceVersion += 1; item.dirty = true; }
       recordRing(item, item.disposition, item.gatedReason);
     }
   }
@@ -692,27 +771,12 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     for (const lane of [item.evidence.roomMessages, item.evidence.uncertainRoomMessages, item.evidence.otherRoomMessages, item.evidence.reportMessages, item.evidence.peerSends]) {
       for (const message of lane) message.prompt = "";
     }
+    // Body loss changes the evaluation basis — an in-flight assessment
+    // built on the pre-clear payload is stale and must be discarded.
+    item.evidenceVersion += 1;
   };
 
   // --- evaluation -----------------------------------------------------------
-
-  const buildEvidence = (item: Case, route: SupervisionRoute): EvidencePayload => ({
-    bound: { leadAgentId: item.leadId, peerId: item.peerId, supervisorAgentId: route.supervisorAgentId },
-    caseId: item.id,
-    peerTurnId: item.peerTurnId,
-    brief: item.evidence.brief === null ? null : {
-      text: item.evidence.brief.text, messageId: item.evidence.brief.messageId,
-      visibility: item.evidence.brief.flags,
-    },
-    handback: item.evidence.handback,
-    roomMessages: item.evidence.roomMessages.map(m => ({ callId: m.callId, turnId: m.turnId, prompt: m.prompt })),
-    uncertainRoomMessages: item.evidence.uncertainRoomMessages.map(m => ({ callId: m.callId, turnId: m.turnId })),
-    otherRoomMessages: item.evidence.otherRoomMessages.map(m => ({ callId: m.callId, turnId: m.turnId, recipient: m.recipient })),
-    reportMessages: item.evidence.reportMessages.map(m => ({ callId: m.callId, turnId: m.turnId, recipient: m.recipient, prompt: m.prompt })),
-    peerSends: item.evidence.peerSends.map(m => ({ callId: m.callId, recipient: m.recipient, prompt: m.prompt })),
-    pendingWindowElapsed: item.evidence.pendingDelayElapsed,
-    flags: item.evidence.flags,
-  });
 
   async function evaluateCase(item: Case): Promise<void> {
     const route = shadowRoutes().get(item.leadId);
@@ -772,7 +836,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
       closeCase(item, "unknown", "peer-inactive");
       return;
     }
-    const payload = buildEvidence(item, route);
+    const payload = buildEvidencePayload(item, route);
     const gateReason = localGate(payload);
     if (gateReason !== null) {
       item.gatedReason = gateReason;
@@ -787,10 +851,14 @@ export function createSupervisionObserver(deps: ObserverDeps) {
       closeCase(item, "unknown", VISIBILITY.evidenceOversize);
       return;
     }
-    // Stale-detection: evidence arriving during the assessment invalidates it
-    // before any conclusion is stored (spec: "invalidates the assessment
-    // before delivery").
+    // Stale-detection: evidence arriving during the assessment invalidates
+    // it before any conclusion is stored (spec: "invalidates the assessment
+    // before delivery"). Two generations: `version` covers evidence still
+    // QUEUED (enqueue bumps); `item.evidenceVersion` covers in-place
+    // mutations that never enqueue (gate-down, queue-overflow marks, lane
+    // pushes, body clears, pending-elapsed flips).
     const pre = version;
+    const preEvidence = item.evidenceVersion;
     item.assessments += 1;
     let assessment: { answers: AssessmentAnswers; model: string; usage: { input_tokens: number; output_tokens: number } | null } | null = null;
     let failed = "jev-request-failed";
@@ -811,7 +879,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
         : error instanceof JevRequestError ? error.code : "jev-request-failed";
     }
     if (signal.aborted) return;
-    if (version !== pre) {
+    if (version !== pre || item.evidenceVersion !== preEvidence) {
       // Evidence changed mid-flight — discard; the newer batch re-arms dirty.
       item.dirty = true;
       return;
@@ -864,6 +932,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
           if (signal.aborted || pre !== version) break;
           if (!item.dirty || item.due > now()) continue;
           item.evidence.pendingDelayElapsed = true;
+          item.evidenceVersion += 1;
           item.timerUsed = true;
           await evaluateCase(item);
         }
@@ -934,7 +1003,26 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     }
   }
 
-  return { onCreated, onArchived, onStart, onTurn, shadow, stop, idle, signal };
+  /** Test/diagnostic seam — count of non-empty body fields one open case
+   *  still retains (brief, handback, lane prompts). Count only, never
+   *  content, so the privacy invariant "gate-down empties retained bodies
+   *  at detection" stays assertable without exposing bodies. */
+  function retainedBodies(fingerprint: string): number | null {
+    const item = cases.get(fingerprint);
+    if (item === undefined) return null;
+    let n = 0;
+    if (item.evidence.brief !== null && item.evidence.brief.text !== "") n += 1;
+    if (item.evidence.handback !== null && item.evidence.handback.text !== "") n += 1;
+    for (const lane of [
+      item.evidence.roomMessages, item.evidence.uncertainRoomMessages,
+      item.evidence.otherRoomMessages, item.evidence.reportMessages, item.evidence.peerSends,
+    ]) {
+      for (const message of lane) if (message.prompt !== "") n += 1;
+    }
+    return n;
+  }
+
+  return { onCreated, onArchived, onStart, onTurn, shadow, stop, idle, retainedBodies, signal };
 }
 
 export type SupervisionObserver = ReturnType<typeof createSupervisionObserver>;
