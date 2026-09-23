@@ -15,6 +15,7 @@ import { agents } from '../src/agents.mjs';
 import { monitor } from '../src/monitor.mjs';
 import { notebook } from '../src/notebook.mjs';
 import { localTarget, runtimeStatus } from '../src/runtime-state.mjs';
+import { probeWorkTracker } from '../src/work-tracker.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const argv = process.argv.slice(2);
@@ -43,14 +44,14 @@ try {
       target = key;
     } else throw new Error(`Unknown flag ${key}`);
   }
-  const commandFlags = { install: ['--paseo-home', '--apply', '--reload'], uninstall: ['--apply', '--reload'], upgrade: ['--from', '--apply', '--reload'], init: ['--routing-from', '--apply'], materialize: ['--from', '--apply'], routes: ['--paseo-home'], inventory: ['--paseo-home'], agents: ['--paseo-home'], monitor: [], notebook: ['--paseo-home'], prepare: ['--check', '--emit', '--schema'], 'prepare-handoff': ['--check', '--emit', '--schema'], 'route-decide': ['--paseo-home'], status: ['--paseo-home'], 'local-target': ['--paseo-home'] };
+  const commandFlags = { install: ['--paseo-home', '--apply', '--reload'], uninstall: ['--apply', '--reload'], upgrade: ['--from', '--apply', '--reload'], init: ['--routing-from', '--apply'], materialize: ['--from', '--apply'], routes: ['--paseo-home'], inventory: ['--paseo-home'], agents: ['--paseo-home'], monitor: [], notebook: ['--paseo-home'], prepare: ['--check', '--emit', '--schema'], 'prepare-handoff': ['--check', '--emit', '--schema'], 'route-decide': ['--paseo-home'], status: ['--paseo-home'], 'local-target': ['--paseo-home'], tracker: ['--paseo-home'] };
   for (const key of Object.keys(options)) if (!commandFlags[command]?.includes(key)) throw new Error(`${key} is not valid for ${command}`);
   const prepareModes = ['--check', '--emit', '--schema'].filter(key => options[key]);
   if (prepareModes.length > 1) throw new Error(`${prepareModes.join(' and ')} are separate modes — pick one`);
   if (command === 'upgrade' && !options['--from']) throw new Error('upgrade requires --from <previous-installation>');
   if (command === 'materialize' && !options['--from']) throw new Error('materialize requires --from <source-repository>');
   if (options['--reload'] && !options['--apply']) throw new Error('--reload requires --apply');
-  const targetArg = { snapshot: 'repository', verify: 'dir', prepare: 'request.json', 'prepare-handoff': 'request.json', routes: 'repository', init: 'repository', materialize: 'repository', monitor: 'request.json', notebook: 'repository', instructions: 'role', 'route-decide': 'request.json' };
+  const targetArg = { snapshot: 'repository', verify: 'dir', prepare: 'request.json', 'prepare-handoff': 'request.json', routes: 'repository', init: 'repository', materialize: 'repository', monitor: 'request.json', notebook: 'repository', instructions: 'role', 'route-decide': 'request.json', tracker: 'repository' };
   if (targetArg[command] && !target && !options['--schema']) throw new Error(`${command} requires <${targetArg[command]}>`);
   if (target && !targetArg[command] && !['install', 'uninstall', 'upgrade'].includes(command)) throw new Error(`${command} takes no arguments`);
   let result;
@@ -89,6 +90,11 @@ try {
   else if (command === 'init') result = initWorkspace(root, target, Boolean(options['--apply']), options['--routing-from']);
   else if (command === 'materialize') result = materializeWorkspace(options['--from'], target, Boolean(options['--apply']));
   else if (command === 'monitor') result = monitor(readJson(target));
+  else if (command === 'tracker') {
+    // Read-only beads probe: gaps are data, so exit 0 even when the state is
+    // not ready. Without --paseo-home the setting is not read (enabled: null).
+    result = probeWorkTracker(resolve(target), { daemonHome: options['--paseo-home'] ?? null });
+  }
   else if (command === 'instructions') {
     // Raw preview: the exact bytes roleBundle would inject, unwrapped — stdout
     // stays diffable against a live bundle; provenance goes to stderr. A
@@ -130,6 +136,6 @@ try {
         process.exitCode = 1;
       }
     }
-  } else throw new Error('Usage: slp.mjs identity | snapshot <repo> | install [absolute-dir] [--paseo-home <absolute-home>] [--apply] [--reload] | upgrade <absolute-new-dir> --from <previous-installation> [--apply] [--reload] | verify <dir> | uninstall <dir> [--apply] [--reload] | init <absolute-repo> [--routing-from <absolute-json>] [--apply] | routes <absolute-repo> [--paseo-home <absolute-home>] | inventory [--paseo-home <absolute-home>] | agents [--paseo-home <absolute-home>] | prepare <request.json> [--check | --emit create | --schema] | prepare-handoff <request.json> [--check | --emit create | --schema] | materialize <repository> --from <source-repository> [--apply] | monitor <request.json> | route-decide <request.json> [--paseo-home <absolute-home>] | notebook <repository> [--paseo-home <absolute-home>] | instructions <role> | status [--paseo-home <absolute-home>] | local-target [--paseo-home <absolute-home>]');
+  } else throw new Error('Usage: slp.mjs identity | snapshot <repo> | install [absolute-dir] [--paseo-home <absolute-home>] [--apply] [--reload] | upgrade <absolute-new-dir> --from <previous-installation> [--apply] [--reload] | verify <dir> | uninstall <dir> [--apply] [--reload] | init <absolute-repo> [--routing-from <absolute-json>] [--apply] | routes <absolute-repo> [--paseo-home <absolute-home>] | inventory [--paseo-home <absolute-home>] | agents [--paseo-home <absolute-home>] | prepare <request.json> [--check | --emit create | --schema] | prepare-handoff <request.json> [--check | --emit create | --schema] | materialize <repository> --from <source-repository> [--apply] | monitor <request.json> | route-decide <request.json> [--paseo-home <absolute-home>] | notebook <repository> [--paseo-home <absolute-home>] | instructions <role> | status [--paseo-home <absolute-home>] | local-target [--paseo-home <absolute-home>] | tracker <repository> [--paseo-home <absolute-home>]');
   if (result !== undefined) process.stdout.write(json(result));
 } catch (error) { console.error(error.message); process.exitCode = 1; }
