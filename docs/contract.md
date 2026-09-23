@@ -42,7 +42,7 @@ Local installation/transport checks do not constitute workflow acceptance.
 | src/notebook.mjs | Read-only locator for a repository's active governance notebook: resolves the repository's git common dir — the property linking a worktree back to its repository — then lists Supervisor agents (provider containing `supervisor`, or a Supervisor-titled state file) whose `cwd` shares it. Output is candidates only, sorted by lastActivityAt, each with notebook path and `notebookExists`; broken agent cwds become gaps. Never copies or mutates notebook content, and picks no authoritative candidate — governance stays per-checkout. |
 | src/package.mjs | Package identity, exclusive staging, integrity checks and stable Git work snapshot; untracked nested Git work-tree roots are snapshotted recursively under `nested`, sub-repos can carry their own `nested`, and index gitlinks record `{path, kind:"gitlink", indexOid, headOid, state}` with non-clean states listed in top-level `incomplete`. |
 | src/runtime-state.mjs | Read-only plugin-state probes (H13 workaround): `localTarget` mirrors the plugin's daemon-home detection; `runtimeStatus` recomputes the file-derivable parts of the daemon `status` view — receipt, owned providers/profiles, runtime and launcher integrity, config-drift presence — and reports daemon-only views (live conflicts, family availability) as gaps, never guesses. The Jev probe reports `hasKey`/`keyPermissionsOk` only — key material never enters output. Fails closed on corrupt plugin state. Mutation RPCs are Human-authority and are not exposed. Retire when the host ships `paseo plugin invoke` or MCP `invoke_plugin_rpc`. |
-| bin/slp.mjs | Install/upgrade/preview, verify/uninstall, init, materialize, routes, prepare/handoff, inventory, agents, monitor, notebook, identity, snapshot, instructions (raw session-entry bundle bytes on stdout, provenance on stderr), route-decide (the only path that calls Jev — explicit invocation, network, emits a receipt; prepare and prepare --check stay offline), status and local-target (read-only plugin-state probes) entrypoints. |
+| bin/slp.mjs | Install/upgrade/preview, verify/uninstall, init, materialize, routes, prepare/handoff, inventory, agents, monitor, notebook, identity, snapshot, instructions (raw session-entry bundle bytes on stdout, provenance on stderr), route-decide (the only CLI path that calls Jev — explicit invocation, network, emits a receipt; prepare and prepare --check stay offline), status and local-target (read-only plugin-state probes) entrypoints. |
 | skills/paseo-slp-e2e/SKILL.md | Single-session full-suite execution procedure; requires the source checkout and authorized Paseo actors. |
 | e2e/evidence.mjs | One contract per evidence kind: what may enter the ledger and what discharges the kind's requirement at seal. |
 | e2e/criteria.mjs | U1–U7 as code, each naming the evidence kinds that can support it; the mapping a reviewer previously held in their head. |
@@ -236,6 +236,31 @@ Confidence lands on the receipt as evidence, never as a routing threshold,
 and receipts prove consistency, not cryptographic authenticity. Accepted
 risk (recorded): the key file is 0600 inside the daemon home, yet any
 same-user process can read it — daemon-home integrity is the boundary.
+
+Communication supervision is a second opt-in capability, bound per Lead
+route in <daemonHome>/slp-runtime/state/supervision.json (0600, whole-file
+sha256 CAS through the supervision card — its sole writer). Off by default;
+configuring Jev never enables a route, and a route enables nothing until
+mode is explicitly shadow. When enabled, the plugin's lifecycle hooks
+(agent.created/archived/turn_started/turn_ended) synchronously capture
+normalized send_agent_prompt evidence for the bound Lead's direct Peers,
+and a serialized plugin-owned queue evaluates each Peer handback through
+Jev's three-question assessment — a second Jev consumer that requires
+capabilities.supervision in addition to enabled. The detector observes
+communication only: it never infers authority, certifies artifacts,
+mutates assignments, or prompts any agent, and every missing or
+unverifiable input resolves to unknown rather than drift. Persisted output
+is a bounded metadata ring (state/supervision-cases.json, ≤200 entries,
+≤30 days — fingerprints, ids, counts, flags, assessment summaries; never
+message bodies or keys); open cases and the queue are process-local and
+are not replayed after a restart. External data/cost: shadow evaluation
+sends captured brief/handback/room-message content to the configured Jev
+endpoint, so communication leaves the host and each evaluation is a paid
+provider call. Mode notify is schema-valid but has no delivery
+implementation — notification is a separate Human gate. Provider coverage
+is fixture-derived for all four families; on devin the MCP result body is
+dropped upstream, so send delivery evidence is weaker there than on codex.
+Live E2E validation has not run; see docs/spec/supervision-integration.md.
 
 prepare accepts repository, workspaceId, assignment and role. Supervisor/Lead use
 fresh profiles/providers; Peer uses providers and route.optionId/catalogSha256.

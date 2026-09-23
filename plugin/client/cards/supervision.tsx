@@ -357,6 +357,12 @@ export function SupervisionCard({ colors, target, jev, supervision }: {
           A route in shadow mode can send captured Peer/Lead communication to the configured Jev endpoint —
           content leaves this host. Notification delivery is not implemented in this build.
         </Text>
+        <Text style={[styles.mutedSmall, { color: colors.foregroundMuted }]}>
+          Coverage is fixture-derived for codex/pi/devin/claude — on devin the send result body is
+          unobservable, so delivery evidence is weaker there. Each evaluation is a billable Jev call.
+          Open cases and the event queue are process-local: a plugin restart does not replay missed
+          turns — only the bounded metadata ring persists.
+        </Text>
       </View>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         <Badge colors={colors} label={gate.label} tone={gate.tone} />
