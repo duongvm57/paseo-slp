@@ -952,8 +952,125 @@ test('observer: archive during peer-refresh — a stale verification cannot admi
   await observer.idle();
   assert.equal(calls.length, 0);
   const rows = ringRows(home);
+  assert.ok(rows.length > 0, 'the dropped turn still records a metadata row — vacuous every() must not pass on empty');
   assert.ok(rows.every(row => row.state === 'unknown'), 'pre-archive evidence can only record unknown');
   assert.ok(rows.every(row => row.reason === 'recipient-refresh-failed'));
+});
+
+test('observer: gate-down clears retained bodies globally — the Jev gate is daemon-global', async t => {
+  // Spec §Configuration: a failed gate "does not retain new message
+  // bodies" — the clause is not lead-scoped, so a gate-down observed by one
+  // Lead's event must empty EVERY open case, not just that Lead's.
+  const LEAD_B = '88888888-8888-4888-8888-888888888888';
+  const PEER_B = '99999999-9999-4999-8999-999999999999';
+  const home = makeHome(t);
+  writeRoutes(home, [
+    route({ pendingDelayMs: 60_000 }),
+    route({ leadAgentId: LEAD_B, pendingDelayMs: 60_000 }),
+  ]);
+  const agents = liveAgents({
+    [LEAD_B]: snap(LEAD_B, 'slp-codex-lead'),
+    [PEER_B]: snap(PEER_B, 'slp-codex-peer', { labels: { 'paseo.parent-agent-id': LEAD_B } }),
+  });
+  writeJev(home, JEV_CFG);
+  let currentGate = GATE_OK;
+  const { observer, paseo } = makeObserver(t, {
+    home, agents, gate: () => currentGate,
+    ask: async () => { throw new Error('unreachable'); },
+  });
+  // Two open cases on two different Leads, both retaining bodies.
+  observer.onCreated(peerHook(), paseo);
+  observer.onTurn(peerTurn(), paseo);
+  observer.onCreated(peerHook(PEER_B, { parentAgentId: LEAD_B }), paseo);
+  observer.onTurn(peerEnd([userMsg('brief B'), asstMsg('handback B')], { peerId: PEER_B, turnId: 'turn-pB', agent: { parentAgentId: LEAD_B } }), paseo);
+  await observer.idle();
+  const rowA = ringRows(home).find(r => r.peerId === PEER);
+  const rowB = ringRows(home).find(r => r.peerId === PEER_B);
+  assert.ok(observer.retainedBodies(rowA.fingerprint) > 0, 'case A retains bodies pre-gate-down');
+  assert.ok(observer.retainedBodies(rowB.fingerprint) > 0, 'case B retains bodies pre-gate-down');
+  // The gate flips down; only Lead A's event observes it — but the Jev
+  // gate is daemon-global, so BOTH leads' cases must empty immediately.
+  currentGate = { ok: false, reason: 'jev-key-missing' };
+  writeJev(home, JEV_CFG, { key: 'k'.repeat(32) }); // stamp-bust the gate cache
+  observer.onTurn(leadEnd([asstMsg('gate-observing event')]), paseo);
+  assert.equal(observer.retainedBodies(rowA.fingerprint), 0, 'event-observing lead cleared');
+  assert.equal(observer.retainedBodies(rowB.fingerprint), 0, 'other lead cleared — the gate is global');
+});
+
+test('observer: a verify job queued before an archive never admits the stale generation', async t => {
+  // onCreated and onArchived land in the same synchronous turn — the
+  // queued verify-peer must discard itself on its ENQUEUE-time generation
+  // instead of refreshing a tombstoned id (spec: "Archive generations
+  // invalidate pending work").
+  const { observer, paseo, home } = await baseSetup(t);
+  observer.onCreated(peerHook(), paseo);
+  observer.onArchived(peerHook(), paseo);
+  await observer.idle();
+  // A post-archive turn cannot open a case: the capture is dropped and the
+  // drop is recorded in diagnostics, not as a ring row for a dead id.
+  observer.onTurn(peerTurn({ turnId: 'after-archive' }), paseo);
+  await observer.idle();
+  assert.equal(ringRows(home).length, 0, 'a queued-then-archived verification must not admit a later turn');
+  assert.ok(observer.shadow(join(home, 'slp-runtime')).diagnostics.reasons.includes('peer-archived'));
+});
+
+test('observer: a tombstoned send recipient is never admitted — not even via refresh', async t => {
+  const agents = liveAgents({
+    [OTHER]: snap(OTHER, 'slp-codex-peer', { labels: { 'paseo.parent-agent-id': LEAD } }),
+  });
+  const { observer, paseo, home } = await baseSetup(t, { agents });
+  observer.onCreated(peerHook(), paseo);
+  observer.onTurn(peerTurn(), paseo);
+  await observer.idle();
+  // OTHER is archived before the Lead's send is even observed — the local
+  // tombstone must gate the send without spending a refresh on a stale id.
+  observer.onArchived(peerHook(OTHER), paseo);
+  await observer.idle();
+  observer.onStart(leadStart('turn-l1'));
+  observer.onTurn(leadEnd([codexSend('c1', OTHER, 'post-archive send')]), paseo);
+  await settle(observer);
+  const rows = ringRows(home);
+  assert.equal(rows[0].counts.otherRoomMessages, 0, 'an archived recipient is never drift support');
+  assert.ok(rows[0].visibility.includes('recipient-inactive'));
+});
+
+test('observer: an archive landing during evaluation refresh closes peer-archived, not a gated reason', async t => {
+  // The post-await tombstone re-check must win over the liveness
+  // snapshots — they describe a stale generation.
+  const home = makeHome(t);
+  writeRoutes(home, [route({ pendingDelayMs: 40 })]);
+  const agents = liveAgents();
+  let evalRefreshStarted = false;
+  let releaseEval;
+  const evalGate = new Promise(resolve => { releaseEval = resolve; });
+  let peerRefreshes = 0;
+  const paseo = {
+    agents: {
+      ref: id => ({
+        refresh: async () => {
+          if (id === PEER && ++peerRefreshes === 2) { evalRefreshStarted = true; await evalGate; }
+          return { agent: agents[id] ?? null };
+        },
+      }),
+    },
+  };
+  const calls = [];
+  const { observer } = makeObserver(t, {
+    home, agents,
+    ask: async () => { calls.push(1); throw new Error('unreachable'); },
+  });
+  observer.onTurn(peerTurn(), paseo);
+  // Refresh 1 = verify-peer admission; refresh 2 = the evaluation's
+  // liveness refresh, blocked until the archive lands.
+  while (!evalRefreshStarted) await sleep(1);
+  observer.onArchived(peerHook(), paseo);
+  releaseEval();
+  await observer.idle();
+  assert.equal(calls.length, 0, 'no Jev spend on a stale generation');
+  const rows = ringRows(home);
+  assert.ok(rows.length > 0);
+  assert.equal(rows[rows.length - 1].state, 'unknown');
+  assert.equal(rows[rows.length - 1].reason, 'peer-archived', 'archive mid-evaluation wins over the snapshot');
 });
 
 test('observer: a Peer in an unverified family resolves unknown via family-shape-unverified', async t => {
