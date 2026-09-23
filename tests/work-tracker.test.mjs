@@ -20,6 +20,8 @@ import {
   readWorkTrackerSetting,
   workTrackerBlock,
 } from '../src/work-tracker.mjs';
+import { install } from '../src/package.mjs';
+import { roleBundle, roleDelivery } from '../src/role-bundle.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 
@@ -329,4 +331,112 @@ test('tracker CLI: argument validation matches the other commands', () => {
   const relative = runCli(['tracker', '/tmp', '--paseo-home', 'relative']);
   assert.notEqual(relative.status, 0);
   assert.match(relative.stderr, /Absolute path required/);
+});
+
+// ---------------------------------------------------------------------------
+// role-bundle session entry — the §5.3 pointer and §7 disabled parity
+// ---------------------------------------------------------------------------
+
+const managedEnv = (home, runtimeRoot = '/rt/candidate') => ({
+  PATH: '',
+  SLP_MANAGED_RUNTIME: '1',
+  SLP_NODE_BIN: '/opt/node/bin/node',
+  SLP_RUNTIME_ROOT: runtimeRoot,
+  SLP_DAEMON_HOME: home,
+});
+
+test('session entry: disabled tracker renders byte-identically — absent file and explicit off (T1)', t => {
+  const home = tmpHome(t);
+  const dir = tmp(t, 'wt-inst-');
+  const installed = join(dir, 'release');
+  install(root, installed);
+  const env = managedEnv(home);
+  const absent = roleBundle(installed, 'peer', env).instructions;
+  writeSetting(home, { schemaVersion: 1, tracker: 'beads', enabled: false });
+  const off = roleBundle(installed, 'peer', env).instructions;
+  assert.equal(off, absent, 'explicit-off render must equal absent render');
+  assert.ok(!absent.includes('Work tracker:'), 'disabled render carries no tracker line');
+  // Unmanaged sessions never read the setting at all.
+  writeSetting(home, { schemaVersion: 1, tracker: 'beads', enabled: true });
+  const unmanaged = roleBundle(installed, 'peer', {}).instructions;
+  assert.ok(!unmanaged.includes('Work tracker:'), 'unmanaged render ignores the setting');
+});
+
+test('session entry: enabled setting adds one pointer line between language and assignment (T3)', t => {
+  const home = tmpHome(t);
+  const dir = tmp(t, 'wt-inst-');
+  const installed = join(dir, 'release');
+  install(root, installed);
+  writeFileSync(join(home, 'slp-runtime/state/communication-language'), 'Vietnamese\n');
+  writeSetting(home, { schemaVersion: 1, tracker: 'beads', enabled: true });
+  // SLP_RUNTIME_ROOT points at the real install so the carrier locators
+  // resolve actual files — matching a managed seat's frozen runtime root.
+  const instructions = roleBundle(installed, 'peer', managedEnv(home, installed)).instructions;
+  const language = instructions.indexOf('Communication language: Vietnamese');
+  const tracker = instructions.indexOf('Work tracker: beads (enabled in SLP settings)');
+  const assignment = instructions.indexOf('Use the current authorized Human or delegated assignment');
+  assert.ok(language !== -1 && tracker !== -1 && assignment !== -1, 'all three lines present');
+  assert.ok(language < tracker && tracker < assignment, 'pointer sits between language and assignment');
+  assert.equal(instructions.split('Work tracker:').length - 1, 1, 'exactly one tracker line');
+  const line = instructions.split('\n').find(l => l.startsWith('Work tracker:'));
+  assert.ok(line.includes(`${installed}/src/references/work-tracking.md`), 'names the installed policy reference');
+  assert.ok(line.includes(`tracker <repository> --paseo-home '${home}'`), 'names the probe with the explicit home');
+  // The integrity locator list always carries the reference — enabled or not.
+  const locatorLine = instructions.split('\n').find(l => l.includes(`${installed}/src/references/work-tracking.md`) && l.startsWith('- '));
+  assert.ok(locatorLine && locatorLine.includes('sha256'), 'locator lists the doctrine with size and hash');
+});
+
+test('session entry: a corrupt setting emits one gap line and never crashes the render (T4)', t => {
+  const home = tmpHome(t);
+  const dir = tmp(t, 'wt-inst-');
+  const installed = join(dir, 'release');
+  install(root, installed);
+  writeSetting(home, '{corrupt');
+  const instructions = roleBundle(installed, 'peer', managedEnv(home)).instructions;
+  assert.match(instructions, /Work tracker: setting unreadable — work-tracker\.json is not valid JSON/);
+  assert.match(instructions, /record this gap/);
+  assert.equal(instructions.split('Work tracker:').length - 1, 1, 'one gap line');
+  // The rest of the entry is intact — assignment still renders.
+  assert.ok(instructions.includes('Use the current authorized Human or delegated assignment'));
+});
+
+test('session entry: anchor() never carries the tracker block', t => {
+  const home = tmpHome(t);
+  const dir = tmp(t, 'wt-inst-');
+  const installed = join(dir, 'release');
+  install(root, installed);
+  writeSetting(home, { schemaVersion: 1, tracker: 'beads', enabled: true });
+  const delivery = roleDelivery(installed, 'peer', managedEnv(home));
+  assert.ok(delivery.entry().includes('Work tracker: beads'), 'entry() carries the pointer');
+  assert.ok(!delivery.anchor().includes('Work tracker:'), 'anchor() omits it');
+});
+
+// ---------------------------------------------------------------------------
+// The doctrine file — §5.4 self-gate and §3.7 prohibitions (T6, package side)
+// ---------------------------------------------------------------------------
+
+test('doctrine: work-tracking.md self-gates, keeps [verify] markers and the never-install rule (T6)', t => {
+  const body = readFileSync(join(root, 'src/references/work-tracking.md'), 'utf8');
+  // Self-gate: seats without the session-entry line ignore the file outright.
+  assert.match(body, /Read this reference only when session entry says `Work tracker: beads/);
+  // §3.7: never installs/initializes/configures beads.
+  assert.match(body, /never installs, initializes, upgrades or configures beads/);
+  assert.match(body, /do not run\s+`bd init`/i);
+  // §3.6: unavailable/uninitialized is a gap, not a block.
+  assert.match(body, /gaps?:\s+record the\s+state once/);
+  assert.match(body, /never blocks work/);
+  // Command syntax stays marked [verify] until a real bd confirms it.
+  assert.match(body, /\[verify\]/);
+  // Boundaries: evidence not control plane; assignment is authority; no
+  // self-claim; tracker status is not proof.
+  assert.match(body, /evidence, not a control plane|Evidence, not control plane/);
+  assert.match(body, /Authority is the assignment/);
+  assert.match(body, /never self-assigns with\s+`bd ready --claim`/);
+  assert.match(body, /recorded claim, not proof|Status is a recorded claim/);
+  // Writers table: one writer per scope.
+  assert.match(body, /Root issue.*Supervisor/s);
+  assert.match(body, /Child issues.*Lead/s);
+  // Identity: BEADS_ACTOR with the --actor fallback for wrapper transports.
+  assert.match(body, /BEADS_ACTOR=slp-<role>-<agent id>/);
+  assert.match(body, /--actor slp-<role>-<agent id>/);
 });

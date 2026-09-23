@@ -154,12 +154,13 @@ test('orientation carries mechanical locators only', t => {
   for (const rel of ['src/common.md', 'src/roles/lead.md', 'src/delegation.md',
     'src/references/delegation-formation.md', 'src/references/delegation-execution.md',
     'src/references/anti-patterns.md', 'src/references/governance.md', 'src/references/monitoring.md',
-    'src/references/orchestration.md', 'src/references/provider-routing.md', 'src/references/review-gates.md']) {
+    'src/references/orchestration.md', 'src/references/provider-routing.md', 'src/references/review-gates.md',
+    'src/references/work-tracking.md']) {
     const entry = byPath[join(installed, rel)];
     const bytes = readFileSync(join(installed, rel));
     assert.deepEqual(entry, { path: join(installed, rel), bytes: bytes.length, sha256: hash(bytes) });
   }
-  assert.equal(lead.orientation.policyBytes.length, 11);
+  assert.equal(lead.orientation.policyBytes.length, 12);
   // Carrier: locators must survive into initialPrompt on the fallback path
   // (stock piBinding is not an injecting wrapper, so the carrier stays).
   assert.ok(lead.create.initialPrompt.includes(`- ${join(installed, 'src/common.md')} — `));
@@ -172,7 +173,7 @@ test('orientation carries mechanical locators only', t => {
   const peerPaths = peer.orientation.policyBytes.map(entry => entry.path);
   assert.ok(peerPaths.includes(join(installed, 'src/roles/peer.md')));
   assert.ok(!peerPaths.includes(join(installed, 'src/delegation.md')));
-  assert.equal(peer.orientation.policyBytes.length, 10);
+  assert.equal(peer.orientation.policyBytes.length, 11);
 });
 
 test('launchCheck names every failing stage and separates profile completeness from live provider verification', t => {
