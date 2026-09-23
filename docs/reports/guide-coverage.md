@@ -170,7 +170,7 @@ observations, not proof that a future role session has identical tools or permis
 | H11 | `paseo inspect --json`/`paseo ls --json` do not surface `persistence.nativeHandle`, so a Devin ACP session cannot be linked back to `devin -r` from CLI output. | `slp.mjs agents` reads daemon persistence under `<paseoHome>/agents/` as a best-effort host detail, not a contract; a missing handle leaves `attach` null. |
 | H12 | `create_heartbeat` rejected an ACP Lead session with "requires an agent-scoped session" (observed 2026-09-16). | Orchestration observability gap beside H02: caller-owned heartbeat may be unavailable to ACP sessions; fall back to the event/notification path within authority or report the gap. |
 | H13 | No agent-facing plugin RPC invoke path: `paseo plugin` CLI is lifecycle-only and the paseo MCP has no invoke tool; the plugin's status/local-target views are reachable only via Manager UI or a hand-rolled WS `plugin.rpc.invoke.request`. | `slp.mjs status`/`local-target` recompute the file-derivable parts (receipt, owned providers/profiles, runtime+launcher integrity, config-drift presence) and report the rest as gaps — never guesses. Mutation RPCs stay Human-authority and are not exposed. Retire when the host ships `paseo plugin invoke` or MCP `invoke_plugin_rpc`. |
-|| H14 | Devin seats use the ACP wrapper transport and bypass `sessionOpen`, so the hook-family env overlay never reaches them: no `BEADS_ACTOR` on a Devin seat. The PATH seen by the plugin process can also differ from a seat's provider env when a provider entry overrides PATH. | Devin seats still receive the session-entry `Work tracker:` block through the ACP adapter; the reference's `--actor` fallback covers attribution and the seat-side probe is authoritative over the plugin's. Recorded gap, no workaround. |
+| H14 | Devin seats use the ACP wrapper transport and bypass `sessionOpen`, so the hook-family env overlay never reaches them: no `BEADS_ACTOR` on a Devin seat. The PATH seen by the plugin process can also differ from a seat's provider env when a provider entry overrides PATH. | Devin seats still receive the session-entry `Work tracker:` block through the ACP adapter; the reference's `--actor` fallback covers attribution and the seat-side probe is authoritative over the plugin's. Recorded gap, no workaround. |
 
 Follow-up clarification (2026-09-09): the earlier 44/48 ≈ 92% figure counted textual
 groups equally and overstated routing readiness. G10 now distinguishes implemented
@@ -202,7 +202,8 @@ coverage. Independent live acceptance remains outside this textual trace.
 - Read the source guide and compared installed policy/procedure branches with the
   50 grouped requirement rows and all 20 §9 entries above.
 - Rendered roleInstructions in memory and followed conditional reference paths:
-  the original four references resolve and occur in the recursive package identity. Peer
+  the policy references (four at that revision, nine now) resolve and occur
+  in the recursive package identity. Peer
   has no delegation procedure or orchestration reference pointer in its envelope.
 - At the initial alignment, checked 20 local Markdown links in README, contract, review checklist and this
   matrix; all resolve. Catalog numbering is exactly §9.1 through §9.20.
@@ -259,14 +260,16 @@ also carry session-entry helpers and the measured carrier — and the protocol
 template owns a four-step tiny procedure (one Peer Engineer, inline
 brief/formation, in-session proof, Lead verdict).
 
-Work-tracker follow-up (2026-11-27): an optional beads (`bd`) work graph
+Work-tracker follow-up (2026-09-23): an optional beads (`bd`) work graph
 reached the package as the ninth reference, `work-tracking.md`, plus
 `src/work-tracker.mjs` probes, a `tracker` CLI, the plugin-owned
 `slp-runtime/state/work-tracker.json` toggle with get/set RPCs and a
 Manager card, and a hook-family `BEADS_ACTOR`/`BD_*` env overlay at
 session open. Detection only — SLP never installs, initializes or
 configures beads; a missing or broken `bd` is a recorded gap, never a
-spawn block; with the toggle unset or corrupt every managed path renders
-exactly as before (the pointer line is simply absent, ACP `anchor()`
-unchanged). Devin-family seats bypass `sessionOpen`, so they get no
+spawn block; with the toggle unset every managed path renders exactly as
+before (the pointer line is simply absent, ACP `anchor()` unchanged),
+while a corrupt or foreign setting file degrades to disabled plus one
+surfaced gap line at session entry and an error on the Manager card.
+Devin-family seats bypass `sessionOpen`, so they get no
 `BEADS_ACTOR` env and rely on the reference's `--actor` fallback — H14.

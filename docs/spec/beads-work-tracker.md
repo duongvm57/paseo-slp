@@ -1,6 +1,8 @@
 # Beads work tracker — implementation spec
 
-Status: design approved for implementation (approach A), not implemented.
+Status: implemented per §12 on `feat/beads-work-tracker` — pending §11 Human
+confirms and the §9 real-`bd` verification (`bd` not installed on the
+implementation machine).
 Written 2026-09-23 against `main` at `bfbc979`, Paseo 0.8.0 SDK declarations
 and the primary-source report [beads-research.md](../reports/beads-research.md).
 Supersedes the multi-adapter direction of
