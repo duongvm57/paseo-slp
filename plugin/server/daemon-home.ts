@@ -9,7 +9,8 @@
 // wording — passed as `notRegularConfigMessage`. The returned `configPath`
 // is carried by the manager's HomeContext; the jev module ignores it.
 import { lstatSync, realpathSync } from "node:fs";
-import { join } from "node:path";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import { OperationConflict } from "../shared/contracts.ts";
 
 export interface HomeContext {
@@ -68,4 +69,17 @@ export function resolveDaemonHome(
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
   return { canonicalHome, configPath, stableRoot };
+}
+
+// The plugin child inherits the daemon's environment: PASEO_HOME when the
+// daemon exported it, else the platform default ~/.paseo — the same detection
+// the session-usage plugin uses. The `source` distinguishes them: only an
+// exported env value is proof the plugin serves that home ("default" is a
+// guess). This is a prefill suggestion only for the Manager UI; the §4
+// verifiedHostHomeMapping acknowledgment remains a human decision.
+export function detectDaemonHome(): { daemonHome: string; source: "env" | "default" } {
+  const raw = (process.env.PASEO_HOME ?? "").trim();
+  if (!raw) return { daemonHome: join(homedir(), ".paseo"), source: "default" };
+  const expanded = raw === "~" ? homedir() : raw.startsWith("~/") ? join(homedir(), raw.slice(2)) : raw;
+  return { daemonHome: resolve(expanded), source: "env" };
 }

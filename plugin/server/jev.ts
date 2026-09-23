@@ -32,6 +32,7 @@ import {
   type SetJevKeyResult,
   type TestJevResult,
 } from "../shared/contracts.ts";
+import { sha256Hex } from "./config-view.ts";
 import { resolveDaemonHome } from "./daemon-home.ts";
 import { writePrivate } from "./state-store.ts";
 
@@ -97,22 +98,25 @@ const resolveHome = (target: { hostId: string; daemonHome: string }): { canonica
 
 // Absent file = unconfigured (null); corrupt or schema-mismatched content is
 // evidence — surfaced as an error string, never silently treated as OFF.
-function readConfig(stableRoot: string): { config: JevConfigValue | null; error: string | null } {
+// sha256 is the raw-file CAS token: present whenever the file exists, even
+// broken, so a stale client can still overwrite it under CAS.
+function readConfig(stableRoot: string): { config: JevConfigValue | null; sha256: string | null; error: string | null } {
   const file = join(stableRoot, JEV_FILE);
   let raw: string;
   try {
     raw = readFileSync(file, "utf8");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { config: null, error: null };
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { config: null, sha256: null, error: null };
     throw error;
   }
+  const sha256 = sha256Hex(raw);
   try {
     const parsed = JevConfig.safeParse(JSON.parse(raw));
     return parsed.success
-      ? { config: parsed.data, error: null }
-      : { config: null, error: `jev.json failed schema validation: ${parsed.error.issues[0]?.message ?? "schema"}` };
+      ? { config: parsed.data, sha256, error: null }
+      : { config: null, sha256, error: `jev.json failed schema validation: ${parsed.error.issues[0]?.message ?? "schema"}` };
   } catch (error) {
-    return { config: null, error: `jev.json is not valid JSON: ${(error as Error).message}` };
+    return { config: null, sha256, error: `jev.json is not valid JSON: ${(error as Error).message}` };
   }
 }
 
@@ -126,12 +130,12 @@ function keyProbe(stableRoot: string, kind: string): { hasKey: boolean; keyPermi
 }
 
 function view(stableRoot: string): JevViewValue {
-  const { config, error } = readConfig(stableRoot);
+  const { config, sha256, error } = readConfig(stableRoot);
   const probe = keyProbe(stableRoot, config?.provider.kind ?? DEFAULT_KIND);
   if (config === null) {
     // A file that exists but fails validation is configured-but-broken, not
     // unconfigured — the error field carries the evidence.
-    return { configured: error !== null, enabled: null, capabilities: null, provider: null, ...probe, error };
+    return { configured: error !== null, enabled: null, capabilities: null, provider: null, ...probe, sha256, error };
   }
   return {
     configured: true,
@@ -139,6 +143,7 @@ function view(stableRoot: string): JevViewValue {
     capabilities: config.capabilities,
     provider: config.provider,
     ...probe,
+    sha256,
     error,
   };
 }
@@ -166,6 +171,16 @@ export function createJev(deps: JevDeps = {}) {
       throw new OperationConflict("INVALID_REQUEST", `invalid set-jev input: ${parsed.error.issues[0]?.message ?? "schema"}`);
     }
     const ctx = resolveHome(parsed.data.target);
+    // CAS on the raw jev.json bytes — a save that overwrote a concurrent
+    // client's capability keys would silently flip supervision; reject and
+    // let the stale client reload first.
+    const current = readConfig(ctx.stableRoot);
+    if (current.sha256 !== parsed.data.expectedSha256) {
+      throw new OperationConflict(
+        "IDEMPOTENCY_CONFLICT",
+        `jev.json changed since the client's read — reload and retry (expected sha256 ${parsed.data.expectedSha256 ?? "<none>"}, found ${current.sha256 ?? "<none>"})`,
+      );
+    }
     writePrivate(ctx.stableRoot, JEV_FILE, `${JSON.stringify(parsed.data.jev, null, 2)}\n`, uuid);
     return { schemaVersion: 1, jev: view(ctx.stableRoot) };
   }

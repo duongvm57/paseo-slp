@@ -193,7 +193,7 @@ test('plugin-written jev config and key read back through the package readers', 
   const jev = createJev();
   const key = fakeOrKey('e2-rtstate');
   await jev.setJev({
-    schemaVersion: 1, target: targetOf(home),
+    schemaVersion: 1, target: targetOf(home), expectedSha256: null,
     jev: {
       schemaVersion: 1, enabled: true, capabilities: { routing: true },
       provider: { kind: 'openrouter', baseUrl: 'https://openrouter.ai', model: 'typesafe/jev-1.13' },

@@ -3,15 +3,17 @@
 // handlers. Lead wires the lane modules here; manager alone owns the mutation
 // mutex, state transitions and connected SDK calls.
 import type { PluginServerContribution } from "@getpaseo/plugin/server";
-import { homedir } from "node:os";
 import { realpathSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { activate, reconcile, deactivate, status, localTarget, catalog, setLanguage, getRoleRouting, setRoleRouting, getPeerPool, setPeerPool, getJev, setJev, setJevKey, testJev } from "./shared/contracts.ts";
+import { getSupervision, setSupervision } from "./shared/supervision.ts";
 import type { Manager } from "./shared/contracts.ts";
 import { loadCatalog } from "./server/provider-catalog.ts";
 import { createManager } from "./server/manager.ts";
 import { createJev } from "./server/jev.ts";
 import { createStateStore } from "./server/state-store.ts";
+import { createSupervisionState } from "./server/supervision/state.ts";
+import { detectDaemonHome } from "./server/daemon-home.ts";
 import { createMaterializer } from "./server/materializer.ts";
 import { embeddedPayload } from "./server/generated/runtime-payload.ts";
 import { createExecutableResolver } from "./server/executables.ts";
@@ -50,6 +52,14 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   server.handle(setJev, input => jev.setJev(input));
   server.handle(setJevKey, input => jev.setJevKey(input));
   server.handle(testJev, input => jev.testJev(input));
+  // Supervision route config (spec supervision-integration.md §Configuration):
+  // private supervision.json under the SERVED daemon home — the store binds
+  // the state path to the home this process actually serves (PASEO_HOME env),
+  // refusing reads/writes it cannot verify. Agent validation on save goes
+  // through the connected SDK; no lifecycle hook calls Jev yet.
+  const supervision = createSupervisionState();
+  server.handle(getSupervision, input => supervision.getSupervision(input));
+  server.handle(setSupervision, (input, { paseo }) => supervision.setSupervision(input, paseo));
   // Phase 2 (settings-driven-providers.md §6): the hook-family thin aliases
   // need the two halves the sentinel gate cannot supply — role-bundle
   // injection at agent.create and the session-open grant overlay. Both hooks
@@ -93,15 +103,4 @@ function readActiveBinding(journal: ReturnType<typeof createJournal>) {
     nodePath: binding.node.path,
     daemonHome: receipt.target.daemonHome,
   };
-}
-
-// The plugin child inherits the daemon's environment: PASEO_HOME when the
-// daemon exported it, else the platform default ~/.paseo — the same detection
-// the session-usage plugin uses. This is a prefill suggestion only; the
-// §4 verifiedHostHomeMapping acknowledgment remains a human decision.
-function detectDaemonHome() {
-  const raw = (process.env.PASEO_HOME ?? "").trim();
-  if (!raw) return { daemonHome: join(homedir(), ".paseo"), source: "default" as const };
-  const expanded = raw === "~" ? homedir() : raw.startsWith("~/") ? join(homedir(), raw.slice(2)) : raw;
-  return { daemonHome: resolve(expanded), source: "env" as const };
 }
