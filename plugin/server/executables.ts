@@ -13,7 +13,7 @@
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
 import { access, realpath, stat } from "node:fs/promises";
-import { delimiter, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
+import { delimiter, isAbsolute, join, relative, resolve as resolvePath, sep } from "node:path";
 import { OperationConflict } from "../shared/contracts.ts";
 import type {
   BinaryResolution,
@@ -264,8 +264,34 @@ async function resolveNode(request: ExecutableRequest, ctx: Ctx): Promise<Resolv
   );
 }
 
+/** Self-updating CLIs version under `<root>/_versions/<ver>/` (Devin CLI's
+ *  layout). Realpath pins one release forever — and a still-working prior path
+ *  wins re-resolution, so an upstream update never reaches managed providers
+ *  (observed: pinned devin 3000.10.31 kept serving a pre-thinking-split ACP
+ *  catalog after 3000.11.1 installed). When the vendor's `_versions/current`
+ *  handle exists for the same binary tail and resolves inside the same
+ *  versions root, record the handle instead: still an absolute vendor-owned
+ *  path no PATH edit can move, and the updater re-points it on each release. */
+async function vendorCurrentHandle(real: string): Promise<string | null> {
+  const marker = `${sep}_versions${sep}`;
+  const at = real.indexOf(marker);
+  if (at < 0) return null;
+  const root = real.slice(0, at + marker.length);
+  const tail = real.slice(at + marker.length);
+  const slash = tail.indexOf(sep);
+  if (slash < 0) return null;
+  const handle = join(root, "current", tail.slice(slash + 1));
+  try {
+    if (!isInside(await realpath(handle), root)) return null;
+    return handle;
+  } catch {
+    return null;
+  }
+}
+
 async function probeBinary(real: string, ctx: Ctx): Promise<BinaryResolution> {
-  const result = await ctx.run(real, ["--version"], {
+  const tracked = (await vendorCurrentHandle(real)) ?? real;
+  const result = await ctx.run(tracked, ["--version"], {
     env: ctx.cleanEnv,
     timeoutMs: PROBE_TIMEOUT_MS,
     maxBuffer: PROBE_MAX_BUFFER,
@@ -282,7 +308,7 @@ async function probeBinary(real: string, ctx: Ctx): Promise<BinaryResolution> {
   if (version.length > MAX_VERSION_LENGTH) {
     throw new Error(`--version line exceeds ${MAX_VERSION_LENGTH} characters`);
   }
-  return { available: true, path: real, version };
+  return { available: true, path: tracked, version };
 }
 
 /** A family binary must never resolve into the SLP runtime/launcher tree, a

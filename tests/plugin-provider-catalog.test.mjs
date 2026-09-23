@@ -146,6 +146,72 @@ test('transient snapshot failures do not latch — the next call retries', async
   assert.equal(calls.listModels, 1, 'second call stayed on the snapshot path');
 });
 
+test('snapshot path: a loading entry resolves through the per-provider listings', async () => {
+  const loadCatalog = await freshCatalog();
+  const listed = { models: [], modes: [] };
+  const { paseo, calls } = fakePaseo({
+    snapshot: snapshotEntries([
+      { provider: 'devin', status: 'ready', models: [{ id: 'base-model' }], modes: [{ id: 'm' }] },
+      { provider: 'slp-devin-peer', status: 'loading' },
+    ]),
+    listModels: async (provider, options) => {
+      calls.listModels++;
+      listed.models.push([provider, options]);
+      return {
+        models: [{
+          id: 'swe-2-high',
+          thinkingOptions: [{ id: 'medium' }, { id: 'high' }, { id: 'max' }],
+          defaultThinkingOptionId: 'max',
+        }],
+        error: null,
+      };
+    },
+    listModes: async (provider, options) => {
+      calls.listModes++;
+      listed.modes.push([provider, options]);
+      return { modes: [{ id: 'bypass' }], error: null };
+    },
+  });
+  const out = await loadCatalog({ ...baseInput, cwd: '/daemon' }, paseo);
+  // The picked provider id — not the family — is queried, in scope.
+  assert.deepEqual(listed.models, [['slp-devin-peer', { cwd: '/daemon' }]]);
+  assert.deepEqual(listed.modes, [['slp-devin-peer', { cwd: '/daemon' }]]);
+  assert.equal(out.resolvedProvider, 'slp-devin-peer');
+  // The resolved answer carries models/modes — no "is loading" error the
+  // client would cache as terminal.
+  assert.equal(out.error, null);
+  assert.deepEqual(out.models.map(m => m.id), ['swe-2-high']);
+  assert.deepEqual(out.models[0].thinkingOptions.map(o => o.id), ['medium', 'high', 'max']);
+  assert.equal(out.models[0].defaultThinkingOptionId, 'max');
+  assert.deepEqual(out.modes.map(m => m.id), ['bypass']);
+});
+
+test('snapshot path: a loading entry that resolves unavailable reports the listing error', async () => {
+  const loadCatalog = await freshCatalog();
+  const { paseo } = fakePaseo({
+    snapshot: snapshotEntries([{ provider: 'pi', status: 'loading' }]),
+    listModels: async () => ({ models: [], error: 'Provider pi is not available' }),
+    listModes: async () => ({ modes: [], error: 'Provider pi is not available' }),
+  });
+  const out = await loadCatalog({ schemaVersion: 1, family: 'pi', role: 'peer' }, paseo);
+  assert.equal(out.resolvedProvider, 'pi');
+  assert.match(out.error, /not available/);
+  assert.deepEqual(out.models, []);
+});
+
+test('snapshot path: terminal statuses do not fall back to listings', async () => {
+  const loadCatalog = await freshCatalog();
+  const { paseo, calls } = fakePaseo({
+    snapshot: snapshotEntries([
+      { provider: 'slp-devin-peer', status: 'unavailable' },
+    ]),
+  });
+  const out = await loadCatalog(baseInput, paseo);
+  assert.match(out.error, /slp-devin-peer is unavailable/);
+  assert.equal(calls.listModels, 0, 'terminal status must not re-ask listings');
+  assert.equal(calls.listModes, 0);
+});
+
 test('role-less input resolves the base family entry directly', async () => {
   const loadCatalog = await freshCatalog();
   const { paseo } = fakePaseo({

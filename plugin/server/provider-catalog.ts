@@ -21,7 +21,7 @@ export interface ProviderCatalogApi {
       entries?: ProviderSnapshotEntryLike[];
       error?: string | null;
     }>;
-    listModels(provider: string): Promise<{
+    listModels(provider: string, options?: { cwd?: string }): Promise<{
       models?: {
         id: string; label?: string;
         thinkingOptions?: {
@@ -32,7 +32,7 @@ export interface ProviderCatalogApi {
       }[];
       error?: string | null;
     }>;
-    listModes(provider: string): Promise<{
+    listModes(provider: string, options?: { cwd?: string }): Promise<{
       modes?: { id: string; label?: string }[]; error?: string | null;
     }>;
     listFeatures(draft: {
@@ -66,6 +66,59 @@ export async function loadCatalog(input: CatalogRequest, paseo: ProviderCatalogA
   // Entry selection parity with the host agent profile: the managed
   // provider id for the request's role, then the base family entry.
   const preferredId = input.role ? ownedProviderId(input.family, input.role) : input.family;
+
+  // Per-provider listing path — verbatim for pre-snapshot daemons
+  // (providerId = the family), and the resolved-read fallback when the
+  // snapshot picks an entry that is still warming: a snapshot read is
+  // fire-and-forget on the daemon, so a "loading" entry is transient —
+  // but the client caches a returned catalog error as terminal until a
+  // manual Retry. The daemon's own per-provider listings await the
+  // in-flight warmup for exactly that provider and answer with the
+  // resolved catalog instead of the placeholder.
+  const listCatalog = async (providerId: string, seedErrors: string[] = []) => {
+    const errors = [...seedErrors];
+    const settle = <T,>(result: PromiseSettledResult<T>): T | null => {
+      if (result.status === "fulfilled") return result.value;
+      errors.push(result.reason instanceof Error ? result.reason.message : String(result.reason));
+      return null;
+    };
+    const listOptions = input.cwd ? { cwd: input.cwd } : undefined;
+    // listFeatures runs on a draft config — the host requires provider/model
+    // format, so feature definitions are only queried when a model is chosen.
+    const [modelsResult, modesResult, featuresResult] = await Promise.allSettled([
+      paseo.providers.listModels(providerId, listOptions),
+      paseo.providers.listModes(providerId, listOptions),
+      input.model
+        ? paseo.providers.listFeatures({
+            provider: `${providerId}/${input.model}`,
+            cwd: input.cwd ?? "/",
+            ...(input.modeId ? { modeId: input.modeId } : {}),
+          })
+        : Promise.resolve({ features: [] as never[], error: null as string | null }),
+    ]);
+    const modelsPayload = settle(modelsResult);
+    const modesPayload = settle(modesResult);
+    const featuresPayload = settle(featuresResult);
+    if (modelsPayload?.error) errors.push(modelsPayload.error);
+    if (modesPayload?.error) errors.push(modesPayload.error);
+    if (featuresPayload?.error) errors.push(featuresPayload.error);
+    return {
+      schemaVersion: 1 as const,
+      // Per-model thinking options pass through untouched (§9 corrected
+      // finding — the host's AgentModelDefinition carries them; an absent
+      // key stays absent so the wire shape records "not declared").
+      models: (modelsPayload?.models ?? []).map(m => ({
+        id: m.id,
+        label: m.label ?? m.id,
+        ...(m.thinkingOptions ? { thinkingOptions: m.thinkingOptions } : {}),
+        ...(m.defaultThinkingOptionId ? { defaultThinkingOptionId: m.defaultThinkingOptionId } : {}),
+      })),
+      modes: (modesPayload?.modes ?? []).map(m => ({ id: m.id, label: m.label ?? m.id })),
+      features: featuresPayload?.features ?? [],
+      error: errors.length > 0 ? errors.join("; ") : null,
+    };
+  };
+
   if (!snapshotUnsupported) {
     if (typeof paseo.providers.snapshot === "function") {
       try {
@@ -78,6 +131,14 @@ export async function loadCatalog(input: CatalogRequest, paseo: ProviderCatalogA
           // real absence, not a reason to re-ask the legacy endpoints.
           errors.push(`provider ${preferredId} not found in providers.snapshot`);
           return { schemaVersion: 1 as const, models: [], modes: [], features: [], error: errors.join("; ") };
+        }
+        if (entry.status === "loading") {
+          // "loading" is a warmup transient, not a catalog answer — resolve
+          // through the per-provider listings, which await the in-flight
+          // warmup server-side, instead of returning a status string the
+          // client would cache as a terminal error.
+          const resolved = await listCatalog(entry.provider, errors);
+          return { ...resolved, resolvedProvider: entry.provider };
         }
         const mapped = snapshotEntryCatalog(entry);
         if (mapped.error) errors.push(mapped.error);
@@ -127,45 +188,6 @@ export async function loadCatalog(input: CatalogRequest, paseo: ProviderCatalogA
       console.warn("slp: providers.snapshot not implemented by this daemon; using legacy provider listings");
     }
   }
-  // Legacy path (pre-snapshot daemons) — unchanged.
-  const errors: string[] = [];
-  const settle = <T,>(result: PromiseSettledResult<T>): T | null => {
-    if (result.status === "fulfilled") return result.value;
-    errors.push(result.reason instanceof Error ? result.reason.message : String(result.reason));
-    return null;
-  };
-  // listFeatures runs on a draft config — the host requires provider/model
-  // format, so feature definitions are only queried when a model is chosen.
-  const [modelsResult, modesResult, featuresResult] = await Promise.allSettled([
-    paseo.providers.listModels(provider),
-    paseo.providers.listModes(provider),
-    input.model
-      ? paseo.providers.listFeatures({
-          provider: `${provider}/${input.model}`,
-          cwd: input.cwd ?? "/",
-          ...(input.modeId ? { modeId: input.modeId } : {}),
-        })
-      : Promise.resolve({ features: [] as never[], error: null as string | null }),
-  ]);
-  const modelsPayload = settle(modelsResult);
-  const modesPayload = settle(modesResult);
-  const featuresPayload = settle(featuresResult);
-  if (modelsPayload?.error) errors.push(modelsPayload.error);
-  if (modesPayload?.error) errors.push(modesPayload.error);
-  if (featuresPayload?.error) errors.push(featuresPayload.error);
-  return {
-    schemaVersion: 1 as const,
-    // Per-model thinking options pass through untouched (§9 corrected
-    // finding — the host's AgentModelDefinition carries them; an absent
-    // key stays absent so the wire shape records "not declared").
-    models: (modelsPayload?.models ?? []).map(m => ({
-      id: m.id,
-      label: m.label ?? m.id,
-      ...(m.thinkingOptions ? { thinkingOptions: m.thinkingOptions } : {}),
-      ...(m.defaultThinkingOptionId ? { defaultThinkingOptionId: m.defaultThinkingOptionId } : {}),
-    })),
-    modes: (modesPayload?.modes ?? []).map(m => ({ id: m.id, label: m.label ?? m.id })),
-    features: featuresPayload?.features ?? [],
-    error: errors.length > 0 ? errors.join("; ") : null,
-  };
+  // Legacy path (pre-snapshot daemons) — the family-level listing.
+  return listCatalog(provider);
 }

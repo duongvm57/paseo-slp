@@ -346,8 +346,9 @@ export function familyFromProviderId(provider: string | null | undefined): strin
  *  a family catalog (§9 corrected finding). null means unresolvable — no
  *  catalog, no picked model, or a picked model the catalog doesn't list —
  *  the picker's established free-text fallback. A resolved model declaring
- *  no options returns `{options: [], defaultId: null}` (the devin case:
- *  thinking is baked into model ids, so free text would invite garbage).
+ *  no options returns `{options: [], defaultId: null}` and the picker
+ *  renders no control — free text would invite garbage the provider
+ *  cannot honor.
  *  The model id trims like featureKeyFor's — surrounding whitespace is not
  *  part of the catalog key. */
 export function thinkingOptionsFor(

@@ -381,7 +381,14 @@ After this refactor the remaining steps are exactly three:
   instead of re-asking legacy endpoints (the daemon just proved
   snapshot-capable). Models filter `isSelectable !== false`; modes come
   from the snapshot entry and ship only when `entry.status === "ready"`
-  — no `listModes` call happens on the snapshot path. Snapshot entries
+  — no `listModes` call happens on the snapshot path. A picked entry
+  still in `status === "loading"` is a warmup transient, not a catalog
+  answer: the daemon's snapshot read kicks off warmup fire-and-forget,
+  while its per-provider `listModels`/`listModes` await the in-flight
+  warmup for that provider — so a loading entry resolves through those
+  listings on the picked id rather than returning a status string the
+  client would cache as a terminal error until a manual Retry.
+  Snapshot entries
   carry no feature definitions, so features still go through
   `listFeatures`, on the RESOLVED provider id
   (`<resolvedProvider>/<model>`), not the bare family. `CatalogInput`
