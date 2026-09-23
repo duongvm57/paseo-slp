@@ -507,7 +507,7 @@ The flow in either mode: the Lead authors a routing `brief` (never raw
 `assignmentFile` bytes) and runs `route-decide <request.json>`; the helper
 computes the eligible candidate set deterministically — the same exclusion
 tokens `prepare` enforces — plus an explicit `no-suitable-option` sentinel,
-and emits `{optionId, catalogSha256, decision}`. `prepare` takes
+and emits `{optionId, catalogSha256, declined, warnings, decision}`. `prepare` takes
 `route.decision` and verifies it offline (internal hash, pinned model,
 catalog hash, candidate membership — plus answer match when armed); a
 supplied receipt is verified even with Jev off. The receipt records the full
@@ -637,11 +637,16 @@ prose.
 `route-decide <request.json> [--paseo-home <absolute-home>]` is the only path
 that calls Jev — see [Jev-assisted routing](#jev-assisted-routing-optional)
 for what it is and when it applies. The request carries `repository`, an
-optional `role` (default `peer`) and a Lead-authored `brief` (nonempty string
-or object — the only task context Jev sees; carry the task description,
-risk/effort signals, constraints and dependencies — a starved brief drifts
-toward chance-level answers). Output is `{optionId,
-catalogSha256, declined, role, decision}`; feed `optionId`/`catalogSha256`/
+optional `role` (default `peer`) and a Lead-authored `brief` — a nonempty
+string of raw task/assignment text and the only task context Jev sees;
+carry the task description, risk/effort signals, constraints and
+dependencies — a starved brief drifts toward chance-level answers.
+Structured forms are refused (`jev-request-invalid`): a `signals` field or
+object/array let the caller pre-classify the task with Jev's own decision
+vocabulary — inline the facts as prose instead. Standard `axis:value`
+tokens quoted inside the text are flagged as unverified mentions in the
+output `warnings`. Output is `{optionId,
+catalogSha256, declined, role, warnings, decision}`; feed `optionId`/`catalogSha256`/
 `decision` into `route.*` of a `prepare` request. A `no-suitable-option`
 answer still prints its receipt but exits 1. The command fails closed before
 any network when the daemon's Jev config or key is missing/disabled, and a

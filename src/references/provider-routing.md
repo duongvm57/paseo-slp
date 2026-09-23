@@ -95,18 +95,24 @@ asymmetric error class (Jev declining a fit option, or picking one the Lead
 rejects) — and only after the recorded pairs satisfy them does the Human arm
 `capabilities.routing`. Arming before that data exists skips the gate.
 
-The flow in either mode: Lead authors a routing `brief` (the task evidence
-Jev judges — a self-authored summary, never raw `assignmentFile` bytes) and
-runs route-decide. A useful brief carries the task description, risk/effort
-signals, constraints and dependencies — the brief is the entire evidence
-surface, so a starved brief (`"x"`) yields answers that drift toward chance;
-this is guidance, not a hard schema, because what a good brief needs is
-itself measured during shadow evaluation. The helper computes the eligible
+The flow in either mode: Lead authors a routing `brief` — a nonempty string
+of raw task/assignment text (never raw `assignmentFile` bytes) — and runs
+route-decide. Structured forms are refused (`jev-request-invalid`): a
+`signals` field or object/array let the caller pre-classify the task with
+Jev's own decision vocabulary, turning the seat choice into a rubber stamp —
+inline the same facts as prose instead. Standard `axis:value` tokens quoted
+verbatim inside the text still ship, but as unverified mentions: the decision
+instructions tell Jev to read them as prose, and `warnings` in the output
+lists every hit for the caller. A useful brief carries the task description,
+risk/effort signals, constraints and dependencies — the brief is the entire
+evidence surface, so a starved brief (`"x"`) yields answers that drift toward
+chance; this is guidance, not a hard schema, because what a good brief needs
+is itself measured during shadow evaluation. The helper computes the eligible
 candidate set deterministically — the same `optionExclusions` tokens prepare
 enforces — plus one explicit `no-suitable-option` sentinel, sends
 `{brief, role, options}` as state (catalog `notes` are
-withheld), and emits `{optionId, catalogSha256, decision}` where `decision`
-is the receipt. prepare then takes `route.optionId` +
+withheld), and emits `{optionId, catalogSha256, declined, warnings, decision}`
+where `decision` is the receipt. prepare then takes `route.optionId` +
 `route.catalogSha256` + `route.decision` and verifies the receipt offline:
 internal hash, pinned model (matching the configured provider), catalog hash
 match, exactly the `route_option` question, matching role, candidate
