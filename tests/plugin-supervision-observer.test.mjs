@@ -5,7 +5,7 @@
 // is an injected seam — no network, no daemon, isolated homes only.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createSupervisionObserver, buildEvidencePayload } from '../plugin/server/supervision/observer.ts';
 import { capture, extractSends } from '../plugin/server/supervision/capture.ts';
@@ -454,10 +454,12 @@ test('decide: handled requires an observable repair plus high-confidence Jev han
 // jev.ts — resolver gates + transport parity
 // ---------------------------------------------------------------------------
 
-const writeJev = (home, config, { key } = {}) => {
+const writeJev = (home, config, { key, padBytes = 0 } = {}) => {
   const dir = join(home, 'slp-runtime', 'state');
   mkdirSync(dir, { recursive: true });
-  if (config !== undefined) writeFileSync(join(dir, 'jev.json'), JSON.stringify(config, null, 2) + '\n', { mode: 0o600 });
+  // padBytes appends trailing whitespace — still valid JSON, but the
+  // mtime+size stamp cache sees a new stamp even when mtime collides.
+  if (config !== undefined) writeFileSync(join(dir, 'jev.json'), JSON.stringify(config, null, 2) + '\n' + ' '.repeat(padBytes), { mode: 0o600 });
   if (key !== undefined) writeFileSync(join(dir, 'jev-openrouter.key'), `${key}\n`, { mode: 0o600 });
 };
 const JEV_CFG = { schemaVersion: 1, enabled: true, capabilities: { supervision: true, routing: false }, provider: PROVIDER };
@@ -1300,6 +1302,7 @@ test('observer: ring rows persisted before the new fields existed still load', a
 // ---------------------------------------------------------------------------
 
 const PEER3 = '77777777-7777-4777-8777-777777777777';
+const OTHER2 = '88888888-8888-4888-8888-888888888888';
 
 const deferred = () => {
   let resolve;
@@ -1328,16 +1331,16 @@ const blockingPaseo = (agents, shouldBlock = () => false) => {
   return { paseo, suspended, release: gate.resolve };
 };
 
-// Gate stub + file-stamp busting: each flip rewrites jev.json with a unique
-// size so the mtime+size cache never aliases two states.
+// Gate control via the REAL resolver path: every flip rewrites jev.json
+// (down also removes the key file → 'jev-key-missing') with a growing
+// whitespace pad so the mtime+size stamp cache never aliases two states.
+// Flipping an injected dep would bypass the gate-file stamp dimension.
 const matrixGateCtl = home => {
-  let current = GATE_OK;
   let n = 0;
-  const bust = () => writeJev(home, { ...JEV_CFG, pad: 'x'.repeat(++n) });
+  const keyFile = join(home, 'slp-runtime', 'state', 'jev-openrouter.key');
   return {
-    get: () => current,
-    down: (reason = 'jev-key-missing') => { current = { ok: false, reason }; bust(); },
-    up: () => { current = GATE_OK; bust(); },
+    down: () => { rmSync(keyFile, { force: true }); writeJev(home, JEV_CFG, { padBytes: ++n }); },
+    up: () => writeJev(home, JEV_CFG, { key: 'k'.repeat(32), padBytes: ++n }),
   };
 };
 
@@ -1345,8 +1348,8 @@ const until = async cond => { while (!cond()) await sleep(2); };
 
 const MATRIX_SITES = ['S0a', 'S0b', 'S3', 'S4', 'S5'];
 const MATRIX_INVS = [
-  'gate-down-event', 'gate-down-file', 'gate-aba',
-  'archive-lead', 'archive-peer', 'archive-recipient',
+  'gate-down-event', 'gate-down-file', 'gate-aba', 'gate-down-orphan',
+  'archive-lead', 'archive-lead-aba', 'archive-peer', 'archive-accepted', 'archive-recipient',
   'route-removed', 'evidence-enqueued', 'overflow', 'tick',
 ];
 
@@ -1368,13 +1371,14 @@ const matrixCell = async (t, site, inv) => {
   const agents = liveAgents({
     [OTHER_LEAD]: snap(OTHER_LEAD, 'slp-codex-lead'),
     [OTHER]: snap(OTHER, 'slp-codex-peer', { labels: { 'paseo.parent-agent-id': LEAD } }),
+    [OTHER2]: snap(OTHER2, 'slp-codex-peer', { labels: { 'paseo.parent-agent-id': LEAD } }),
     [PEER3]: snap(PEER3, 'slp-codex-peer', { labels: { 'paseo.parent-agent-id': OTHER_LEAD } }),
   });
 
   const ctl = matrixGateCtl(home);
   const shouldBlock =
     site === 'S0a' || site === 'S0b' ? id => id === PEER2 :
-    site === 'S3' ? id => id === OTHER :
+    site === 'S3' ? id => id === OTHER2 :
     site === 'S4' ? (id, n) => id === PEER && n === 2 :
     () => false;
   const blk = blockingPaseo(agents, shouldBlock);
@@ -1388,9 +1392,10 @@ const matrixCell = async (t, site, inv) => {
     return { model: PROVIDER.model, answers: ALL_HANDLED.answers, usage: ALL_HANDLED.usage, raw: ALL_HANDLED };
   };
 
+  // The gate resolves through the real file path — ctl flips jev.json.
+  writeJev(home, JEV_CFG, { key: 'k'.repeat(32) });
   const observer = createSupervisionObserver({
     stableRoot: join(home, 'slp-runtime'),
-    gate: ctl.get,
     ask,
     // On this host every real capture carries report-route-unverifiable —
     // the seam lets S4/S5 reach the liveness/ask suspension sites.
@@ -1423,9 +1428,17 @@ const matrixCell = async (t, site, inv) => {
   } else if (site === 'S3') {
     observer.onTurn(peerTurn(), paseo);
     await observer.idle();                      // case created (60s delay → no eval)
+    // Pre-verify OTHER so its send is accepted WITHOUT an await — the
+    // gather suspends only on OTHER2's refresh, with OTHER's lane already
+    // assembled (the mid-await recipient-archive hole).
+    observer.onCreated(peerHook(OTHER, { parentAgentId: LEAD }), paseo);
+    await observer.idle();
     observer.onStart(leadStart('turn-l3'));
-    observer.onTurn(leadEnd([userMsg('w'), codexSend('call-o', OTHER, 'msg for other')], { turnId: 'turn-l3' }), paseo);
-    await until(() => blk.suspended.includes(OTHER)); // send-loop suspended on the recipient refresh
+    observer.onTurn(leadEnd([userMsg('w'),
+      codexSend('call-o', OTHER, 'msg for other'),
+      codexSend('call-o2', OTHER2, 'msg for other2'),
+    ], { turnId: 'turn-l3' }), paseo);
+    await until(() => blk.suspended.includes(OTHER2)); // send-loop suspended on the second recipient's refresh
   } else {
     observer.onTurn(peerTurn(), paseo); // case → eval → suspends at liveness (S4) or ask (S5)
     if (site === 'S4') await until(() => blk.suspended.includes(PEER));
@@ -1446,9 +1459,39 @@ const matrixCell = async (t, site, inv) => {
       observer.onTurn(leadEnd([], { turnId: 'turn-gd' }), paseo);
       ctl.up();
       break;
+    case 'gate-down-orphan': {
+      // A start recorded before the pause whose end drops inside it must
+      // not poison the next clean turn — onGateDown purges start-state and
+      // onStart is gated, so turn-clean matches normally post-recovery.
+      observer.onStart(leadStart('turn-orph'));
+      ctl.down();
+      observer.onTurn(leadEnd([], { turnId: 'turn-gd2' }), paseo); // observes the edge → purge
+      observer.onStart(leadStart('turn-orph2'));                   // gated — never recorded
+      observer.onTurn(leadEnd([userMsg('x'), codexSend('call-orph', PEER, 'lost')], { turnId: 'turn-orph' }), paseo);
+      ctl.up();
+      observer.onStart(leadStart('turn-clean'));
+      observer.onTurn(leadEnd([userMsg('w'), codexSend('call-clean', PEER, 'clean send')], { turnId: 'turn-clean' }), paseo);
+      break;
+    }
     case 'archive-lead': observer.onArchived(leadHook(), paseo); break;
+    case 'archive-lead-aba':
+      // Archive then restore the lead while suspended — the tombstone
+      // clears on restore, so only the monotonic generation still proves
+      // the enqueue-era boundary.
+      observer.onArchived(leadHook(), paseo);
+      observer.onTurn(leadEnd([], { turnId: 'turn-restore' }), paseo); // tombstoned → restore-lead job
+      break;
     case 'archive-peer': observer.onArchived(peerHook(), paseo); break;
-    case 'archive-recipient': observer.onArchived(peerHook(OTHER), paseo); break;
+    case 'archive-accepted':
+      // S3: archive the already-accepted recipient mid-await; elsewhere a
+      // never-member peer — unrelated churn.
+      observer.onArchived(peerHook(OTHER), paseo);
+      break;
+    case 'archive-recipient':
+      // S3: archive the recipient whose refresh is in flight; elsewhere an
+      // unrelated peer.
+      observer.onArchived(peerHook(site === 'S3' ? OTHER2 : OTHER), paseo);
+      break;
     case 'route-removed': writeRoutes(home, []); break;
     case 'evidence-enqueued':
       observer.onStart(leadStart('turn-late'));
@@ -1490,7 +1533,7 @@ test('observer: suspension-site × invalidation matrix — unified basis validat
       cells += 1;
 
       if (site === 'S0a') {
-        if (inv === 'gate-down-event' || inv === 'gate-down-file' || inv === 'archive-lead' || inv === 'route-removed') {
+        if (inv === 'gate-down-event' || inv === 'gate-down-file' || inv === 'archive-lead' || inv === 'archive-lead-aba' || inv === 'route-removed') {
           assert.equal(r.main, undefined, `${tag}: no case may form`);
           assert.equal(r.rows.length, 0, `${tag}: no row written`);
         } else if (inv === 'archive-peer') {
@@ -1501,8 +1544,18 @@ test('observer: suspension-site × invalidation matrix — unified basis validat
           assert.ok(r.main, `${tag}: the capture still forms a case post-recovery`);
           assert.equal(r.observer.retainedBodies(r.fp), 0, `${tag}: purge scrubbed the queued capture's bodies`);
           assert.ok(r.main.visibility.includes('capture-paused'), `${tag}: the purge window is flagged`);
+        } else if (inv === 'gate-down-orphan') {
+          // The orphaned start ('turn-orph') was purged and 'turn-orph2'
+          // was gated at onStart — turn-clean matches normally.
+          assert.ok(r.main, tag);
+          assert.equal(r.main.counts.roomMessages, 1, `${tag}: the clean send lands`);
+          assert.ok(!r.main.visibility.includes('lead-start-unmatched'), `${tag}: no orphan-start pollution`);
+          assert.ok(r.main.messageIds.sendCallIds.includes('call-clean'), tag);
+          assert.ok(!r.main.messageIds.sendCallIds.includes('call-orph'), `${tag}: the dropped turn never lands`);
+          assert.ok(r.main.visibility.includes('capture-paused'), `${tag}: the purge window is flagged`);
         } else {
-          // archive-recipient / evidence-enqueued / overflow / tick — no invalidation of this cell
+          // archive-accepted / archive-recipient / evidence-enqueued /
+          // overflow / tick — no invalidation of this cell
           assert.ok(r.main, `${tag}: the queued turn still forms a case`);
           assert.ok(r.observer.retainedBodies(r.fp) > 0, `${tag}: bodies retained — no invalidation`);
           if (inv === 'evidence-enqueued') assert.equal(r.main.counts.roomMessages, 1, `${tag}: the late send lands after resume`);
@@ -1522,7 +1575,16 @@ test('observer: suspension-site × invalidation matrix — unified basis validat
           assert.equal(r.main.counts.roomMessages, 1, `${tag}: scrubbed sends may append metadata`);
           assert.equal(r.observer.retainedBodies(r.fp), 0, `${tag}: appended prompts are empty — no bodies`);
           assert.ok(r.main.visibility.includes('capture-paused'), tag);
-        } else if (inv === 'archive-lead') {
+        } else if (inv === 'gate-down-orphan') {
+          // turn-l1's queued capture was body-scrubbed by the purge (its
+          // send still counts as metadata); turn-clean applies cleanly.
+          assert.ok(r.main, tag);
+          assert.equal(r.main.counts.roomMessages, 2, `${tag}: scrubbed send + clean send both count`);
+          assert.ok(!r.main.visibility.includes('lead-start-unmatched'), `${tag}: no orphan-start pollution`);
+          assert.ok(r.main.messageIds.sendCallIds.includes('call-clean'), tag);
+          assert.ok(!r.main.messageIds.sendCallIds.includes('call-orph'), tag);
+          assert.ok(r.main.visibility.includes('capture-paused'), tag);
+        } else if (inv === 'archive-lead' || inv === 'archive-lead-aba') {
           assert.ok(r.main, tag);
           assert.equal(r.main.reason, 'lead-archived', tag);
           assert.equal(r.observer.retainedBodies(r.fp), null, `${tag}: the case closed — bodies gone`);
@@ -1534,7 +1596,8 @@ test('observer: suspension-site × invalidation matrix — unified basis validat
           assert.ok(r.main, tag);
           assert.equal(r.main.counts.roomMessages, 0, `${tag}: no append without a route`);
         } else {
-          // archive-recipient / evidence-enqueued / overflow / tick
+          // archive-accepted / archive-recipient / evidence-enqueued /
+          // overflow / tick
           assert.ok(r.main, tag);
           const expected = inv === 'evidence-enqueued' ? 2 : 1;
           assert.equal(r.main.counts.roomMessages, expected, `${tag}: sends land in order`);
@@ -1549,22 +1612,49 @@ test('observer: suspension-site × invalidation matrix — unified basis validat
           assert.equal(r.main.counts.otherRoomMessages, 0, `${tag}: no lane append across a purge boundary`);
           assert.equal(r.observer.retainedBodies(r.fp), 0, `${tag}: bodies purged`);
           assert.ok(r.main.visibility.includes('capture-paused'), tag);
-        } else if (inv === 'archive-lead') {
+        } else if (inv === 'gate-down-orphan') {
+          // The gather crosses a purge boundary → dropped wholesale;
+          // turn-clean then lands normally with a matched start.
+          assert.ok(r.main, tag);
+          assert.equal(r.main.counts.otherRoomMessages, 0, `${tag}: gather dropped across the purge boundary`);
+          assert.equal(r.main.counts.roomMessages, 1, `${tag}: the clean turn's send lands`);
+          assert.ok(!r.main.visibility.includes('lead-start-unmatched'), `${tag}: no orphan-start pollution`);
+          assert.ok(r.main.messageIds.sendCallIds.includes('call-clean'), tag);
+          assert.ok(!r.main.messageIds.sendCallIds.includes('call-orph'), tag);
+          assert.ok(r.main.visibility.includes('capture-paused'), tag);
+        } else if (inv === 'archive-lead' || inv === 'archive-lead-aba') {
           assert.equal(r.main.reason, 'lead-archived', tag);
           assert.equal(r.main.counts.otherRoomMessages, 0, tag);
         } else if (inv === 'archive-peer') {
+          // The case's own peer archived mid-gather — the lane must not
+          // resurrect bodies on a case the archive boundary purged.
           assert.equal(r.main.reason, 'peer-archived', tag);
-        } else if (inv === 'archive-recipient') {
+          assert.equal(r.main.counts.otherRoomMessages, 0, `${tag}: no lane append onto a purged case`);
+          assert.equal(r.observer.retainedBodies(r.fp), null, `${tag}: case closed — bodies gone`);
+        } else if (inv === 'archive-accepted') {
+          // OTHER was accepted into roomFor before the suspension; its
+          // mid-gather archive drops the lane at commit. OTHER2's refresh
+          // resolves live and still commits.
           assert.ok(r.main, tag);
-          assert.equal(r.main.counts.otherRoomMessages, 0, `${tag}: archived recipient — send never admitted`);
+          assert.equal(r.main.counts.otherRoomMessages, 1, `${tag}: only the live recipient's lane commits`);
+          assert.ok(r.main.visibility.includes('recipient-inactive'), tag);
+          assert.ok(r.main.messageIds.sendCallIds.includes('call-o2'), `${tag}: OTHER2's send commits`);
+          assert.ok(!r.main.messageIds.sendCallIds.includes('call-o'), `${tag}: OTHER's lane was dropped at commit`);
+        } else if (inv === 'archive-recipient') {
+          // OTHER2 archived while its refresh was in flight — the gen
+          // compare drops it; OTHER's already-accepted lane still commits.
+          assert.ok(r.main, tag);
+          assert.equal(r.main.counts.otherRoomMessages, 1, `${tag}: only the live recipient's lane commits`);
           assert.ok(r.main.visibility.includes('recipient-refresh-failed'), tag);
+          assert.ok(r.main.messageIds.sendCallIds.includes('call-o'), `${tag}: OTHER's send commits`);
+          assert.ok(!r.main.messageIds.sendCallIds.includes('call-o2'), `${tag}: OTHER2's send never admitted`);
         } else if (inv === 'route-removed') {
           assert.ok(r.main, tag);
           assert.equal(r.main.counts.otherRoomMessages, 0, `${tag}: gather discarded when the route vanished`);
         } else {
-          // evidence-enqueued / overflow / tick — gather commits
+          // evidence-enqueued / overflow / tick — gather commits both lanes
           assert.ok(r.main, tag);
-          assert.equal(r.main.counts.otherRoomMessages, 1, `${tag}: the send lands`);
+          assert.equal(r.main.counts.otherRoomMessages, 2, `${tag}: both sends land`);
           if (inv === 'evidence-enqueued') assert.equal(r.main.counts.roomMessages, 1, `${tag}: the queued evidence applies too`);
           if (inv === 'overflow') assert.ok(r.main.visibility.includes('queue-overflow'), tag);
           if (inv === 'tick') assert.ok(r.other, tag);
@@ -1577,7 +1667,9 @@ test('observer: suspension-site × invalidation matrix — unified basis validat
           assert.equal(r.main.reason, 'jev-key-missing', `${tag}: gate-down mid-refresh closes on the gate reason`);
           assert.equal(r.calls.length, 0, `${tag}: no spend while the gate is down`);
           assert.equal(r.main.lastAssessment, null, tag);
-        } else if (inv === 'archive-lead') {
+        } else if (inv === 'archive-lead' || inv === 'archive-lead-aba') {
+          // Mid-refresh archive: the queued restore has not applied yet,
+          // so the post-await tombstone still closes on the boundary.
           assert.equal(r.main.reason, 'lead-archived', tag);
           assert.equal(r.calls.length, 0, `${tag}: no spend on a stale generation`);
         } else if (inv === 'archive-peer') {
@@ -1594,6 +1686,14 @@ test('observer: suspension-site × invalidation matrix — unified basis validat
           assert.equal(r.calls.length, 0, `${tag}: no spend across a purge boundary`);
           assert.equal(r.main.lastAssessment, null, `${tag}: no verdict on a stale basis`);
           assert.ok(r.main.visibility.includes('capture-paused'), tag);
+        } else if (inv === 'gate-down-orphan') {
+          // Discard on the stale basis (pending + purge), then turn-clean
+          // applies and the re-evaluation accepts — with a matched start.
+          assert.ok(r.main, tag);
+          assert.equal(r.calls.length, 1, `${tag}: one spend on the fresh basis`);
+          assert.notEqual(r.main.lastAssessment, null, tag);
+          assert.equal(r.main.counts.roomMessages, 1, `${tag}: the clean turn's send lands`);
+          assert.ok(!r.main.visibility.includes('lead-start-unmatched'), `${tag}: no orphan-start pollution`);
         } else if (inv === 'overflow' || inv === 'evidence-enqueued') {
           // The stale-basis attempt discards before spend; the re-evaluation
           // sees post-invalidation evidence and accepts.
@@ -1603,7 +1703,8 @@ test('observer: suspension-site × invalidation matrix — unified basis validat
           if (inv === 'evidence-enqueued') assert.equal(r.main.counts.roomMessages, 1, `${tag}: the accepted verdict saw the late send`);
           if (inv === 'overflow') assert.ok(r.main.visibility.includes('queue-overflow'), tag);
         } else {
-          // archive-recipient / tick — no invalidation of this case
+          // archive-accepted / archive-recipient / tick — no invalidation
+          // of this case
           assert.ok(r.main, tag);
           assert.notEqual(r.main.lastAssessment, null, `${tag}: verdict accepted — unrelated churn must not discard`);
           assert.equal(r.calls.length, inv === 'tick' ? 2 : 1, `${tag}: tick spends only on its own case`);
@@ -1617,7 +1718,9 @@ test('observer: suspension-site × invalidation matrix — unified basis validat
           assert.equal(r.main.reason, 'jev-key-missing', `${tag}: post-ask gate read closes on the gate reason`);
           assert.equal(r.calls.length, 1, `${tag}: the ask fired before the gate fell — spend counted, verdict dropped`);
           assert.equal(r.main.lastAssessment, null, `${tag}: no verdict commit across the edge`);
-        } else if (inv === 'archive-lead') {
+        } else if (inv === 'archive-lead' || inv === 'archive-lead-aba') {
+          // The post-ask tombstone check fires before the queued restore
+          // applies — the boundary close wins over the era compare.
           assert.equal(r.main.reason, 'lead-archived', tag);
           assert.equal(r.main.lastAssessment, null, tag);
         } else if (inv === 'archive-peer') {
@@ -1635,6 +1738,14 @@ test('observer: suspension-site × invalidation matrix — unified basis validat
           assert.equal(r.calls.length, 1, `${tag}: exactly one spend — the stale ask never committed`);
           assert.equal(r.main.lastAssessment, null, `${tag}: no verdict commit across the purge boundary`);
           assert.ok(r.main.visibility.includes('capture-paused'), tag);
+        } else if (inv === 'gate-down-orphan') {
+          // The stale ask discards (pending + purge); turn-clean applies
+          // and the re-evaluation spends again on the fresh basis.
+          assert.ok(r.main, tag);
+          assert.equal(r.calls.length, 2, `${tag}: stale ask discarded, fresh ask committed`);
+          assert.notEqual(r.main.lastAssessment, null, tag);
+          assert.equal(r.main.counts.roomMessages, 1, `${tag}: the clean turn's send lands`);
+          assert.ok(!r.main.visibility.includes('lead-start-unmatched'), `${tag}: no orphan-start pollution`);
         } else if (inv === 'evidence-enqueued' || inv === 'overflow') {
           // The paid-for assessment is discarded on the stale basis; the
           // queued work then applies, re-arms dirty, and the re-evaluation
@@ -1646,8 +1757,8 @@ test('observer: suspension-site × invalidation matrix — unified basis validat
           if (inv === 'evidence-enqueued') assert.equal(r.main.counts.roomMessages, 1, `${tag}: the accepted verdict saw the late send`);
           if (inv === 'overflow') assert.ok(r.main.visibility.includes('queue-overflow'), tag);
         } else {
-          // archive-recipient / tick — per-lead basis: unrelated churn must
-          // NOT invalidate this case's assessment.
+          // archive-accepted / archive-recipient / tick — per-lead basis:
+          // unrelated churn must NOT invalidate this case's assessment.
           assert.ok(r.main, tag);
           assert.equal(r.calls.length, inv === 'tick' ? 2 : 1, tag);
           assert.notEqual(r.main.lastAssessment, null, `${tag}: verdict accepted — no spurious discard`);

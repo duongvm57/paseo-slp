@@ -101,7 +101,12 @@ const CasesFileSchema = z.object({
 
 type Job =
   | { t: "tick"; order: number; leadId: null }
-  | { t: "turn-end"; order: number; leadId: string; capture: Capture; startSeq: number | null; overlap: boolean }
+  // leadGen/peerGen = archive generations AT ENQUEUE — an archive→restore
+  // crossing the queue is invisible to the tombstone flag (restore clears
+  // it) but bumps the monotonic generation, so the compare at apply is
+  // ABA-safe. peerGen is undefined for lead events (they fan out to every
+  // open case — each case's peer is checked per-case instead).
+  | { t: "turn-end"; order: number; leadId: string; leadGen: number | undefined; peerGen: number | undefined; capture: Capture; startSeq: number | null; overlap: boolean }
   // gens = archive generations AT ENQUEUE — a queued verification answers
   // a question asked at hook time; an archive landing before the job
   // executes already changed the generation, so the job must discard
@@ -296,6 +301,15 @@ export function createSupervisionObserver(deps: ObserverDeps) {
   // whose gather spanned this purge.
   const onGateDown = (): void => {
     purgeCount += 1;
+    // Start bookkeeping purges with everything else: a turn whose start
+    // was recorded pre-pause but whose end is dropped inside the pause
+    // would orphan its openTurns/leadStarts/startMeta entries and poison
+    // the NEXT start (overlap → lead-start-unmatched). Chronology across
+    // a paused window is untrusted — post-recovery turns whose starts are
+    // gone resolve conservatively to the uncertain lane.
+    openTurns.clear();
+    leadStarts.clear();
+    startMeta.clear();
     for (const item of cases.values()) {
       if (!item.evidence.flags.includes(VISIBILITY.capturePaused)) item.evidence.flags.push(VISIBILITY.capturePaused);
       // clearBodies bumps evidenceVersion — an in-flight assessment must
@@ -512,6 +526,10 @@ export function createSupervisionObserver(deps: ObserverDeps) {
 
   function onStart(event: TurnStarted): void {
     if (signal.aborted) return;
+    // A start inside a paused window is never recorded — its end will be
+    // dropped at the hook anyway, and the entry would orphan into
+    // overlap/unmatched pollution for the next clean turn.
+    if (!observeGate().ok) return;
     const routes = shadowRoutes();
     const lead = isSlpLead(event.agent.provider) && routes.has(event.agent.id) && !tombstoned(event.agent.id);
     if (!lead) return;
@@ -567,6 +585,10 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     }
     if (!isLeadEvent) {
       if (!isSlpPeer(event.agent.provider)) return;
+      // A peer event inside the lead's dead window cannot be trusted —
+      // its membership was swept at the archive boundary and a
+      // restore-lead may re-admit it on the next live turn.
+      if (tombstoned(leadId)) { diag("lead-archived"); return; }
       if (tombstoned(event.agent.id)) {
         // A turn event while the peer is tombstoned cannot open a case —
         // the capture is dropped (archive generations "block old turns
@@ -602,6 +624,8 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     }
     enqueue({
       t: "turn-end", order: seq, leadId: captured.leadId, capture: captured,
+      leadGen: archiveGen.get(captured.leadId),
+      peerGen: captured.kind === "peer" ? archiveGen.get(captured.peerId) : undefined,
       startSeq: captured.kind === "lead" ? meta?.seq ?? null : null,
       overlap: captured.kind === "lead" ? meta?.overlapped ?? false : false,
     });
@@ -755,13 +779,18 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     if (!observeGate().ok) { diag(VISIBILITY.capturePaused); return; }
     // A lead archived between enqueue and apply must not grow a case —
     // the archive's synchronous purge already ran; the queued job closes
-    // the rows.
-    if (tombstoned(event.leadId)) { diag("lead-archived"); return; }
+    // the rows. The generation compare also catches archive→restore: the
+    // tombstone cleared on restore but the monotonic gen moved, so a turn
+    // captured in the dead era is still dropped.
+    if (tombstoned(event.leadId) || archiveGen.get(event.leadId) !== job.leadGen) {
+      diag("lead-archived"); return;
+    }
     if (event.kind === "peer") {
-      if (tombstoned(event.peerId)) {
-        // Captured live, archived while queued — record a metadata-only
-        // row so the lost observation stays inspectable (an event ARRIVING
-        // tombstoned drops at the hook instead, no row).
+      if (tombstoned(event.peerId) || archiveGen.get(event.peerId) !== job.peerGen) {
+        // Captured live, archived (or archived→restored) while queued —
+        // record a metadata-only row so the lost observation stays
+        // inspectable (an event ARRIVING tombstoned drops at the hook
+        // instead, no row).
         const entries = loadRing();
         const stamp = new Date(now()).toISOString();
         entries.set(event.id, {
@@ -864,6 +893,10 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     // `sentCalls` only if the gather commits, so a discarded gather never
     // burns a call's dedup slot (a later identical capture may retry it).
     const accepted = new Set<string>();
+    // Membership verified during THIS gather — staged, not committed:
+    // `peers.set` inside the loop would survive a dropped gather and leak
+    // a mid-gather archive's stale membership.
+    const pendingPeers = new Map<string, string>();
     // The gather's own basis: a purge landing mid-gather invalidates every
     // lane assembled from pre-purge prompts.
     const purgeAt = purgeCount;
@@ -913,7 +946,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
           }
           if (isSlpPeer(agent.provider) && (agent.labels?.["paseo.parent-agent-id"] ?? null) === event.leadId) {
             leadOfRecipient = event.leadId;
-            peers.set(send.recipient, event.leadId);
+            pendingPeers.set(send.recipient, event.leadId);
           }
         } catch {
           if (signal.aborted) return;
@@ -929,21 +962,39 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     }
     // Commit segment — NO await between this validation and the mutations.
     // A gate-down observed here, a purge boundary crossed mid-gather, a
-    // lead archive, or a route removal/supervisor change all invalidate
-    // the assembled lanes — the purge/archive already flagged and cleared
-    // every affected case, so the gather is simply dropped.
+    // lead archive (tombstone now, or an archive→restore era change via
+    // the enqueue-time gen), or a route removal/supervisor change all
+    // invalidate the assembled lanes — the purge/archive already flagged
+    // and cleared every affected case, so the gather is simply dropped.
     if (signal.aborted) return;
     const routeNow = shadowRoutes().get(event.leadId);
     if (!observeGate().ok || purgeCount !== purgeAt || tombstoned(event.leadId) ||
+        archiveGen.get(event.leadId) !== job.leadGen ||
         routeNow === undefined || routeNow.supervisorAgentId !== route.supervisorAgentId) {
       for (const item of cases.values()) if (item.leadId === event.leadId) item.dirty = true;
       return;
     }
+    // Per-recipient tombstone sweep: a recipient archived while a LATER
+    // send's refresh was in flight invalidates the lane accepted earlier —
+    // drop it and flag, same as the in-loop recipient-inactive path.
+    for (const recipient of roomFor.keys()) {
+      if (tombstoned(recipient)) { roomFor.delete(recipient); newFlags.add(VISIBILITY.recipientInactive); }
+    }
+    for (let i = reports.length - 1; i >= 0; i -= 1) {
+      if (tombstoned(reports[i].recipient)) { reports.splice(i, 1); newFlags.add(VISIBILITY.recipientInactive); }
+    }
+    // Verified memberships commit only inside the guard — and only for
+    // recipients still outside the tombstone set.
+    for (const [id, lead] of pendingPeers) if (!tombstoned(id)) peers.set(id, lead);
     for (const callKey of accepted) sentCalls.add(callKey);
     const subsequent = job.startSeq !== null && !job.overlap;
     if (job.startSeq === null || job.overlap) newFlags.add(VISIBILITY.leadStartUnmatched);
     for (const item of cases.values()) {
       if (item.leadId !== event.leadId) continue;
+      // A case-peer archived mid-gather sits on the archive boundary —
+      // onArchived already purged its bodies; appending lanes now would
+      // resurrect bodies the boundary invalidated.
+      if (tombstoned(item.peerId)) continue;
       const qualifies = subsequent && (job.startSeq as number) > item.handbackOrder;
       // One chronology rule for EVERY send class (spec §Observation point
       // 5: "A Lead send is subsequent handling only when its matching
