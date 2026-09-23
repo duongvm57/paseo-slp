@@ -348,7 +348,7 @@ export function OptionPicker({ colors, label, hint, options, value, onChange, di
           ]}
         >
           <Text style={[styles.pickerSelectedLabel, { color: colors.foreground, fontWeight: "600" }]} numberOfLines={1}>
-            {effective ? (effective.label !== effective.id ? `${effective.label} · ${effective.id}` : effective.id) : "Provider default"}
+            {effective ? effective.label : "Provider default"}
           </Text>
           <Text style={[styles.selectBoxLink, { color: colors.accent }]}>
             {open ? "Close ⌃" : `Change ${label.toLowerCase()} ⌄`}
@@ -384,7 +384,7 @@ export function OptionPicker({ colors, label, hint, options, value, onChange, di
                   ]}
                 >
                   <Text style={[styles.pickerRowLabel, { color: colors.foreground }]} numberOfLines={1}>
-                    {option.label !== option.id ? `${option.label} · ${option.id}` : option.id}
+                    {option.label}
                   </Text>
                 </Pressable>
               ))}
