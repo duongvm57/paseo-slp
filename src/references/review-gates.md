@@ -88,6 +88,12 @@ decision. The committee analyzes and recommends; it holds no write
 authority over the candidate.
 
 The same cluster surfacing after the invariant refactor marks the class as
-beyond point-fixing: escalate the strategy — a committee member writes the
-patch directly, or a property or enumeration test covers the whole matrix —
-as an explicit decision, not the default loop.
+beyond point-fixing: escalate the strategy as an explicit decision, not the
+default loop. The committee itself still holds no write authority. When the
+decision is a direct patch, the Lead issues a separate Engineer assignment
+— agent-scoped under the Lead, naming the write scope and its single
+owner; the assignee may be a former committee member, but the authority
+comes from that assignment, never from membership. The patch forms a new
+candidate that re-freezes and re-enters the gate — frozen identity, split
+seats, Lead verification — without bypass. The alternative branch is a
+property or enumeration test covering the whole matrix.
