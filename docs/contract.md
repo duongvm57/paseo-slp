@@ -245,6 +245,37 @@ and receipts prove consistency, not cryptographic authenticity. Accepted
 risk (recorded): the key file is 0600 inside the daemon home, yet any
 same-user process can read it — daemon-home integrity is the boundary.
 
+Communication supervision is a second opt-in capability, bound per Lead
+route in <daemonHome>/slp-runtime/state/supervision.json (0600, whole-file
+sha256 CAS through the supervision card — its sole writer). Off by default;
+configuring Jev never enables a route, and a route enables nothing until
+mode is explicitly shadow. When enabled, the plugin's lifecycle hooks
+(agent.created/archived/turn_started/turn_ended) synchronously capture
+normalized send_agent_prompt evidence for the bound Lead's direct Peers,
+and a serialized plugin-owned queue evaluates each Peer handback through
+Jev's three-question assessment — a second Jev consumer that requires
+capabilities.supervision in addition to enabled. The detector observes
+communication only: it never infers authority, certifies artifacts,
+mutates assignments, or prompts any agent, and every missing or
+unverifiable input resolves to unknown rather than drift. Persisted output
+is a bounded metadata ring (state/supervision-cases.json, ≤200 entries,
+≤30 days — fingerprints, ids, counts, flags, assessment summaries; never
+message bodies or keys); open cases and the queue are process-local and
+are not replayed after a restart. External data/cost: shadow evaluation
+sends captured brief/handback/room-message content to the configured Jev
+endpoint, so communication leaves the host and each evaluation is a paid
+provider call. Mode notify is schema-valid but has no delivery
+implementation — notification is a separate Human gate. Provider coverage:
+only the codex normalized send shape is verified against a real timeline;
+pi/devin/claude fixtures are mapper-derived, so their sends stay uncertain
+(family-shape-unverified) and their cases resolve unknown until real
+fixtures exist — devin additionally drops the MCP result body upstream.
+Because no machine-readable report-recipient signal exists on this host,
+report-route-unverifiable is set on every case, so all cases currently
+resolve unknown before any Jev call — accepted, pending the structured
+report-recipient decision. Live E2E validation has not run; see
+docs/spec/supervision-integration.md.
+
 prepare accepts repository, workspaceId, assignment and role. Supervisor/Lead use
 fresh profiles/providers; Peer uses providers and route.optionId/catalogSha256.
 A profiles inventory can accompany Peer discovery but does not select its runtime;

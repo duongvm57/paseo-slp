@@ -523,6 +523,49 @@ the pool is Human-owned, so escalate rather than retry. Controlled
 degradation: while armed an outage blocks only the dependent delegation; the
 Human disables the capability in the Manager card and Lead judgment resumes.
 
+### Communication supervision (optional, shadow-only)
+
+Supervision is a second opt-in capability, configured per Lead route in the
+SLP Manager's **Supervision** card
+(`<daemonHome>/slp-runtime/state/supervision.json`, 0600, sha256 CAS). It is
+off by default — configuring Jev alone never enables observation, and a
+route does nothing until its mode is explicitly `shadow` *and* Jev is
+enabled with `capabilities.supervision` on.
+
+In shadow mode the plugin's lifecycle hooks
+(`agent.created`/`archived`/`turn_started`/`turn_ended`) capture normalized
+`send_agent_prompt` evidence for the bound Lead's direct Peers, and a
+serialized plugin-owned queue evaluates each Peer handback through Jev's
+three-question assessment (brief quality, handback quality, Lead handling).
+The detector observes only — it never infers authority, certifies
+artifacts, mutates assignments, or messages any agent, and every missing or
+unverifiable input resolves to `unknown`, never a violation. The Manager
+card lists bounded observation metadata (case state, ids, timestamps,
+counts, visibility flags, assessment summary) — message bodies and keys are
+never persisted.
+
+External data and cost: a shadow evaluation sends captured
+brief/handback/room-message content to the configured Jev endpoint, so
+that communication leaves the host and each evaluation is a billable
+provider call. Provider coverage: codex is the only family whose
+normalized send shape is verified against a real timeline; the pi, devin
+and claude fixtures are mapper-derived, so their sends are demoted to
+uncertain (`family-shape-unverified`) and every case in those families
+stays `unknown` until real-timeline fixtures exist. On devin the upstream
+record additionally drops the MCP result body, so delivery evidence would
+stay weaker even after fixture verification. On this host
+`report-route-unverifiable` is always set — there is no machine-readable
+report-recipient signal — so cases currently resolve `unknown` before any
+Jev call; see the open decision on structured report-recipient labels.
+Open cases and the event queue are process-local: a plugin restart does
+not replay missed turns, and only the metadata ring survives
+(`state/supervision-cases.json`, ≤200 entries or 30 days).
+
+Mode `notify` is schema-valid but carries no delivery path in this build —
+notification is a separate Human gate. Live end-to-end validation has not
+run; the design, evidence and open decisions live in
+[docs/spec/supervision-integration.md](docs/spec/supervision-integration.md).
+
 ## Lead provider handoff
 
 Switching a Lead to Pi when Codex runs out of quota: change the **SLP Lead**

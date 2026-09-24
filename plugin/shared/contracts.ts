@@ -387,7 +387,11 @@ export const JevConfig = z.object({
   provider: JevProvider,
 }).strict();
 /** Wire view of the Jev setup — hasKey only; the key material never leaves
- *  the daemon home. */
+ *  the daemon home. `sha256` is the raw jev.json byte hash — the optimistic-
+ *  concurrency token set-jev requires so a stale save cannot silently
+ *  overwrite another client's capability keys (supervision-integration.md
+ *  §Configuration); null means the file is absent, and it stays present on a
+ *  broken file so the CAS overwrite path still works. */
 export const JevView = z.object({
   configured: z.boolean(),
   enabled: z.boolean().nullable(),
@@ -395,6 +399,7 @@ export const JevView = z.object({
   provider: JevProvider.nullable(),
   hasKey: z.boolean(),
   keyPermissionsOk: z.boolean().nullable(),
+  sha256: Sha.nullable(),
   error: z.string().nullable(),
 }).strict();
 export const GetJevInput = z.object({
@@ -407,11 +412,15 @@ export const GetJevOutput = z.object({
 }).strict();
 /** Plugin-owned state mutation, same class as set-role-routing: writes
  *  slp-runtime/state/jev.json atomically (0600). Toggling off never removes
- *  the stored key. */
+ *  the stored key. `expectedSha256` is the sha256 get-jev returned (null =
+ *  expect the file to be absent); a mismatch is an IDEMPOTENCY_CONFLICT and
+ *  the client must reload first — this is what keeps one card's routing edit
+ *  from overwriting another's supervision toggle. */
 export const SetJevInput = z.object({
   schemaVersion: z.literal(1),
   target: Target,
   jev: JevConfig,
+  expectedSha256: Sha.nullable(),
 }).strict();
 export const SetJevOutput = z.object({
   schemaVersion: z.literal(1),

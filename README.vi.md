@@ -494,6 +494,48 @@ quyền Human nên escalate thay vì thử lại. Degradation có kiểm soát: 
 bật, một outage chỉ chặn delegation phụ thuộc; Human tắt capability trong
 Manager card và phán đoán của Lead được khôi phục.
 
+### Giám sát giao tiếp (tùy chọn, chỉ shadow)
+
+Supervision là capability opt-in thứ hai, cấu hình theo từng route Lead trong
+card **Supervision** của SLP Manager
+(`<daemonHome>/slp-runtime/state/supervision.json`, 0600, sha256 CAS). Mặc
+định tắt — chỉ cấu hình Jev không bao giờ bật quan sát, và một route không
+làm gì cho tới khi mode được đặt tường minh là `shadow` *và* Jev được bật
+với `capabilities.supervision`.
+
+Ở mode shadow, các lifecycle hook của plugin
+(`agent.created`/`archived`/`turn_started`/`turn_ended`) capture evidence
+`send_agent_prompt` đã chuẩn hóa cho các Peer trực tiếp của Lead được bind,
+và một hàng đợi tuần tự do plugin sở hữu đánh giá từng handback của Peer qua
+bộ ba câu hỏi Jev (chất lượng brief, chất lượng handback, cách Lead xử lý).
+Detector chỉ quan sát — không suy ra authority, không chứng nhận artifact,
+không sửa assignment, không nhắn cho agent nào; mọi đầu vào thiếu hoặc không
+verify được đều thành `unknown`, không bao giờ là vi phạm. Card Manager liệt
+kê metadata quan sát có giới hạn (trạng thái case, id, timestamp, đếm, cờ
+visibility, tóm tắt assessment) — body message và key không bao giờ được
+persist.
+
+Dữ liệu ra ngoài và chi phí: một lượt đánh giá shadow gửi nội dung
+brief/handback/room-message đã capture tới Jev endpoint đã cấu hình, nghĩa là
+giao tiếp đó rời khỏi host và mỗi lượt đánh giá là một provider call trả
+phí. Coverage provider: chỉ codex có send shape đã verify trên timeline
+thật; fixture pi, devin và claude là mapper-derived nên send của chúng bị
+demote thành uncertain (`family-shape-unverified`) và mọi case của các
+family đó giữ `unknown` tới khi có fixture timeline thật. Trên devin, bản
+ghi upstream còn drop body của MCP result nên evidence giao hàng vẫn yếu
+hơn cả sau khi fixture được verify. Trên host này
+`report-route-unverifiable` luôn được set — không có report-recipient
+signal đọc được bằng máy — nên hiện mọi case resolve `unknown` trước cả
+Jev call; xem open decision về structured report-recipient label. Các case
+đang mở và hàng đợi event là process-local: restart plugin không replay
+các turn đã lỡ, chỉ ring metadata tồn tại (`state/supervision-cases.json`,
+≤200 mục hoặc 30 ngày).
+
+Mode `notify` hợp lệ về schema nhưng không có đường delivery trong build
+này — notification là một gate Human riêng. Validation E2E live chưa chạy;
+thiết kế, evidence và các quyết định còn mở nằm trong
+[docs/spec/supervision-integration.md](docs/spec/supervision-integration.md).
+
 ## Handoff provider của Lead
 
 Đổi Lead sang Pi khi Codex hết quota: đổi provider của **SLP Lead** thành

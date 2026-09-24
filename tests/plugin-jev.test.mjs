@@ -15,7 +15,13 @@ import { redactionFixtures } from './jev-redaction-matrix.mjs';
 const jevPath = home => join(home, 'slp-runtime', 'state', 'jev.json');
 const keyPath = home => join(home, 'slp-runtime', 'state', 'jev-openrouter.key');
 const getJev = (jev, home) => jev.getJev({ schemaVersion: 1, target: targetOf(home) });
-const setJev = (jev, home, config) => jev.setJev({ schemaVersion: 1, target: targetOf(home), jev: config });
+// set-jev carries a raw-file CAS token — the helper reads the current sha256
+// first so every call writes against fresh state (call sites unchanged); the
+// dedicated CAS test exercises the conflict path explicitly.
+const setJev = async (jev, home, config) => {
+  const current = await getJev(jev, home);
+  return jev.setJev({ schemaVersion: 1, target: targetOf(home), jev: config, expectedSha256: current.jev.sha256 });
+};
 const setJevKey = (jev, home, key) => jev.setJevKey({ schemaVersion: 1, target: targetOf(home), key });
 const testJev = (jev, home) => jev.testJev({ schemaVersion: 1, target: targetOf(home) });
 const config = (over = {}) => ({
@@ -31,7 +37,7 @@ test('jev config round-trips through get/set with 0600 atomic writes', async t =
   assert.equal(existsSync(jevPath(home)), false);
   assert.deepEqual((await getJev(jev, home)).jev, {
     configured: false, enabled: null, capabilities: null, provider: null,
-    hasKey: false, keyPermissionsOk: null, error: null,
+    hasKey: false, keyPermissionsOk: null, sha256: null, error: null,
   });
   const stored = await setJev(jev, home, config());
   assert.equal(lstatSync(jevPath(home)).mode & 0o777, 0o600);
@@ -416,7 +422,7 @@ test('absent and corrupt config share one semantic on both sides — never silen
   assert.equal(readJevConfig(home), null);
   assert.deepEqual((await getJev(jev, home)).jev, {
     configured: false, enabled: null, capabilities: null, provider: null,
-    hasKey: false, keyPermissionsOk: null, error: null,
+    hasKey: false, keyPermissionsOk: null, sha256: null, error: null,
   });
   // Corrupt bytes are evidence, not absence: the runtime throws, the plugin
   // reports configured-but-broken — same "not OFF" verdict, different
