@@ -390,10 +390,26 @@ test('session entry: disabled render equals the pre-feature render byte-for-byte
   rmSync(installed, { recursive: true, force: true });
   install(root, installed);
   const after = roleBundle(installed, 'peer', env).instructions;
-  const delta = after.split('\n').filter(line => line.includes('src/references/work-tracking.md'));
-  assert.equal(delta.length, 1, 'the only declared delta is the work-tracking.md locator line');
-  const normalized = after.split('\n').filter(line => !line.includes('src/references/work-tracking.md')).join('\n');
-  assert.equal(normalized, before, 'disabled render must equal the pre-feature render byte-for-byte');
+  // Integrity locators carry per-file size+sha256, so another lane's doctrine
+  // edit legitimately rewrites that file's locator line. Pin the invariant,
+  // not the bytes: the render body must be identical, and the locator path
+  // set may gain exactly the work-tracking.md entry — nothing else.
+  const locatorRe = /^- (.*\S) — \d+ bytes, sha256 [0-9a-f]{64}$/;
+  const splitRender = text => {
+    const locators = new Set(), body = [];
+    for (const line of text.split('\n')) {
+      const m = line.match(locatorRe);
+      if (m) locators.add(m[1]); else body.push(line);
+    }
+    return { locators, body: body.join('\n') };
+  };
+  const a = splitRender(after), b = splitRender(before);
+  assert.deepEqual(
+    [...a.locators].filter(path => !b.locators.has(path)),
+    [`${installed}/src/references/work-tracking.md`],
+    'work tracker adds exactly its own locator entry',
+  );
+  assert.equal(a.body, b.body, 'disabled render body must equal the pre-feature render byte-for-byte');
 });
 
 test('session entry: enabled setting adds one pointer line between language and assignment (T3)', t => {
