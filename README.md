@@ -638,7 +638,8 @@ prose.
 
 ### `route-decide`
 
-`route-decide <request.json> [--paseo-home <absolute-home>]` is the only path
+`route-decide <request.json> [--schema] [--out <path>] [--paseo-home <absolute-home>]`
+is the only path
 that calls Jev — see [Jev-assisted routing](#jev-assisted-routing-optional)
 for what it is and when it applies. The request carries `repository`, an
 optional `role` (default `peer`) and a Lead-authored `brief` — a nonempty
@@ -649,13 +650,17 @@ Structured forms are refused (`jev-request-invalid`): a `signals` field or
 object/array let the caller pre-classify the task with Jev's own decision
 vocabulary — inline the facts as prose instead. Standard `axis:value`
 tokens quoted inside the text are flagged as unverified mentions in the
-output `warnings`. Output is `{optionId,
-catalogSha256, declined, role, warnings, decision}`; feed `optionId`/`catalogSha256`/
+output `warnings`. Output is `{schemaVersion, optionId,
+catalogSha256, declined, role, tokenConflicts, warnings, poolDrift, decision}`;
+`poolDrift` plus a `warnings` line report any divergence between the
+repository catalog and the live user-scope pool (advisory — the catalog
+still binds, nothing is reconciled). Feed `optionId`/`catalogSha256`/
 `decision` into `route.*` of a `prepare` request. A `no-suitable-option`
 answer still prints its receipt but exits 1. The command fails closed before
 any network when the daemon's Jev config or key is missing/disabled, and a
 source checkout invocation needs a daemon home carrying that config (`--paseo-home`
-or `PASEO_HOME`).
+or `PASEO_HOME`). `--schema` prints the request contract without a request
+file or daemon; `--out` persists the response bytes, never the request.
 
 ### `inventory` / `agents`
 
@@ -720,7 +725,8 @@ worktree lacks the protocol entirely. `materialize` clones it from an
 existing checkout:
 
 ```bash
-node "$SLP_RT/bin/slp.mjs" materialize /absolute/target-repo --from /absolute/source-repo
+node "$SLP_RT/bin/slp.mjs" materialize /absolute/target-repo --from /absolute/source-repo \
+  [--include <repo-relative-path>]... [--paseo-home <absolute-home>]
 # dry-run by default; add --apply to write
 ```
 
@@ -728,7 +734,14 @@ It copies `.paseo-slp/workspace-protocol.md`, and `.paseo-slp/slp-routing.json`
 (validated) only when the source actually pins one — a source that never
 created a catalog materializes the protocol alone, and the target resolves
 the user-scope pool exactly like the source does. `notebook.md` is
-Supervisor-owned state and is never copied. Absolute source-root paths inside
+Supervisor-owned state and is never copied. Repeatable `--include` stages
+extra repository-relative files verbatim — untracked spec or evidence the
+seat must read; paths are validated before anything is staged (absolute,
+drive-prefixed, backslash, `.`/`..`/empty-segment, NUL, `.paseo-slp`,
+symlink and non-regular entries are refused), deduped by target path, and
+preserved when already present. `--paseo-home` enables the advisory
+catalog↔live-pool drift report on the result (`poolDrift`). Absolute
+source-root paths inside
 the protocol's YAML frontmatter are rebased to the target root (a longer
 sibling path like `<source>-old` is not a boundary match and stays put). Like
 `init`, existing target files are preserved rather than overwritten; each

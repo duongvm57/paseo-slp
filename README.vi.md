@@ -601,17 +601,27 @@ lý do là phân phối trên decision receipt chứ không phải văn xuôi.
 
 ### `route-decide`
 
-`route-decide <request.json> [--paseo-home <absolute-home>]` là đường duy nhất
+`route-decide <request.json> [--schema] [--out <path>] [--paseo-home <absolute-home>]`
+là đường duy nhất
 gọi Jev — xem [Routing có Jev hỗ trợ](#routing-có-jev-hỗ-trợ-tùy-chọn) để biết
 nó là gì và áp dụng khi nào. Request mang `repository`, `role` tùy chọn (mặc
-định `peer`) và `brief` do Lead viết (string hoặc object không rỗng — context
-duy nhất Jev thấy về task; mang theo mô tả tác vụ, tín hiệu rủi ro/effort,
-ràng buộc và dependencies — brief cằn sẽ trôi về mức ngẫu nhiên). Output là `{optionId, catalogSha256, declined,
-role, decision}`; đưa `optionId`/`catalogSha256`/`decision` vào `route.*` của
+định `peer`) và `brief` do Lead viết — một string không rỗng chứa text
+task/assignment thô, là context duy nhất Jev thấy về task; mang theo mô tả
+tác vụ, tín hiệu rủi ro/effort, ràng buộc và dependencies — brief cằn sẽ
+trôi về mức ngẫu nhiên. Dạng có cấu trúc bị từ chối
+(`jev-request-invalid`): field `signals` hay object/array cho phép caller
+tự phân loại task bằng chính vocabulary quyết định của Jev — hãy đưa sự
+kiện vào văn xuôi. Token `axis:value` chuẩn trích trong text được gắn cờ
+là unverified mention trong `warnings` của output. Output là `{schemaVersion, optionId, catalogSha256, declined,
+role, tokenConflicts, warnings, poolDrift, decision}`; `poolDrift` cùng một
+dòng `warnings` báo divergence giữa catalog repo và pool user-scope live
+(advisory — catalog vẫn bind, không reconcile). Đưa `optionId`/`catalogSha256`/`decision` vào `route.*` của
 request `prepare`. Đáp án `no-suitable-option` vẫn in receipt nhưng exit 1.
 Lệnh fail closed trước cả network khi config/key Jev của daemon thiếu hoặc
 tắt, và gọi từ source checkout cần một daemon home có config đó
-(`--paseo-home` hoặc `PASEO_HOME`).
+(`--paseo-home` hoặc `PASEO_HOME`). `--schema` in request contract mà không
+cần request file hay daemon; `--out` ghi bytes của response, không bao giờ
+là request file.
 
 ### `inventory` / `agents`
 
@@ -673,7 +683,8 @@ và báo seat mới không được claim full-candidate coverage cho phạm vi 
 mới thiếu hẳn protocol. `materialize` clone nó từ một checkout có sẵn:
 
 ```bash
-node "$SLP_RT/bin/slp.mjs" materialize /absolute/target-repo --from /absolute/source-repo
+node "$SLP_RT/bin/slp.mjs" materialize /absolute/target-repo --from /absolute/source-repo \
+  [--include <repo-relative-path>]... [--paseo-home <absolute-home>]
 # mặc định dry-run; thêm --apply để ghi
 ```
 
@@ -681,7 +692,13 @@ Lệnh copy `.paseo-slp/workspace-protocol.md`, và `.paseo-slp/slp-routing.json
 (đã validate) chỉ khi source thật sự pin catalog — source chưa từng tạo
 catalog thì materialize chỉ mang protocol, và target đọc pool user-scope y
 hệt source. `notebook.md` là state do Supervisor sở hữu và không bao giờ
-được copy. Absolute path nằm dưới source root trong YAML frontmatter của
+được copy. `--include` lặp lại được để stage thêm file repository-relative
+nguyên byte — spec/evidence chưa track mà seat cần đọc; path được validate
+trước khi stage bất cứ thứ gì (từ chối absolute, drive-prefixed, backslash,
+segment rỗng/`.`/`..`, NUL, path dưới `.paseo-slp`, symlink và object không
+phải regular file), dedupe theo target path và preserve khi đã tồn tại.
+`--paseo-home` bật report drift advisory catalog↔pool live trên kết quả
+(`poolDrift`). Absolute path nằm dưới source root trong YAML frontmatter của
 protocol được rebase sang target root (path anh em dài hơn kiểu
 `<source>-old` không khớp boundary nên giữ nguyên). Như `init`, file đã tồn
 tại ở target được preserve chứ không ghi đè; mỗi file báo

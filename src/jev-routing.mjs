@@ -172,7 +172,7 @@ export function routeDecideSchema() {
       role: 'optional — supervisor | lead | peer; default peer',
       paseoHome: 'optional — absolute daemon home for the user-scope pool and jev.json (the --paseo-home flag or PASEO_HOME also resolves it)',
     },
-    output: '{ schemaVersion, optionId, catalogSha256, declined, role, tokenConflicts, warnings, poolDrift, decision } — decision is the signed receipt; feed optionId/catalogSha256/decision into route.* of a prepare request. declined=true is a successful run whose answer is "no suitable option" (exit 1).',
+    output: '{ schemaVersion, optionId, catalogSha256, declined, role, tokenConflicts, warnings, poolDrift, decision } — decision is the consistency receipt (an offline-verifiable artifact, not a cryptographic signature); feed optionId/catalogSha256/decision into route.* of a prepare request. declined=true is a successful run whose answer is "no suitable option" (exit 1).',
     notes: [
       'Never assignmentFile bytes — pass a Lead-authored task text; eligibility is computed deterministically and Jev only sees {task, role, vocabulary, options}.',
       'Requires the daemon’s jev.json to be enabled; capabilities.routing=true arms the receipt as binding, otherwise it is a shadow receipt (the Lead’s choice still binds).',
