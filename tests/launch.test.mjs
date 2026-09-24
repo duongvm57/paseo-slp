@@ -32,20 +32,50 @@ function catalogFixture(dir) {
   return { optionId: 'devin-peer', catalogSha256: readCatalog(dir).sha256 };
 }
 
-test('plan surfaces the intended modeId and warns when the binding lacks one', t => {
+const NO_MODE_WARNING = 'no modeId resolved (none in the binding and no agent_mode in .paseo-slp/workspace-protocol.md) — the spawn would inherit the caller default and cross-family inheritance fails at the host; pin modeId in the pool option or saved profile, or ask the Human';
+
+test('plan surfaces the intended modeId with its provenance and warns when nothing resolves one', t => {
   const { dir, installed } = fixture(t);
   const base = { ...request, repository: dir, role: 'lead' };
   const withMode = launchPlan(installed, { ...base, binding: { ...piBinding, modeId: 'bypass' } });
   assert.equal(withMode.modeId, 'bypass');
+  assert.equal(withMode.modeIdSource, 'binding');
   assert.equal(withMode.warnings, undefined);
   assert.deepEqual(withMode.create.settings, { modeId: 'bypass', features: {} });
   const noMode = launchPlan(installed, { ...base, binding: piBinding });
   assert.equal(noMode.modeId, null);
-  assert.deepEqual(noMode.warnings, ['no modeId in binding — spawn inherits caller default']);
+  assert.equal(noMode.modeIdSource, 'none');
+  assert.deepEqual(noMode.warnings, [NO_MODE_WARNING]);
   assert.deepEqual(noMode.create.settings, { features: {} });
   // The create.* argument record is unchanged: only additive top-level fields.
   assert.deepEqual(Object.keys(noMode.create).sort(),
     ['initialPrompt', 'notifyOnFinish', 'provider', 'settings', 'title', 'workspaceId']);
+});
+
+test('agent_mode frontmatter is the declared mode fallback — emitted, sourced and warned', t => {
+  const { dir, installed } = fixture(t);
+  // A bundle-level pin always wins over the repository's declared default.
+  mkdirSync(join(dir, '.paseo-slp'), { recursive: true });
+  writeFileSync(join(dir, '.paseo-slp', 'workspace-protocol.md'),
+    '---\nversion: \'1\'\nagent_mode: \'full-access\'\n---\n\n# Protocol\n');
+  const pinned = launchPlan(installed, { ...request, repository: dir, role: 'lead', binding: { ...piBinding, modeId: 'bypass' } });
+  assert.equal(pinned.modeId, 'bypass');
+  assert.equal(pinned.modeIdSource, 'binding');
+  assert.equal(pinned.warnings, undefined);
+  // No pin → the protocol's agent_mode resolves into create.settings.modeId.
+  const fallback = launchPlan(installed, { ...request, repository: dir, role: 'lead', binding: piBinding });
+  assert.equal(fallback.modeId, 'full-access');
+  assert.equal(fallback.modeIdSource, 'agent_mode');
+  assert.deepEqual(fallback.create.settings, { modeId: 'full-access', features: {} });
+  assert.equal(fallback.warnings.length, 1);
+  assert.match(fallback.warnings[0], /agent_mode, not pinned in the binding/);
+  // An empty agent_mode is the same as absent — nothing resolves to 'none'.
+  writeFileSync(join(dir, '.paseo-slp', 'workspace-protocol.md'),
+    '---\nversion: \'1\'\nagent_mode: \'\'\n---\n\n# Protocol\n');
+  const none = launchPlan(installed, { ...request, repository: dir, role: 'lead', binding: piBinding });
+  assert.equal(none.modeId, null);
+  assert.equal(none.modeIdSource, 'none');
+  assert.deepEqual(none.warnings, [NO_MODE_WARNING]);
 });
 
 test('prepare on a non-installed root names the root and the installed CLI, never raw ENOENT', t => {
@@ -207,7 +237,7 @@ test('launchCheck names every failing stage and separates profile completeness f
   const noMode = launchCheck(installed, { ...request, repository: dir, role: 'lead',
     profiles: [{ id: 'slp-lead', provider: 'slp-codex-lead', model: 'gpt-5.6-luna' }], providers: goodProviders });
   assert.equal(noMode.ok, true);
-  assert.deepEqual(noMode.warnings, ['no modeId in binding — spawn inherits caller default']);
+  assert.deepEqual(noMode.warnings, [NO_MODE_WARNING]);
   // Stale catalog hash is reported before create on the Peer path, while the
   // wrapper's live state is still reported separately.
   const peer = launchCheck(installed, { ...request, repository: dir, role: 'peer', providers,
@@ -267,7 +297,8 @@ test('handoff plans carry modeId, spawnKit and orientation alongside the packet'
     state: 'paused on snapshot', previousOwner: { settled: true, evidence: 'cancel receipt' }, resources: [] };
   const plan = handoffPlan(installed, { ...request, role: 'lead', binding: piBinding, handoff });
   assert.equal(plan.modeId, null);
-  assert.deepEqual(plan.warnings, ['no modeId in binding — spawn inherits caller default']);
+  assert.equal(plan.modeIdSource, 'none');
+  assert.deepEqual(plan.warnings, [NO_MODE_WARNING]);
   assert.equal(plan.spawnKit.tools.length, 12);
   assert.equal(plan.orientation.installedRoot, installed);
   assert.equal(plan.handoff.previousAgentId, 'old-lead');

@@ -31,16 +31,16 @@ export function rejectRouteKeys(route, keys, message) {
 // One provider-health rule for every Binding source. familyFor resolves the
 // expected provider family from the observed provider id, and may itself reject.
 export function verifyProvider(inventory, id, familyFor, label = id) {
-  if (!Array.isArray(inventory)) throw new Error('Paseo list_providers inventory required: pass the discovered providers array as request.providers, not the tool response envelope');
+  if (!Array.isArray(inventory)) throw new Error('Paseo list_providers inventory required: pass the discovered providers array verbatim as request.providers — the live list_providers array, not the tool response envelope, a configured inventory or hand-edited entries');
   const observed = inventory?.find(item => item.id === id);
-  if (!observed || observed.enabled === false || observed.status === 'unavailable') throw new Error(`Unverified provider ${label}`);
+  if (!observed || observed.enabled === false || observed.status === 'unavailable') throw new Error(`Unverified provider ${label}: no enabled entry with that id in the live list_providers inventory — provider objects must be verbatim from list_providers, unedited`);
   // Managed-runtime inventory entries carry provenance:"configured" — static
   // config reads, never live provider state. Launch planning requires live
   // selected-connection inventory, so the enabled/status checks alone are
   // insufficient here (spec §10).
-  if (observed.provenance === 'configured') throw new Error(`Unverified provider ${label}: configured inventory is not live evidence`);
+  if (observed.provenance === 'configured') throw new Error(`Unverified provider ${label}: configured inventory is not live evidence — pass provider objects verbatim from list_providers on the same daemon`);
   const family = familyFor(observed.id);
-  if (observed.extends != null && observed.extends !== transportOf(family)) throw new Error(`Unverified provider family ${label}`);
+  if (observed.extends != null && observed.extends !== transportOf(family)) throw new Error(`Unverified provider family ${label}: the entry's 'extends' (${observed.extends}) does not match the '${family}' transport '${transportOf(family)}' — the provider object must be verbatim from list_providers; do not add, remove or edit fields`);
   return { observed, family };
 }
 

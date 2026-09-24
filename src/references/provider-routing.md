@@ -190,7 +190,10 @@ the chosen option whenever its runtime bundle (provider/model/modeId/
 thinkingOptionId/features) differs from the live pool record — reported for
 reconciliation, never auto-merged.
 Pass the array returned by live list_providers as request.providers, extracting
-it from the tool response envelope when necessary. Each entry carries the observed
+it from the tool response envelope when necessary — each provider object
+verbatim from that array: no added, removed or edited fields, never a
+configured or hand-authored entry (preparation refuses anything else and the
+error says so). Each entry carries the observed
 id, enabled and status (and extends when present). The same data can arrive by
 file: `node <installed>/bin/slp.mjs inventory --paseo-home <exact-home>` emits
 {providers, profiles} in the shape preparation consumes — write it to a file and
