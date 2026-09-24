@@ -199,13 +199,27 @@ remains a distinct source of cheap signal candidates.
    drift.
 5. Use a monotonic callback-order counter. A Lead send is subsequent handling
    only when its matching non-null turn-start event was observed strictly after
-   the Peer handback. Overlap, missing/mismatched starts, unsupported provider
-   tool shapes, delivery ambiguity, or a failed recipient refresh remain
-   uncertainty and locally block both closure and alert. New evidence arriving
-   during an assessment invalidates that assessment before delivery.
+   the Peer handback. When no usable start reached the observer instance —
+   plugin reload erases the in-memory start maps, lifecycle hook calls can
+   time out, and gate pauses drop starts at the hook — an end-only fallback
+   may still prove ordering from the `turn_ended` event itself: a
+   `user_message` in that turn carrying this case's handback (the
+   `<paseo-system>` finish notification embedding the handback body, or the
+   verbatim `send_agent_prompt` report) precedes every send extracted from
+   the turn slice, so the in-event ordering is sufficient evidence. The
+   fallback never fabricates a start timestamp; whatever it cannot establish
+   stays uncertain, flagged `lead-start-end-derived` when it did prove the
+   ordering and `lead-start-unmatched` when it could not. Overlap,
+   missing/mismatched starts without such in-event proof, unsupported
+   provider tool shapes, delivery ambiguity, or a failed recipient refresh
+   remain uncertainty and locally block both closure and alert. New evidence
+   arriving during an assessment invalidates that assessment before delivery.
 
-Paseo 0.8 lifecycle payloads provide the needed event names and full timeline,
-but timeline items have no per-item turn ID. The reference plugin's
+Paseo 0.8/0.9 lifecycle payloads provide the needed event names and full
+timeline, but timeline items have no per-item turn ID or timestamp, and the
+observer's start bookkeeping is plugin-process state that does not survive
+reloads or a dropped hook call — the end event's own ordering is the only
+honest fallback. The reference plugin's
 [input-shape investigation](https://github.com/hoangnb24/paseo-supervision/blob/1bad19b8ee6c58482494f56a3d8c6edb4f969ee1/docs/INPUT_SHAPES.md)
 establishes one normalized Codex/Meetless `send_agent_prompt` shape; it does
 not establish the same shape for Pi, Devin, and Claude. Before supporting a

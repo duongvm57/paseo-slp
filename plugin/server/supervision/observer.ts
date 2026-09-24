@@ -7,8 +7,13 @@
 // single serialized queue owned by the plugin process. Archive events tombstone
 // agent ids so a late event from the old generation cannot re-enter. A
 // monotonic callback-order counter stamps every observation; Lead handling is
-// provable only when a matching non-null turn-start landed strictly after the
-// Peer's handback.
+// provable when a matching non-null turn-start landed strictly after the
+// Peer's handback — or, when no usable start reached this observer instance
+// (plugin reload clears the in-memory start maps, lifecycle hook RPC timeouts
+// drop calls, gate pauses drop starts at the hook — all observed on host
+// 0.9.1), when the handback's own delivery is present inside the ended turn's
+// timeline. The end-derived path only reads ordering the event itself records;
+// it never fabricates a start, and whatever it cannot prove stays uncertain.
 //
 // Queue/generation mechanics are adapted from hoangnb24/paseo-supervision
 // server/observer.ts @ 1bad19b8ee6c58482494f56a3d8c6edb4f969ee1
@@ -23,7 +28,7 @@ import { z } from "zod";
 import { isSlpLead, isSlpPeer, SupervisionFileSchema, SupervisionObservation } from "../../shared/supervision.ts";
 import type { SupervisionObservation as Observation, SupervisionRoute } from "../../shared/supervision.ts";
 import { writePrivate } from "../state-store.ts";
-import { capture, VISIBILITY } from "./capture.ts";
+import { capture, handbackAnchorIndex, VISIBILITY } from "./capture.ts";
 import type { Capture, SendObservation, TurnEnded, TurnStarted } from "./capture.ts";
 import {
   localGate, decide, parseAssessmentResponse, SUPERVISION_QUESTIONS,
@@ -87,6 +92,12 @@ interface Case {
    *  evidence arriving during an assessment invalidates that
    *  assessment." */
   evidenceVersion: number;
+  /** Internal correlation data, never shipped to Jev: prompt bodies this
+   *  case's Peer addressed to the bound Lead (confirmed AND unconfirmed —
+   *  an unconfirmed send's parsed prompt appearing verbatim in the Lead's
+   *  own timeline still proves that content arrived). Feeds the end-only
+   *  chronology anchor; cleared with every other body. */
+  peerLeadPrompts: string[];
   gatedReason: string | null;
   disposition: "observed" | "unknown" | "suspected_drift";
   assessments: number;
@@ -353,6 +364,9 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     }
     for (const send of captured.sends) send.prompt = "";
     for (const send of captured.uncertainSends) send.prompt = "";
+    if (captured.kind === "lead") {
+      for (const anchor of captured.anchors) anchor.text = "";
+    }
   };
 
   // --- metadata ring (state/supervision-cases.json) ------------------------
@@ -863,6 +877,10 @@ export function createSupervisionObserver(deps: ObserverDeps) {
         handbackOrder: job.order,
         dirty: true,
         evidenceVersion: 0,
+        peerLeadPrompts: [...event.sends, ...event.uncertainSends]
+          .filter(s => s.recipient === event.leadId)
+          .map(s => s.prompt)
+          .filter(p => p !== ""),
         gatedReason: null,
         disposition: "observed",
         assessments: 0,
@@ -994,15 +1012,27 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     // recipients still outside the tombstone set.
     for (const [id, lead] of pendingPeers) if (!tombstoned(id)) peers.set(id, lead);
     for (const callKey of accepted) sentCalls.add(callKey);
-    const subsequent = job.startSeq !== null && !job.overlap;
-    if (job.startSeq === null || job.overlap) newFlags.add(VISIBILITY.leadStartUnmatched);
+    const startProven = job.startSeq !== null && !job.overlap;
     for (const item of cases.values()) {
       if (item.leadId !== event.leadId) continue;
       // A case-peer archived mid-gather sits on the archive boundary —
       // onArchived already purged its bodies; appending lanes now would
       // resurrect bodies the boundary invalidated.
       if (tombstoned(item.peerId)) continue;
-      const qualifies = subsequent && (job.startSeq as number) > item.handbackOrder;
+      const startQualifies = startProven && (job.startSeq as number) > item.handbackOrder;
+      // End-only fallback (spec §Observation point 5): when no usable
+      // turn-start is on record — reload erased the start maps, the hook
+      // RPC timed out, or a gate pause dropped it — the ended turn's own
+      // timeline can still prove ordering: the user_message that delivered
+      // THIS case's handback (finish-notification envelope or verbatim
+      // report prompt) precedes every extracted send. A scrubbed anchor or
+      // cleared prompt simply cannot match — the fallback never invents
+      // evidence and never fabricates a start timestamp.
+      const endDerived = handbackAnchorIndex(
+        event.anchors, item.peerId,
+        item.evidence.handback?.text ?? null, item.peerLeadPrompts,
+      ) >= 0;
+      const qualifies = startQualifies || endDerived;
       // One chronology rule for EVERY send class (spec §Observation point
       // 5: "A Lead send is subsequent handling only when its matching
       // non-null turn-start event was observed strictly after the Peer
@@ -1035,6 +1065,16 @@ export function createSupervisionObserver(deps: ObserverDeps) {
       for (const flag of newFlags) {
         if (!item.evidence.flags.includes(flag)) { item.evidence.flags.push(flag); mutated = true; }
       }
+      // Per-case chronology flags: unmatched start stays a blocking gap
+      // only when neither path proved ordering; an end-derived proof is
+      // recorded honestly instead (informational, never a gate reason).
+      const chronFlag = !qualifies ? VISIBILITY.leadStartUnmatched
+        : !startQualifies ? VISIBILITY.leadStartEndDerived
+        : null;
+      if (chronFlag !== null && !item.evidence.flags.includes(chronFlag)) {
+        item.evidence.flags.push(chronFlag);
+        mutated = true;
+      }
       // Every applied mutation bumps the case's evaluation basis — an
       // in-flight assessment must not accept against stale evidence
       // (spec: "New evidence arriving during an assessment invalidates
@@ -1050,6 +1090,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     for (const lane of [item.evidence.roomMessages, item.evidence.uncertainRoomMessages, item.evidence.otherRoomMessages, item.evidence.reportMessages, item.evidence.peerSends]) {
       for (const message of lane) message.prompt = "";
     }
+    item.peerLeadPrompts = [];
     // Body loss changes the evaluation basis — an in-flight assessment
     // built on the pre-clear payload is stale and must be discarded.
     item.evidenceVersion += 1;
@@ -1396,6 +1437,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     let n = 0;
     if (item.evidence.brief !== null && item.evidence.brief.text !== "") n += 1;
     if (item.evidence.handback !== null && item.evidence.handback.text !== "") n += 1;
+    n += item.peerLeadPrompts.length;
     for (const lane of [
       item.evidence.roomMessages, item.evidence.uncertainRoomMessages,
       item.evidence.otherRoomMessages, item.evidence.reportMessages, item.evidence.peerSends,

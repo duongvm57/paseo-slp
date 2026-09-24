@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createSupervisionObserver, buildEvidencePayload } from '../plugin/server/supervision/observer.ts';
-import { capture, extractSends } from '../plugin/server/supervision/capture.ts';
+import { capture, extractSends, handbackAnchorIndex } from '../plugin/server/supervision/capture.ts';
 import { parseAssessmentResponse, decide, localGate } from '../plugin/server/supervision/assessment.ts';
 import { resolveSupervision, askJevDecision, assertRedacted, JevRequestError } from '../plugin/server/jev.ts';
 import { makeHome } from './helpers/plugin-doubles.mjs';
@@ -89,6 +89,13 @@ const leadEnd = (timeline, over = {}) => ({
   timeline,
 });
 const leadStart = (turnId, over = {}) => ({ agent: leadHook(over.agent ?? {}), turnId });
+// The host's notify-on-finish envelope (agent-prompt.js
+// formatSystemNotificationPrompt + formatFinishNotificationBody): the status
+// line names the child agent id and the agent-response section embeds the
+// child's last assistant message verbatim (truncated at 4000 chars).
+const finishEnvelope = (peerId, responseBody, reason = 'finished') =>
+  `<paseo-system>\nAgent ${peerId} (peer title) ${reason}.\n\n<agent-response>\n${responseBody}\n</agent-response>\n</paseo-system>`;
+const HANDBACK = 'Done — X implemented, tests pass';
 
 const makeAsk = (responses = []) => {
   const calls = [];
@@ -215,6 +222,29 @@ test('capture: malformed pi args string stays unparsed', () => {
   const result = extractSends('pi', [item]);
   assert.equal(result.sends.length, 0);
   assert.ok(result.flags.includes('send-input-unparsed'));
+});
+
+test('capture: handbackAnchorIndex — finish envelope and verbatim report anchor; everything else stays unproven', () => {
+  const anchors = texts => texts.map((text, index) => ({ index, text }));
+  const env = finishEnvelope(PEER, HANDBACK);
+  // The notify-on-finish envelope carrying THIS peer's captured handback is
+  // the handback's own delivery proof inside the ended turn's timeline.
+  assert.equal(handbackAnchorIndex(anchors(['earlier input', env, 'x']), PEER, HANDBACK, []), 1);
+  // The Peer's report prompt arriving verbatim is the same proof.
+  assert.equal(handbackAnchorIndex(anchors(['REPORT: X done']), PEER, null, ['REPORT: X done']), 0);
+  // Fail-closed shapes — none of these may anchor.
+  assert.equal(handbackAnchorIndex(anchors([env]), OTHER, HANDBACK, []), -1, 'another agent\'s notification');
+  assert.equal(handbackAnchorIndex(anchors([finishEnvelope(PEER, 'a different body')]), PEER, HANDBACK, []), -1, 'mismatched handback body');
+  assert.equal(handbackAnchorIndex(anchors(['Agent x finished']), PEER, HANDBACK, []), -1, 'not an envelope');
+  assert.equal(handbackAnchorIndex(anchors(['']), PEER, null, ['']), -1, 'scrubbed bodies never match');
+  assert.equal(handbackAnchorIndex(
+    anchors([`<paseo-system>\nAgent ${PEER} (t) finished.\n\n<agent-response>\n\n</agent-response>\n</paseo-system>`]),
+    PEER, '', []), -1, 'an empty handback cannot verify content');
+  // The host truncates the embedded response at 4000 chars — the same
+  // truncation form still verifies.
+  const long = 'x'.repeat(4100);
+  const truncatedEnv = finishEnvelope(PEER, `${'x'.repeat(4000)}\n[truncated 100 chars; use get_agent_activity for the full response]`);
+  assert.equal(handbackAnchorIndex(anchors([truncatedEnv]), PEER, long, []), 0);
 });
 
 test('capture: peer on failed turn keeps confirmed sends but no handback', () => {
@@ -717,6 +747,119 @@ test('observer scenario 5: overlapping Lead turns — send start ambiguous → u
   assert.equal(rows[0].state, 'unknown');
   assert.equal(rows[0].counts.uncertainRoomMessages, 1);
   assert.ok(rows[0].visibility.includes('lead-start-unmatched'));
+});
+
+// ---------------------------------------------------------------------------
+// End-only chronology fallback — host 0.9.1 emits agent.turn_started, but the
+// observer's in-memory start state does not always survive: plugin reloads
+// clear it, lifecycle hook RPC timeouts drop calls, gate pauses drop starts at
+// the hook. The turn_ended event's own ordering is the only honest fallback:
+// a user_message carrying THIS case's handback precedes every extracted send.
+// ---------------------------------------------------------------------------
+
+test('observer: end-only chronology — finish-notification envelope qualifies the send without a start', async t => {
+  const { observer, paseo, home, calls } = await baseSetup(t);
+  observer.onCreated(peerHook(), paseo);
+  observer.onTurn(peerTurn(), paseo);
+  await observer.idle();
+  // NO leadStart — the host's start never reached this observer instance.
+  // The lead turn_ended still carries the <paseo-system> finish notification
+  // for THIS peer embedding the captured handback — the send behind it is
+  // provably post-handback.
+  observer.onTurn(leadEnd([userMsg(finishEnvelope(PEER, HANDBACK)), codexSend('c1', PEER, 'acknowledged — continue')]), paseo);
+  await settle(observer);
+  const rows = ringRows(home);
+  assert.equal(rows[0].counts.roomMessages, 1, 'end-derived ordering qualifies the confirmed send');
+  assert.equal(rows[0].counts.uncertainRoomMessages, 0);
+  assert.ok(rows[0].visibility.includes('lead-start-end-derived'), 'the derivation is recorded, not hidden');
+  assert.ok(!rows[0].visibility.includes('lead-start-unmatched'));
+  // Host truth unchanged: report-route-unverifiable still gates before Jev.
+  assert.equal(rows[0].state, 'unknown');
+  assert.equal(rows[0].reason, GATED);
+  assert.equal(calls.length, 0);
+});
+
+test('observer: end-only chronology reaches evaluated when evidence is sufficient', async t => {
+  // The assignment's acceptance: a turn_ended with no usable turn_started
+  // must still capture AND be able to reach evaluated. On this host the real
+  // gate closes every case on report-route-unverifiable — the documented
+  // localGate seam opens the Jev path, same as the S4/S5 matrix sites.
+  const home = makeHome(t);
+  writeRoutes(home, [route()]);
+  const ask = makeAsk([ALL_HANDLED]);
+  const { observer, paseo } = makeObserver(t, {
+    home, agents: liveAgents(), ask: ask.ask, localGate: () => null,
+  });
+  observer.onCreated(peerHook(), paseo);
+  observer.onTurn(peerTurn(), paseo);
+  await observer.idle();
+  // The send lands inside the pending window — the first (and only)
+  // evaluation already sees the end-derived repair.
+  observer.onTurn(leadEnd([userMsg(finishEnvelope(PEER, HANDBACK)), codexSend('c1', PEER, 'acknowledged — continue')]), paseo);
+  await settle(observer);
+  const rows = ringRows(home);
+  assert.equal(ask.calls.length, 1, 'end-derived evidence passed the local gate and reached Jev');
+  assert.equal(rows[0].state, 'evaluated');
+  assert.equal(rows[0].reason, null);
+  assert.equal(rows[0].assessmentsUsed, 1);
+  assert.equal(rows[0].counts.roomMessages, 1);
+  assert.ok(rows[0].visibility.includes('lead-start-end-derived'));
+});
+
+test('observer: end-only turn without handback evidence stays uncertain — nothing is fabricated', async t => {
+  const { observer, paseo, home, calls } = await baseSetup(t);
+  observer.onCreated(peerHook(), paseo);
+  observer.onTurn(peerTurn(), paseo);
+  await observer.idle();
+  // No start AND no handback anchor inside the turn — chronology cannot be
+  // derived; the send stays in the uncertain lane with the unmatched flag.
+  observer.onTurn(leadEnd([userMsg('an unrelated input'), codexSend('c1', PEER, 'maybe-early ack')]), paseo);
+  await settle(observer);
+  assert.equal(calls.length, 0);
+  const rows = ringRows(home);
+  assert.equal(rows[0].counts.roomMessages, 0);
+  assert.equal(rows[0].counts.uncertainRoomMessages, 1);
+  assert.ok(rows[0].visibility.includes('lead-start-unmatched'));
+  assert.ok(!rows[0].visibility.includes('lead-start-end-derived'));
+});
+
+test('observer: a steered finish notification qualifies sends on a pre-handback start', async t => {
+  // The Lead turn started BEFORE the peer handback — the finish notification
+  // was steered into the running turn (host notify uses activeTurnBehavior
+  // "steer"), so the recorded start's seq precedes the handback and the
+  // start-based path stays unproven. The envelope inside the turn's own
+  // timeline still proves the send is post-handback.
+  const { observer, paseo, home } = await baseSetup(t);
+  observer.onStart(leadStart('turn-l1'));
+  observer.onCreated(peerHook(), paseo);
+  observer.onTurn(peerTurn(), paseo);
+  await observer.idle();
+  observer.onTurn(leadEnd([userMsg(finishEnvelope(PEER, HANDBACK)), codexSend('c1', PEER, 'ack')], { turnId: 'turn-l1' }), paseo);
+  await settle(observer);
+  const rows = ringRows(home);
+  assert.equal(rows[0].counts.roomMessages, 1, 'the steered handback anchors the turn');
+  assert.ok(rows[0].visibility.includes('lead-start-end-derived'));
+  assert.ok(!rows[0].visibility.includes('lead-start-unmatched'));
+});
+
+test('observer: the peer report prompt landing as a lead user_message anchors end-only', async t => {
+  // The second delivery path: the Peer called send_agent_prompt to the Lead —
+  // the captured report prompt arriving verbatim in the Lead's own turn_ended
+  // timeline proves the content reached the Lead before the send.
+  const { observer, paseo, home } = await baseSetup(t);
+  observer.onCreated(peerHook(), paseo);
+  observer.onTurn(peerEnd([
+    userMsg('Implement X per the brief'),
+    codexSend('r1', LEAD, 'REPORT: X done, tests pass'),
+    asstMsg(HANDBACK),
+  ]), paseo);
+  await observer.idle();
+  observer.onTurn(leadEnd([userMsg('REPORT: X done, tests pass'), codexSend('c1', PEER, 'ack')]), paseo);
+  await settle(observer);
+  const rows = ringRows(home);
+  assert.equal(rows[0].counts.roomMessages, 1);
+  assert.equal(rows[0].counts.peerSends, 1, 'the peer report send is captured evidence too');
+  assert.ok(rows[0].visibility.includes('lead-start-end-derived'));
 });
 
 test('observer scenario 6: failed tool send — no structured success, not proof of either verdict', async t => {
