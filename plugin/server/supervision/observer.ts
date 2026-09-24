@@ -7,8 +7,14 @@
 // single serialized queue owned by the plugin process. Archive events tombstone
 // agent ids so a late event from the old generation cannot re-enter. A
 // monotonic callback-order counter stamps every observation; Lead handling is
-// provable only when a matching non-null turn-start landed strictly after the
-// Peer's handback.
+// provable when a matching non-null turn-start landed strictly after the
+// Peer's handback — or, when no usable start reached this observer instance
+// (plugin reload clears the in-memory start maps, lifecycle hook RPC timeouts
+// drop calls, gate pauses drop starts at the hook — all observed on host
+// 0.9.1), when the handback's own delivery is the user_message opening the
+// ended turn's current slice. The end-derived path only reads ordering the
+// event itself records; it never fabricates a start, and whatever it cannot
+// prove stays uncertain.
 //
 // Queue/generation mechanics are adapted from hoangnb24/paseo-supervision
 // server/observer.ts @ 1bad19b8ee6c58482494f56a3d8c6edb4f969ee1
@@ -22,7 +28,7 @@ import { z } from "zod";
 import { isSlpLead, isSlpPeer, SupervisionFileSchema, SupervisionObservation } from "../../shared/supervision.ts";
 import type { SupervisionObservation as Observation, SupervisionRoute } from "../../shared/supervision.ts";
 import { writePrivate } from "../state-store.ts";
-import { capture, VISIBILITY } from "./capture.ts";
+import { capture, handbackAnchorIndex, VISIBILITY } from "./capture.ts";
 import type { Capture, SendObservation, TurnEnded, TurnStarted } from "./capture.ts";
 import {
   localGate, decide, parseAssessmentResponse, SUPERVISION_QUESTIONS,
@@ -372,6 +378,9 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     }
     for (const send of captured.sends) send.prompt = "";
     for (const send of captured.uncertainSends) send.prompt = "";
+    if (captured.kind === "lead") {
+      for (const anchor of captured.anchors) anchor.text = "";
+    }
   };
 
   // --- metadata ring (state/supervision-cases.json) ------------------------
@@ -1013,15 +1022,30 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     // recipients still outside the tombstone set.
     for (const [id, lead] of pendingPeers) if (!tombstoned(id)) peers.set(id, lead);
     for (const callKey of accepted) sentCalls.add(callKey);
-    const subsequent = job.startSeq !== null && !job.overlap;
-    if (job.startSeq === null || job.overlap) newFlags.add(VISIBILITY.leadStartUnmatched);
+    const startProven = job.startSeq !== null && !job.overlap;
     for (const item of cases.values()) {
       if (item.leadId !== event.leadId) continue;
       // A case-peer archived mid-gather sits on the archive boundary —
       // onArchived already purged its bodies; appending lanes now would
       // resurrect bodies the boundary invalidated.
       if (tombstoned(item.peerId)) continue;
-      const qualifies = subsequent && (job.startSeq as number) > item.handbackOrder;
+      const startQualifies = startProven && (job.startSeq as number) > item.handbackOrder;
+      // End-only fallback (spec §Observation point 5): when no usable
+      // turn-start is on record — reload erased the start maps, the hook
+      // RPC timed out, or a gate pause dropped it — the ended turn's own
+      // ordering can still prove chronology, but only inside the turn
+      // slice extraction used: the turn-opening user_message IS this
+      // case's handback delivery — the finish-notification envelope with
+      // the peer's id at the status-line position and the handback in the
+      // agent-response section. A bare prompt body is not accepted (no
+      // authenticated sender on user_messages); an anchor in an older
+      // turn or a scrubbed body never qualifies — the fallback invents
+      // nothing and fabricates no start.
+      const endDerived = handbackAnchorIndex(
+        event.anchors, item.peerId,
+        item.evidence.handback?.text ?? null,
+      ) >= 0;
+      const qualifies = startQualifies || endDerived;
       // One chronology rule for EVERY send class (spec §Observation point
       // 5: "A Lead send is subsequent handling only when its matching
       // non-null turn-start event was observed strictly after the Peer
@@ -1053,6 +1077,16 @@ export function createSupervisionObserver(deps: ObserverDeps) {
       }
       for (const flag of newFlags) {
         if (!item.evidence.flags.includes(flag)) { item.evidence.flags.push(flag); mutated = true; }
+      }
+      // Per-case chronology flags: unmatched start stays a blocking gap
+      // only when neither path proved ordering; an end-derived proof is
+      // recorded honestly instead (informational, never a gate reason).
+      const chronFlag = !qualifies ? VISIBILITY.leadStartUnmatched
+        : !startQualifies ? VISIBILITY.leadStartEndDerived
+        : null;
+      if (chronFlag !== null && !item.evidence.flags.includes(chronFlag)) {
+        item.evidence.flags.push(chronFlag);
+        mutated = true;
       }
       // Every applied mutation bumps the case's evaluation basis — an
       // in-flight assessment must not accept against stale evidence

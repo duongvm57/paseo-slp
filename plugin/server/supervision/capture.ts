@@ -36,6 +36,10 @@ export const VISIBILITY = {
   recipientRefreshFailed: "recipient-refresh-failed",
   recipientInactive: "recipient-inactive",
   leadStartUnmatched: "lead-start-unmatched",
+  // Chronology proven by the ended turn's own ordering rather than an
+  // observed turn-start — informational only, never a gate reason (the
+  // derivation is honest evidence, not an ambiguity).
+  leadStartEndDerived: "lead-start-end-derived",
   reportRouteUnverifiable: "report-route-unverifiable",
   familyShapeUnverified: "family-shape-unverified",
   noCommunication: "no-observable-communication",
@@ -84,6 +88,14 @@ export type Capture =
       sends: SendObservation[];
       uncertainSends: SendObservation[];
       flags: string[];
+      /** user_message positions inside the CURRENT turn slice — the same
+       *  slice send extraction used, so at most the turn-opening message
+       *  (latestTurn starts at the last user_message; nothing older can
+       *  anchor this turn's handling). The raw material for the end-only
+       *  chronology fallback (see handbackAnchorIndex). Bodies live
+       *  in-process only; the gate-down scrub empties them like every
+       *  other captured body. */
+      anchors: { index: number; text: string }[];
     };
 
 export const fingerprint = (value: unknown): string =>
@@ -331,5 +343,72 @@ export function capture(event: TurnEnded, activeLeadIds: ReadonlySet<string>): C
     id: fingerprint([leadId, event.turnId, extraction.sends, extraction.uncertainSends]),
     sends: extraction.sends, uncertainSends: extraction.uncertainSends,
     flags: [...flags],
+    anchors: turn.flatMap((item, index) =>
+      item.type === "user_message" ? [{ index, text: item.text }] : []),
   };
 }
+
+// --- end-only chronology fallback -------------------------------------------
+//
+// Host 0.9.1 does emit `agent.turn_started` (plugins/lifecycle publishAgentStream
+// maps turn_started → { agent, turnId }), but that event reaching the host's
+// dispatch is not the same as a start record inside THIS observer instance:
+// plugin reloads clear the in-memory start maps, lifecycle hook RPC calls can
+// time out (observed in daemon logs: "Lifecycle hook agent.turn_ended failed:
+// Plugin RPC timed out"), and gate-pause windows drop starts at the hook.
+// When no usable start is on record, the only honest fallback is ordering the
+// turn_ended event proves INSIDE the same slice the sends were extracted
+// from: the turn-opening user_message is this case's handback delivery — the
+// host's <paseo-system> finish notification embedding the handback body
+// (agent-prompt.js formatFinishNotificationBody; the peer's identity must
+// hold at the status-line position, not anywhere in the body). A bare
+// send_agent_prompt report body is NOT an anchor: timeline user_messages
+// carry no authenticated sender (host send_agent_prompt passes the prompt
+// through verbatim — no wrapper, no sender field), so a text-only match
+// cannot tell the peer's delivery from a manual message or another agent's
+// identical input. A match in an older turn or a scrubbed body proves
+// nothing either — the fallback never invents evidence and never fabricates
+// a start timestamp.
+export function handbackAnchorIndex(
+  anchors: readonly { index: number; text: string }[],
+  peerId: string,
+  handbackText: string | null,
+): number {
+  let first = -1;
+  for (const anchor of anchors) {
+    const matched = handbackText !== null && isFinishAnchor(anchor.text, peerId, handbackText);
+    if (matched && (first < 0 || anchor.index < first)) first = anchor.index;
+  }
+  return first;
+}
+
+// Mirrors the host's formatSystemNotificationPrompt envelope
+// (agent-prompt.js): "<paseo-system>\n<body>\n</paseo-system>".
+const SYSTEM_PREFIX = "<paseo-system>\n";
+const SYSTEM_SUFFIX = "\n</paseo-system>";
+const AGENT_RESPONSE_OPEN = "<agent-response>\n";
+const AGENT_RESPONSE_CLOSE = "\n</agent-response>";
+// FINISH_NOTIFICATION_MESSAGE_LIMIT in the host's agent-prompt.js — the
+// embedded agent-response body is the child's last assistant message trimmed,
+// then truncated to this many chars plus a "[truncated N chars; …]" line.
+const FINISH_MESSAGE_LIMIT = 4000;
+
+const isFinishAnchor = (text: string, peerId: string, handbackText: string): boolean => {
+  // The status line is the body's FIRST line — `Agent ${childAgentId}
+  // (${title}) ${reason}.` (sections[0] of formatFinishNotificationBody).
+  // Identity must hold at that exact position: a foreign agent's envelope
+  // naming this peer inside its title or reason must never anchor.
+  if (!text.startsWith(`${SYSTEM_PREFIX}Agent ${peerId} (`)) return false;
+  if (!text.endsWith(SYSTEM_SUFFIX)) return false;
+  const open = text.indexOf(AGENT_RESPONSE_OPEN);
+  if (open < 0) return false;
+  const start = open + AGENT_RESPONSE_OPEN.length;
+  const close = text.indexOf(AGENT_RESPONSE_CLOSE, start);
+  if (close < 0) return false;
+  const trimmed = handbackText.trim();
+  if (trimmed === "") return false;
+  const expected = trimmed.length <= FINISH_MESSAGE_LIMIT
+    ? trimmed
+    : `${trimmed.slice(0, FINISH_MESSAGE_LIMIT)}\n[truncated ${trimmed.length - FINISH_MESSAGE_LIMIT} chars; use get_agent_activity for the full response]`;
+  return text.slice(start, close) === expected;
+};
