@@ -17,7 +17,7 @@ import {
   Text,
   View,
 } from "react-native";
-import { activate, catalog, deactivate, reconcile, status, localTarget, setLanguage, getRoleRouting, setRoleRouting, getJev, setJev, setJevKey, testJev, getPeerPool, setPeerPool } from "../shared/contracts.ts";
+import { activate, catalog, deactivate, reconcile, status, localTarget, setLanguage, getRoleRouting, setRoleRouting, getJev, setJev, setJevKey, testJev, getPeerPool, setPeerPool, getWorkTracker, setWorkTracker } from "../shared/contracts.ts";
 import { FAMILY_IDS, FAMILY_LABEL, FAMILY_PICKER_ORDER } from "../shared/families.ts";
 import type { RoleName } from "../shared/families.ts";
 import { PEER_SEAT_ARCHETYPES } from "../shared/archetypes.ts";
@@ -84,6 +84,7 @@ import { useLanguageCard } from "./cards/language.ts";
 import { useRoutingCard, RoutingCard } from "./cards/routing.tsx";
 import { useJevCard, JevCard, JEV_KIND_DEFAULT, JEV_KIND_LABEL } from "./cards/jev.tsx";
 import { usePeerPoolCard, PeerPoolCard } from "./cards/peer-pool.tsx";
+import { useWorkTrackerCard, WorkTrackerCard } from "./cards/work-tracker.tsx";
 
 // Family knowledge derives from the shared registry (shared/families.ts):
 // FAMILY_IDS is the canonical order, FAMILY_PICKER_ORDER the picker order
@@ -97,6 +98,7 @@ const MANAGER_SECTIONS = [
   { id: "profiles", label: "Role profiles" },
   { id: "pool", label: "Peer pool" },
   { id: "language", label: "Communication language" },
+  { id: "tracker", label: "Work tracker" },
   { id: "jev", label: "Jev" },
 ] as const;
 type ManagerSectionId = (typeof MANAGER_SECTIONS)[number]["id"];
@@ -137,6 +139,8 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   const callSetJevKey = useRpc(setJevKey);
   const callTestJev = useRpc(testJev);
   const callGetPeerPool = useRpc(getPeerPool);
+  const callGetWorkTracker = useRpc(getWorkTracker);
+  const callSetWorkTracker = useRpc(setWorkTracker);
   const callSetPeerPool = useRpc(setPeerPool);
 
   const [detectedHome, setDetectedHome] = useState<string | null>(null);
@@ -298,6 +302,18 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     callSetJev,
     callSetJevKey,
     callTestJev,
+    update,
+  });
+
+  // The work-tracker card owns its view, once-per-target load and the
+  // immediate toggle — cards/work-tracker.tsx. Per-daemon-home like Jev:
+  // shows whenever a target resolves, independent of activation state.
+  const tracker = useWorkTrackerCard({
+    target,
+    targetKey: key,
+    sameTarget,
+    callGetWorkTracker,
+    callSetWorkTracker,
     update,
   });
 
@@ -829,6 +845,15 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
           onChangeText={language.onChangeText}
           onApply={language.onApply}
         />
+        </View>
+      ) : null}
+
+      {target ? (
+        // Work tracker is per-daemon-home like Jev — shows whenever a target
+        // resolves. Detect, never install: the card reports bd presence and
+        // the toggle only; there is deliberately no install/init button.
+        <View style={sectionShown("tracker")}>
+        <WorkTrackerCard colors={colors} target={target} tracker={tracker} />
         </View>
       ) : null}
 

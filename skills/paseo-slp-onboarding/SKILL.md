@@ -246,6 +246,28 @@ pool is the only declared fallback, resolved automatically when the repository
 has none; never read another repository's catalog. No automatic import from retired
 profile bindings occurs during host upgrade.
 
+## Optional beads work tracker
+
+The work tracker is opt-in and off by default; onboarding only sets it up when
+the Human asks for durable task state. It needs the Human-installed `bd` CLI
+(beads) — check `bd version`; when absent, hand the Human the install commands
+(`brew install beads`, `npm i -g @beads/bd`, or the upstream `install.sh`)
+rather than installing it silently — SLP detects but never installs,
+initializes, upgrades or configures beads itself. Each participating repository
+is initialized once under explicit authority with
+`bd init --skip-agents --skip-hooks` [verify exact flag names against the
+installed `bd`] — a per-repo step, never run by an SLP seat during a task.
+
+Enable it in the SLP Manager's Work tracker card (the card probes `bd` and
+shows the detected version/path or the install hint). The toggle writes
+`slp-runtime/state/work-tracker.json`; disabling is the same switch. Once
+enabled, every managed seat sees a `Work tracker:` line at session entry and
+reads `src/references/work-tracking.md` for the procedure: probe first, a
+missing or uninitialized `bd` is a recorded gap rather than a block, the
+assignment remains the authority, and beads state is evidence — never the
+control plane. Seats write under their own `BEADS_ACTOR` (hook-family seats
+receive it automatically; Devin seats pass `--actor` per command).
+
 ## Verify and hand back
 
 Record actual profile/provider discovery, pool validation, eligible choices and

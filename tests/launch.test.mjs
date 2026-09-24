@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { install, json, hash } from '../src/package.mjs';
 import { launchPlan, handoffPlan, launchCheck, requestSchema } from '../src/launch.mjs';
 import { readCatalog } from '../src/routing.mjs';
@@ -154,12 +154,13 @@ test('orientation carries mechanical locators only', t => {
   for (const rel of ['src/common.md', 'src/roles/lead.md', 'src/delegation.md',
     'src/references/delegation-formation.md', 'src/references/delegation-execution.md',
     'src/references/anti-patterns.md', 'src/references/governance.md', 'src/references/monitoring.md',
-    'src/references/orchestration.md', 'src/references/provider-routing.md', 'src/references/review-gates.md']) {
+    'src/references/orchestration.md', 'src/references/provider-routing.md', 'src/references/review-gates.md',
+    'src/references/work-tracking.md']) {
     const entry = byPath[join(installed, rel)];
     const bytes = readFileSync(join(installed, rel));
     assert.deepEqual(entry, { path: join(installed, rel), bytes: bytes.length, sha256: hash(bytes) });
   }
-  assert.equal(lead.orientation.policyBytes.length, 11);
+  assert.equal(lead.orientation.policyBytes.length, 12);
   // Carrier: locators must survive into initialPrompt on the fallback path
   // (stock piBinding is not an injecting wrapper, so the carrier stays).
   assert.ok(lead.create.initialPrompt.includes(`- ${join(installed, 'src/common.md')} — `));
@@ -172,7 +173,7 @@ test('orientation carries mechanical locators only', t => {
   const peerPaths = peer.orientation.policyBytes.map(entry => entry.path);
   assert.ok(peerPaths.includes(join(installed, 'src/roles/peer.md')));
   assert.ok(!peerPaths.includes(join(installed, 'src/delegation.md')));
-  assert.equal(peer.orientation.policyBytes.length, 10);
+  assert.equal(peer.orientation.policyBytes.length, 11);
 });
 
 test('launchCheck names every failing stage and separates profile completeness from live provider verification', t => {
@@ -274,6 +275,72 @@ test('handoff plans carry modeId, spawnKit and orientation alongside the packet'
   // Handed-off seats receive the carrier inside the prompt too.
   assert.ok(plan.create.initialPrompt.includes('- create_agent(title: string'));
   assert.match(plan.create.initialPrompt, /Provider handoff evidence:/);
+});
+
+test('prepare paths are tracker-agnostic: off renders identical, on adds one line (T3)', t => {
+  const { dir, installed } = fixture(t);
+  // The prepare CLI must run from an installed root — source checkouts refuse.
+  const slp = join(installed, 'bin/slp.mjs');
+  const home = join(dir, 'home');
+  mkdirSync(join(home, 'slp-runtime/state'), { recursive: true });
+  const setting = join(home, 'slp-runtime/state/work-tracker.json');
+  const baseEnv = { PATH: process.env.PATH };
+  const managed = {
+    ...baseEnv,
+    SLP_MANAGED_RUNTIME: '1', SLP_NODE_BIN: process.execPath,
+    SLP_RUNTIME_ROOT: installed, SLP_DAEMON_HOME: home,
+  };
+  // A stock provider inlines the full role instructions into the prompt —
+  // the only prepare path where session-entry helpers (language, tracker)
+  // can appear. slp-* wrappers render the short role tag instead and inject
+  // the bundle through the hook, which is a different entry surface.
+  const request = { repository: dir, workspaceId: 'wks-t3', assignment: 'x', role: 'lead',
+    binding: { provider: 'pi', model: 'm' } };
+  const reqFile = join(dir, 'req.json');
+  writeFileSync(reqFile, json(request));
+  const handoff = { previousAgentId: 'a', reason: 'r', authority: 'Human', state: 'settled',
+    previousOwner: { settled: true, evidence: 'e' }, resources: [] };
+  const handoffFile = join(dir, 'handoff.json');
+  // handoffPacket snapshots the repository — point it at a real git root.
+  writeFileSync(handoffFile, json({ ...request, repository: root, handoff }));
+  const run = (args, env) => spawnSync(process.execPath, [slp, ...args], { env, encoding: 'utf8' });
+  const trackerLine = /Work tracker:[^\n]*\n/;
+
+  for (const [command, file] of [['prepare', reqFile], ['prepare-handoff', handoffFile]]) {
+    // Unmanaged seat env: the setting file is never consulted.
+    rmSync(setting, { force: true });
+    const unmanagedOff = run([command, file], baseEnv);
+    writeFileSync(setting, json({ schemaVersion: 1, tracker: 'beads', enabled: true }));
+    const unmanagedOn = run([command, file], baseEnv);
+    assert.equal(unmanagedOn.stdout, unmanagedOff.stdout, `${command}: unmanaged output must not change`);
+    assert.ok(!unmanagedOff.stdout.includes('Work tracker:'));
+    // Managed seat env: enabled adds exactly the tracker line inside the
+    // rendered instructions; every other plan byte is identical.
+    rmSync(setting, { force: true });
+    const off = run([command, file], managed);
+    writeFileSync(setting, json({ schemaVersion: 1, tracker: 'beads', enabled: true }));
+    const on = run([command, file], managed);
+    assert.equal(off.status, 0, off.stderr);
+    assert.equal(on.status, 0, on.stderr);
+    const offPlan = JSON.parse(off.stdout);
+    const onPlan = JSON.parse(on.stdout);
+    assert.match(onPlan.create.initialPrompt, trackerLine);
+    assert.ok(!offPlan.create.initialPrompt.includes('Work tracker:'));
+    const stripped = onPlan.create.initialPrompt.replace(trackerLine, '');
+    assert.deepEqual({ ...onPlan, create: { ...onPlan.create, initialPrompt: stripped } }, offPlan,
+      `${command}: enabled adds only the tracker line`);
+    // Explicit disabled is byte-identical to absent.
+    writeFileSync(setting, json({ schemaVersion: 1, tracker: 'beads', enabled: false }));
+    assert.equal(run([command, file], managed).stdout, off.stdout, `${command}: explicit off == absent`);
+  }
+  // prepare --check emits the stage report — never role instructions — so the
+  // bytes are identical whether the tracker is on or off.
+  rmSync(setting, { force: true });
+  const checkOff = run(['prepare', '--check', reqFile], managed);
+  writeFileSync(setting, json({ schemaVersion: 1, tracker: 'beads', enabled: true }));
+  const checkOn = run(['prepare', '--check', reqFile], managed);
+  assert.equal(checkOn.stdout, checkOff.stdout, 'prepare --check output is identical on/off');
+  assert.equal(checkOn.status, checkOff.status);
 });
 
 test('handoff packet surfaces unproven submodule scope as an evidence gap, not a refusal', t => {

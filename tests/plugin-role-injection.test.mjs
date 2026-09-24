@@ -373,6 +373,53 @@ test('session_open: every hook id gets a fresh non-empty grant; others pass thro
 });
 
 // ---------------------------------------------------------------------------
+// agent.session_open — the work-tracker env overlay (spec §6.3)
+// ---------------------------------------------------------------------------
+
+test('session_open: absent/disabled/throwing tracker dep emits only the grant overlay (T2)', async t => {
+  for (const [name, deps] of [
+    ['dep absent', {}],
+    ['dep returns false', { readWorkTrackerEnabled: () => false }],
+    ['dep throws (corrupt/foreign setting)', { readWorkTrackerEnabled: () => { throw new Error('EISDIR state file'); } }],
+  ]) {
+    const { injection } = makeInjection(t, { deps });
+    for (const reason of ['create', 'resume']) {
+      const out = injection.sessionOpen(openReq('slp-codex-peer', { reason }));
+      assert.ok(out.env.SLP_SESSION_OPEN_GRANT.length > 0, `${name} still grants`);
+      assert.equal(out.env.BEADS_ACTOR, undefined, `${name}: no actor overlay`);
+      assert.equal(out.env.BD_AGENT_PROFILE, undefined, `${name}: no profile overlay`);
+      assert.equal(out.env.BD_DISABLE_METRICS, undefined, `${name}: no metrics overlay`);
+      assert.equal(out.env.SLP_FAMILY_BIN, '/bin/x');
+    }
+  }
+});
+
+test('session_open: enabled tracker overlays the seat env on hook ids only (T6 plugin)', async t => {
+  const { injection } = makeInjection(t, { deps: { readWorkTrackerEnabled: () => true } });
+  const out = injection.sessionOpen(openReq('slp-pi-peer'));
+  assert.equal(out.env.BEADS_ACTOR, 'slp-peer-agent-1');
+  assert.equal(out.env.BD_AGENT_PROFILE, 'conservative');
+  assert.equal(out.env.BD_DISABLE_METRICS, '1');
+  assert.ok(out.env.SLP_SESSION_OPEN_GRANT.length > 0, 'grant still lands');
+  // Human-set BD_* values win; BEADS_ACTOR is always SLP's per-seat identity.
+  const preset = injection.sessionOpen(openReq('slp-codex-lead', {
+    env: { SLP_SESSION_OPEN_GRANT: '', BD_AGENT_PROFILE: 'aggressive', BD_DISABLE_METRICS: '0', BEADS_ACTOR: 'daemon-wide' },
+  }));
+  assert.equal(preset.env.BD_AGENT_PROFILE, 'aggressive');
+  assert.equal(preset.env.BD_DISABLE_METRICS, '0');
+  assert.equal(preset.env.BEADS_ACTOR, 'slp-lead-agent-1', 'a preset actor is replaced — attribution names the seat');
+  // Wrapper transports (devin) and non-slp providers never get the overlay.
+  for (const provider of ['slp-devin-peer', 'codex', 'custom-tool']) {
+    assert.equal(injection.sessionOpen(openReq(provider)), undefined, `${provider} passes through`);
+  }
+  // Every open reason gets the overlay — a resumed seat keeps its actor.
+  for (const reason of ['create', 'resume', 'refresh', 'import']) {
+    const open = injection.sessionOpen(openReq('slp-claude-supervisor', { reason }));
+    assert.equal(open.env.BEADS_ACTOR, 'slp-supervisor-agent-1', `${reason} keeps the actor`);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // bin/slp-gate.mjs — sentinel gate as a real subprocess
 // ---------------------------------------------------------------------------
 

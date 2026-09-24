@@ -1163,6 +1163,22 @@ test('the Jev card offers both provider kinds with per-kind model/baseUrl/key su
   assert.ok(jevModule.includes('"Base URL (custom)"'), 'custom baseUrl marker missing');
 });
 
+// T4 pin (Spec F3): a corrupt/foreign work-tracker.json must surface on the
+// card — the server view carries `error` and the card renders it as a
+// visible `setting error:` line in the loaded branch, not just loadError.
+test('the work-tracker card surfaces a setting error on the loaded view (T4)', () => {
+  const card = readFileSync(join(root, 'plugin/client/cards/work-tracker.tsx'), 'utf8');
+  // The error branch renders inside the loaded view, styled as danger.
+  assert.ok(card.includes('view.error !== null'), 'card must branch on view.error');
+  assert.ok(card.includes('setting error: {view.error}'), 'card must render the setting error text');
+  const branch = card.indexOf('view.error !== null');
+  const danger = card.indexOf('colors.statusDanger', branch);
+  assert.ok(danger !== -1 && danger - branch < 300, 'setting error must render in the danger tone');
+  // Server side: the view contract carries `error` and the RPC populates it.
+  const contracts = readFileSync(join(root, 'plugin/shared/contracts.ts'), 'utf8');
+  assert.ok(contracts.includes('error: z.string().nullable()'), 'WorkTrackerView must expose error');
+});
+
 test('featureDefsForSeat is declared before poolBuild calls it eagerly', () => {
   // Regression: poolBuild runs during render and invokes the lambda per seat
   // — a const declared below it is a TDZ crash on any non-empty seat list
