@@ -164,13 +164,38 @@ availability and conflicts before changing anything.
 
 ## Upgrading
 
-Git-managed installs update through Paseo:
+How an update reaches the daemon depends on how the plugin was installed —
+`paseo plugin ls` shows the source kind per plugin.
+
+**Git source following the default branch** — installed as
+`paseo plugin install duongvm57/paseo-slp-plugin:plugin` without `--ref` —
+updates through Paseo:
 
 ```bash
-paseo plugin update paseo-slp
+paseo plugin update paseo-slp          # review and apply
+paseo plugin update paseo-slp --check  # show available updates without installing
+paseo plugin update paseo-slp --yes    # apply without asking
 ```
 
 The daemon fetches the source, builds the checkout and reloads the plugin.
+
+**Git source pinned to a ref** — installed with `--ref v0.2.0` — stays on
+that tag or commit; a plain `update` has nothing newer to offer because the
+pin does not move. Pick the new ref explicitly:
+
+```bash
+paseo plugin update paseo-slp --ref v0.3.0
+```
+
+**Directory install** — `paseo plugin install /absolute/path/to/plugin` —
+points at that checkout instead of a managed copy. New code lands when the
+checkout itself changes (pull, merge, your own edits); rebuild and reload to
+run it:
+
+```bash
+paseo plugin reload paseo-slp
+```
+
 Reactivating rebinds the current candidate and rebuilds its launchers. Running
 sessions keep their provider process until they finish; launch shim paths stay
 stable across candidates. Rebinding is idempotent: activating the same
@@ -184,12 +209,6 @@ stored a versioned binary path needs one reactivation to move onto the alias;
 an administrator-supplied direct release path intentionally pins that
 activation. Saved Supervisor/Lead choices and Peer pool model IDs remain
 Human-controlled; discovering a new model does not select it automatically.
-
-Directory installs are reloaded instead:
-
-```bash
-paseo plugin reload paseo-slp
-```
 
 ## Deactivation and removal
 
