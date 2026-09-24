@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 import { fileURLToPath } from 'node:url';
-import { resolve, isAbsolute, join } from 'node:path';
-import { existsSync } from 'node:fs';
+import { resolve, isAbsolute, join, dirname } from 'node:path';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { identity, install, uninstall, update, verifyInstall, snapshot, readJson, json } from '../src/package.mjs';
 import { launchPlan, handoffPlan, launchCheck, requestSchema } from '../src/launch.mjs';
 import { roleBundle } from '../src/role-bundle.mjs';
 import { readCatalog } from '../src/routing.mjs';
-import { routeDecide } from '../src/jev-routing.mjs';
+import { routeDecide, routeDecideSchema } from '../src/jev-routing.mjs';
+import { jevRoutingState } from '../src/jev.mjs';
 import { resolveHome } from '../src/managed-home.mjs';
 import { installPaseo, uninstallPaseo, upgradePaseo, initWorkspace, materializeWorkspace, installHome } from '../src/paseo-install.mjs';
 import { inventory } from '../src/inventory.mjs';
@@ -15,6 +16,7 @@ import { agents } from '../src/agents.mjs';
 import { monitor } from '../src/monitor.mjs';
 import { notebook } from '../src/notebook.mjs';
 import { localTarget, runtimeStatus } from '../src/runtime-state.mjs';
+import { probeWorkTracker } from '../src/work-tracker.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const argv = process.argv.slice(2);
@@ -24,11 +26,22 @@ try {
   const options = {};
   for (let i = 0; i < args.length; i++) {
     const key = args[i];
+    if (key === '--include') {
+      // Repeatable: each use appends one repository-relative path to stage.
+      const value = args[++i];
+      if (value === undefined || value.startsWith('-')) throw new Error('--include requires a repository-relative path');
+      (options[key] ??= []).push(value);
+      continue;
+    }
     if (Object.hasOwn(options, key)) throw new Error(`Repeated option ${key}`);
     if (key === '--apply' || key === '--reload' || key === '--check' || key === '--schema') options[key] = true;
     else if (key === '--emit') {
       if (args[i + 1] !== 'create') throw new Error('--emit requires create');
       options[key] = args[++i];
+    } else if (key === '--out') {
+      const value = args[++i];
+      if (typeof value !== 'string' || !value.trim() || value.startsWith('-')) throw new Error('--out requires a path');
+      options[key] = value;
     } else if (key === '--from' || key === '--routing-from') {
       if (!args[i + 1] || !isAbsolute(args[i + 1])) throw new Error(`Absolute path required for ${key}`);
       options[key] = args[++i];
@@ -43,16 +56,20 @@ try {
       target = key;
     } else throw new Error(`Unknown flag ${key}`);
   }
-  const commandFlags = { install: ['--paseo-home', '--apply', '--reload'], uninstall: ['--apply', '--reload'], upgrade: ['--from', '--apply', '--reload'], init: ['--routing-from', '--apply'], materialize: ['--from', '--apply'], routes: ['--paseo-home'], inventory: ['--paseo-home'], agents: ['--paseo-home'], monitor: [], notebook: ['--paseo-home'], prepare: ['--check', '--emit', '--schema'], 'prepare-handoff': ['--check', '--emit', '--schema'], 'route-decide': ['--paseo-home'], status: ['--paseo-home'], 'local-target': ['--paseo-home'] };
+  const commandFlags = { install: ['--paseo-home', '--apply', '--reload'], uninstall: ['--apply', '--reload'], upgrade: ['--from', '--apply', '--reload'], init: ['--routing-from', '--apply'], materialize: ['--from', '--apply', '--include', '--paseo-home'], routes: ['--paseo-home', '--out'], inventory: ['--paseo-home'], agents: ['--paseo-home'], monitor: [], notebook: ['--paseo-home'], prepare: ['--check', '--emit', '--schema', '--out'], 'prepare-handoff': ['--check', '--emit', '--schema', '--out'], 'route-decide': ['--paseo-home', '--schema', '--out'], status: ['--paseo-home'], 'local-target': ['--paseo-home'], tracker: ['--paseo-home'] };
   for (const key of Object.keys(options)) if (!commandFlags[command]?.includes(key)) throw new Error(`${key} is not valid for ${command}`);
   const prepareModes = ['--check', '--emit', '--schema'].filter(key => options[key]);
   if (prepareModes.length > 1) throw new Error(`${prepareModes.join(' and ')} are separate modes — pick one`);
   if (command === 'upgrade' && !options['--from']) throw new Error('upgrade requires --from <previous-installation>');
   if (command === 'materialize' && !options['--from']) throw new Error('materialize requires --from <source-repository>');
   if (options['--reload'] && !options['--apply']) throw new Error('--reload requires --apply');
-  const targetArg = { snapshot: 'repository', verify: 'dir', prepare: 'request.json', 'prepare-handoff': 'request.json', routes: 'repository', init: 'repository', materialize: 'repository', monitor: 'request.json', notebook: 'repository', instructions: 'role', 'route-decide': 'request.json' };
+  const targetArg = { snapshot: 'repository', verify: 'dir', prepare: 'request.json', 'prepare-handoff': 'request.json', routes: 'repository', init: 'repository', materialize: 'repository', monitor: 'request.json', notebook: 'repository', instructions: 'role', 'route-decide': 'request.json', tracker: 'repository' };
   if (targetArg[command] && !target && !options['--schema']) throw new Error(`${command} requires <${targetArg[command]}>`);
   if (target && !targetArg[command] && !['install', 'uninstall', 'upgrade'].includes(command)) throw new Error(`${command} takes no arguments`);
+  // --out persists the response bytes — never the request file. Reject early
+  // when it resolves to the request path so the input record is never
+  // destroyed by its own result.
+  if (options['--out'] && target && targetArg[command] === 'request.json' && resolve(options['--out']) === resolve(target)) throw new Error('--out must not resolve to the request file — it writes the response, never the request');
   let result;
   if (command === 'identity') result = identity(root);
   else if (command === 'snapshot') result = snapshot(target);
@@ -69,26 +86,41 @@ try {
       if (!result.ok) process.exitCode = 1;
     } else {
       const planned = handoff ? handoffPlan(root, readJson(target)) : launchPlan(root, readJson(target));
-      // --emit create prints the create_agent argument record verbatim —
-      // initialPrompt, title, settings and workspaceId pass through untrimmed.
-      result = options['--emit'] ? planned.create : planned;
+      // --emit create prints an audit artifact: `create` is the create_agent
+      // argument record verbatim (initialPrompt, title, settings, workspaceId
+      // untrimmed), and modeId/modeIdSource record the resolved mode plus its
+      // provenance so a saved emit file is self-describing for audit.
+      result = options['--emit'] ? { modeId: planned.modeId, modeIdSource: planned.modeIdSource, create: planned.create } : planned;
     }
   }
   else if (command === 'route-decide') {
-    // Explicit helper invocation only — Jev is never called from prepare, a
-    // schedule or a background loop. A decline is a successful decision run
-    // whose answer is "no suitable option": emit the receipt and exit 1.
-    result = await routeDecide(readJson(target), { home: options['--paseo-home'] });
-    if (result.declined) process.exitCode = 1;
+    if (options['--schema']) {
+      if (target) throw new Error('route-decide --schema takes no request file');
+      result = routeDecideSchema();
+    } else {
+      // Explicit helper invocation only — Jev is never called from prepare, a
+      // schedule or a background loop. A decline is a successful decision run
+      // whose answer is "no suitable option": emit the receipt and exit 1.
+      result = await routeDecide(readJson(target), { home: options['--paseo-home'] });
+      if (result.declined) process.exitCode = 1;
+    }
   }
-  else if (command === 'routes') result = readCatalog(target, options['--paseo-home']);
+  else if (command === 'routes') {
+    const home = resolveHome(options['--paseo-home']);
+    result = { ...readCatalog(target, home), jevRouting: jevRoutingState(home) };
+  }
   else if (command === 'inventory') result = inventory(options['--paseo-home']);
   else if (command === 'agents') result = agents(options['--paseo-home']);
   else if (command === 'local-target') result = localTarget(options['--paseo-home']);
   else if (command === 'status') result = runtimeStatus(options['--paseo-home']);
   else if (command === 'init') result = initWorkspace(root, target, Boolean(options['--apply']), options['--routing-from']);
-  else if (command === 'materialize') result = materializeWorkspace(options['--from'], target, Boolean(options['--apply']));
+  else if (command === 'materialize') result = materializeWorkspace(options['--from'], target, Boolean(options['--apply']), { includePaths: options['--include'] ?? [], home: resolveHome(options['--paseo-home']) });
   else if (command === 'monitor') result = monitor(readJson(target));
+  else if (command === 'tracker') {
+    // Read-only beads probe: gaps are data, so exit 0 even when the state is
+    // not ready. Without --paseo-home the setting is not read (enabled: null).
+    result = probeWorkTracker(resolve(target), { daemonHome: options['--paseo-home'] ?? null });
+  }
   else if (command === 'instructions') {
     // Raw preview: the exact bytes roleBundle would inject, unwrapped — stdout
     // stays diffable against a live bundle; provenance goes to stderr. A
@@ -130,6 +162,13 @@ try {
         process.exitCode = 1;
       }
     }
-  } else throw new Error('Usage: slp.mjs identity | snapshot <repo> | install [absolute-dir] [--paseo-home <absolute-home>] [--apply] [--reload] | upgrade <absolute-new-dir> --from <previous-installation> [--apply] [--reload] | verify <dir> | uninstall <dir> [--apply] [--reload] | init <absolute-repo> [--routing-from <absolute-json>] [--apply] | routes <absolute-repo> [--paseo-home <absolute-home>] | inventory [--paseo-home <absolute-home>] | agents [--paseo-home <absolute-home>] | prepare <request.json> [--check | --emit create | --schema] | prepare-handoff <request.json> [--check | --emit create | --schema] | materialize <repository> --from <source-repository> [--apply] | monitor <request.json> | route-decide <request.json> [--paseo-home <absolute-home>] | notebook <repository> [--paseo-home <absolute-home>] | instructions <role> | status [--paseo-home <absolute-home>] | local-target [--paseo-home <absolute-home>]');
+  } else throw new Error('Usage: slp.mjs identity | snapshot <repo> | install [absolute-dir] [--paseo-home <absolute-home>] [--apply] [--reload] | upgrade <absolute-new-dir> --from <previous-installation> [--apply] [--reload] | verify <dir> | uninstall <dir> [--apply] [--reload] | init <absolute-repo> [--routing-from <absolute-json>] [--apply] | routes <absolute-repo> [--paseo-home <absolute-home>] [--out <path>] | inventory [--paseo-home <absolute-home>] | agents [--paseo-home <absolute-home>] | prepare <request.json> [--check | --emit create | --schema] [--out <path>] | prepare-handoff <request.json> [--check | --emit create | --schema] [--out <path>] | materialize <repository> --from <source-repository> [--include <repo-path>]... [--paseo-home <absolute-home>] [--apply] | monitor <request.json> | route-decide <request.json> [--schema] [--out <path>] [--paseo-home <absolute-home>] | notebook <repository> [--paseo-home <absolute-home>] | instructions <role> | status [--paseo-home <absolute-home>] | local-target [--paseo-home <absolute-home>] | tracker <repository> [--paseo-home <absolute-home>]');
+  // --out persists the RESULT bytes — the response, never the request file —
+  // so an audit artifact cannot silently hold the request instead.
+  if (result !== undefined && options['--out']) {
+    const out = resolve(options['--out']);
+    mkdirSync(dirname(out), { recursive: true });
+    writeFileSync(out, json(result));
+  }
   if (result !== undefined) process.stdout.write(json(result));
 } catch (error) { console.error(error.message); process.exitCode = 1; }

@@ -144,6 +144,9 @@ Keep candidate writers paused during review and verification. A before/after ide
 change invalidates that acceptance attempt. Reviewers report severity, evidence,
 checks and APPROVE/FINDINGS; Engineer supplies proof; Lead issues the project verdict.
 Follow Session continuity for corrections and re-review. Keep unresolved findings visible.
+Gate findings repeating one class across consecutive rounds follow
+references/review-gates.md's correction-loop escalation — enumeration, an
+invariant refactor or a findings committee — not another point-fix brief.
 
 Evidence must address real failure mechanisms and the Human outcome. Use integration,
 migration, cancellation, performance or Human product/visual/playtest evidence as

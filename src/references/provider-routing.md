@@ -23,7 +23,11 @@ Read the assigned repository's .paseo-slp/slp-routing.json with
 Resolution is skill-style: the repository catalog wins when present; when the
 repository has no catalog, routes resolves the plugin-owned user-scope pool
 ($PASEO_HOME/slp-runtime/state/peer-pool.json, default ~/.paseo) and reports
-scope/path. The Manager's Peer pool card is that file's sole writer — its
+scope/path. routes also reports `jevRouting` (unconfigured | off | shadow |
+armed | error) so the daemon's routing mode is visible where the seat choice
+happens, and — when the repository catalog wins — attaches `userPool` plus
+`poolDrift`, an advisory diff of the two Human-owned sources (sha pair plus
+per-option field differences). The Manager's Peer pool card is that file's sole writer — its
 model/mode/thinking values come from the live provider catalog, so a seat
 cannot name a mode the provider never offered.
 Each option contains an id, provider family (pi/codex/devin/claude), model, optional modeId,
@@ -95,18 +99,26 @@ asymmetric error class (Jev declining a fit option, or picking one the Lead
 rejects) — and only after the recorded pairs satisfy them does the Human arm
 `capabilities.routing`. Arming before that data exists skips the gate.
 
-The flow in either mode: Lead authors a routing `brief` (the task evidence
-Jev judges — a self-authored summary, never raw `assignmentFile` bytes) and
-runs route-decide. A useful brief carries the task description, risk/effort
-signals, constraints and dependencies — the brief is the entire evidence
-surface, so a starved brief (`"x"`) yields answers that drift toward chance;
-this is guidance, not a hard schema, because what a good brief needs is
-itself measured during shadow evaluation. The helper computes the eligible
+The flow in either mode: Lead authors a routing `brief` — a nonempty string
+of raw task/assignment text (never raw `assignmentFile` bytes) — and runs
+route-decide. Structured forms are refused (`jev-request-invalid`): a
+`signals` field or object/array let the caller pre-classify the task with
+Jev's own decision vocabulary, turning the seat choice into a rubber stamp —
+inline the same facts as prose instead. Standard `axis:value` tokens quoted
+verbatim inside the text still ship, but as unverified mentions: the decision
+instructions tell Jev to read them as prose, and `warnings` in the output
+lists every hit for the caller. A useful brief carries the task description,
+risk/effort signals, constraints and dependencies — the brief is the entire
+evidence surface, so a starved brief (`"x"`) yields answers that drift toward
+chance; this is guidance, not a hard schema, because what a good brief needs
+is itself measured during shadow evaluation. The helper computes the eligible
 candidate set deterministically — the same `optionExclusions` tokens prepare
 enforces — plus one explicit `no-suitable-option` sentinel, sends
 `{brief, role, options}` as state (catalog `notes` are
-withheld), and emits `{optionId, catalogSha256, decision}` where `decision`
-is the receipt. prepare then takes `route.optionId` +
+withheld), and emits `{schemaVersion, optionId, catalogSha256, declined, role,
+tokenConflicts, warnings, poolDrift, decision}` where `decision` is the
+receipt and `poolDrift`/`warnings` surface repository-catalog↔live-pool
+divergence (advisory — the catalog still binds). prepare then takes `route.optionId` +
 `route.catalogSha256` + `route.decision` and verifies the receipt offline:
 internal hash, pinned model (matching the configured provider), catalog hash
 match, exactly the `route_option` question, matching role, candidate
@@ -178,9 +190,16 @@ workspaceId and assignment. Peer requests use the same task fields and providers
 plus route.optionId/catalogSha256. An optional paseoHome overrides the fallback
 catalog home ($PASEO_HOME, default ~/.paseo). Preparation resolves the repository
 pool with the user-scope catalog as fallback and emits arguments; it never creates
-an agent or chooses the option for Lead.
+an agent or chooses the option for Lead. When the repository catalog binds,
+prepare and route-decide still surface `poolDrift` and a `warnings` line for
+the chosen option whenever its runtime bundle (provider/model/modeId/
+thinkingOptionId/features) differs from the live pool record — reported for
+reconciliation, never auto-merged.
 Pass the array returned by live list_providers as request.providers, extracting
-it from the tool response envelope when necessary. Each entry carries the observed
+it from the tool response envelope when necessary — each provider object
+verbatim from that array: no added, removed or edited fields, never a
+configured or hand-authored entry (preparation refuses anything else and the
+error says so). Each entry carries the observed
 id, enabled and status (and extends when present). The same data can arrive by
 file: `node <installed>/bin/slp.mjs inventory --paseo-home <exact-home>` emits
 {providers, profiles} in the shape preparation consumes — write it to a file and
@@ -198,6 +217,12 @@ it is not a reason to change the selected model or read package implementation.
 Use taskLabel for a short Human-readable work label and disposition for the Peer
 seat. prepare renders the naming convention from delegation-execution.md; omitted taskLabel
 uses the repository directory name, and omitted Peer disposition displays General.
+`prepare <request.json> --emit create` emits the audit artifact
+`{ modeId, modeIdSource, create }` — `create` is the verbatim create_agent
+argument record and the mode fields record the resolved mode plus its
+provenance, so a saved emit file is self-describing. `--out <path>` writes
+any command's result to a file — the response, never the request file;
+`route-decide --schema` prints its request contract without a request file.
 Catalog hash validation is not atomic with host creation; record actual launches.
 
 Installed providers are slp-codex-{role}, slp-pi-{role}, slp-devin-{role} and

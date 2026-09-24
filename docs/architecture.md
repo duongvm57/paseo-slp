@@ -204,6 +204,12 @@ Six rules fall out of the role model and shape everything below:
 │     state/jev.json       optional Jev decision-primitive toggles  │
 │     state/jev-*.key      per-daemon provider key (0600,           │
 │                          write-only; status reports hasKey only)  │
+│     state/supervision.json                                        │
+│                          opt-in per-Lead supervision routes       │
+│                          (0600, sha256 CAS; supervision card)     │
+│     state/supervision-cases.json                                  │
+│                          bounded metadata ring written by the     │
+│                          shadow observer (≤200/30d — no bodies)   │
 │     state/peer-pool.json the user-scope Peer pool — catalog-      │
 │                          shaped, written whole-file under a       │
 │                          sha256 CAS; sole writer is the Peer      │
@@ -441,11 +447,20 @@ still be executing from them.
 - The plugin installs and manages; it does **not** orchestrate. No
   agent-facing tools, no `create_agent`, no delegation logic.
 - Jev is an explicit helper primitive, not an agent feature: the
-  `route-decide` CLI is the only call path (no loops, schedules or
+  `route-decide` CLI is the only CLI call path (no loops, schedules or
   prepare-time calls), its key lives in per-daemon state, and routing
   stays deterministic — prepare verifies the receipt offline and fails
-  closed on any config/transport/validation error.
-- No background watchers — status is computed when asked.
+  closed on any config/transport/validation error. The plugin-side
+  supervision observer is the second consumer: it runs only for Lead
+  routes explicitly bound in `state/supervision.json` with
+  `capabilities.supervision` on, and it observes without acting — a
+  serialized queue evaluates Peer handbacks and persists a metadata-only
+  ring; missing evidence becomes `unknown`, never a violation, and the
+  `notify` mode carries no delivery path in this build.
+- No background watchers — status is computed when asked. The single
+  exception is the opt-in shadow observer above: event-driven from
+  lifecycle hooks (never a poll), bound to explicit routes, and writing
+  only the bounded metadata ring.
 - The Supervisor/Lead/Peer intelligence is **policy text + Paseo
   primitives**, not code in the plugin. The plugin's correctness job ends
   at "the right bytes reach the right session through the right channel."

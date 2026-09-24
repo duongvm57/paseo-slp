@@ -209,6 +209,23 @@ export function resolveJev(home, capability, { allowShadow = false } = {}) {
   return { provider: { ...config.provider, endpoint }, key, armed };
 }
 
+// Compact routing-mode view for catalog/status surfaces — a Lead reading
+// `routes` sees whether a route-decide receipt would bind (armed), record
+// (shadow), or be unavailable (off/unconfigured). 'error' reports a
+// configured-but-unreadable jev.json instead of reading as unconfigured.
+// Presence-only: never key material or provider details.
+export function jevRoutingState(home) {
+  let config;
+  try {
+    config = readJevConfig(home);
+  } catch (error) {
+    return { routing: 'error', error: error instanceof Error ? error.message : String(error) };
+  }
+  if (config === null) return { routing: 'unconfigured' };
+  if (!config.enabled) return { routing: 'off' };
+  return { routing: config.capabilities.routing === true ? 'armed' : 'shadow' };
+}
+
 // ---------------------------------------------------------------------------
 // Redaction guard — credential-shaped strings never leave the machine
 // ---------------------------------------------------------------------------

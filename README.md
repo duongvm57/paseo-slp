@@ -18,37 +18,45 @@ delegation rules, spawn kit, sha256 policy locators and managed runtime
 helpers — injected at session entry and not shown in the agent tab.
 Details in [Plugin architecture](docs/architecture.md).
 
+## Why subagents are not enough
+
+A subagent API solves process creation. It does not solve ownership,
+independent judgment, coordination, or acceptance. In practice,
+multi-agent coding commonly fails in these ways:
+
+- Authority gradient: when a parent already presents the answer, the
+  child tends to agree and optimize that answer instead of checking
+  whether its premise is wrong.
+- Perfect-plan trap: the coordinator pre-selects files, APIs, and
+  lifecycle before implementation. The worker becomes a typing bot,
+  while real dependencies surface late as compatibility patches.
+- Attention dilution: when the coordinator also implements, debugs, and
+  repeatedly explains local details, it loses the project-wide view of
+  ownership, dependencies, and agent lifecycle.
+- Unsafe parallelism: two agents can share one checkout and overwrite
+  the same moving files. A workspace or agent ID does not provide
+  filesystem isolation.
+- Biased or stale review: a reviewer forked from the author inherits the
+  same framing, while a reviewer reading changing files may approve a
+  candidate that no longer exists.
+- False completion: finished, idle, "done," and passing tests are
+  signals—not proof that the right artifact was reviewed by the right
+  authority.
+- Split control planes: if workers create their own untracked workers,
+  no single system knows who owns the task, workspace, correction, or
+  cleanup.
+
+More agents can therefore increase confidence and activity without
+increasing correctness.
+
 ## Why SLP
 
-Paseo already creates agents, workspaces, parentage and timelines — it
-solves *process creation*. What it does not decide is ownership,
-independent judgment, coordination discipline or acceptance. Adding more
-agents without those raises confidence and activity without raising
-correctness. Multi-agent coding commonly fails in the same few ways:
+Paseo already creates agents, workspaces, parentage and timelines — the
+process-creation half. SLP answers the rest by separating *kinds of
+judgment* rather than building a rigid `Supervisor > Lead > Peer`
+hierarchy:
 
-- **Authority gradient** — a parent that presents its answer gets
-  agreement back, not a check of the premise.
-- **Perfect-plan trap** — a coordinator that pre-selects files and
-  approach turns the worker into a typing bot; real dependencies surface
-  late as patches.
-- **Attention dilution** — a coordinator that also implements loses the
-  project-wide view of ownership, dependencies and lifecycle.
-- **Unsafe parallelism** — two agents sharing one checkout overwrite the
-  same moving files; a workspace or agent ID is not filesystem isolation.
-- **Biased or stale review** — a reviewer that inherits the author's
-  framing, or reviews files that are still moving, approves a candidate
-  that no longer exists.
-- **False completion** — `finished`, `idle`, "done" and passing tests are
-  signals, not proof that the right artifact was reviewed by the right
-  authority.
-- **Split control planes** — workers spawning their own untracked workers
-  leave no single system that knows who owns the task, the workspace or
-  the correction.
-
-SLP answers by separating *kinds of judgment* rather than building a
-rigid `Supervisor > Lead > Peer` hierarchy:
-
-![Paseo SLP role model: Human owns intent, boundaries and final acceptance; a Supervisor observes the Lead's workflow without joining execution; the Lead coordinates the project and delegates bounded outcomes to independent Engineer, Architect, Reviewer and Scout Peers, which return evidence, challenges, dependency requests or blocked work.](docs/images/slp-role-model.png)
+![Paseo SLP role model: Human owns intent, boundaries and final acceptance; a Supervisor observes the Lead's workflow without joining execution; the Lead coordinates the project and delegates bounded outcomes to independent Engineer, Architect, Reviewer and Scout Peers, which return evidence, challenges, dependency requests or blocked work; two optional Jev advisory instruments — a routing advisory tapping the delegation channel and a supervision assessment tapping the evidence-return channel — are never team seats.](docs/images/slp-role-model.svg)
 
 - **Human** keeps owner authority: intent, important trade-offs,
   exceptional grants, protocol changes and final acceptance.
@@ -156,13 +164,38 @@ availability and conflicts before changing anything.
 
 ## Upgrading
 
-Git-managed installs update through Paseo:
+How an update reaches the daemon depends on how the plugin was installed —
+`paseo plugin ls` shows the source kind per plugin.
+
+**Git source following the default branch** — installed as
+`paseo plugin install duongvm57/paseo-slp-plugin:plugin` without `--ref` —
+updates through Paseo:
 
 ```bash
-paseo plugin update paseo-slp
+paseo plugin update paseo-slp          # review and apply
+paseo plugin update paseo-slp --check  # show available updates without installing
+paseo plugin update paseo-slp --yes    # apply without asking
 ```
 
 The daemon fetches the source, builds the checkout and reloads the plugin.
+
+**Git source pinned to a ref** — installed with `--ref v0.2.0` — stays on
+that tag or commit; a plain `update` has nothing newer to offer because the
+pin does not move. Pick the new ref explicitly:
+
+```bash
+paseo plugin update paseo-slp --ref v0.3.0
+```
+
+**Directory install** — `paseo plugin install /absolute/path/to/plugin` —
+points at that checkout instead of a managed copy. New code lands when the
+checkout itself changes (pull, merge, your own edits); rebuild and reload to
+run it:
+
+```bash
+paseo plugin reload paseo-slp
+```
+
 Reactivating rebinds the current candidate and rebuilds its launchers. Running
 sessions keep their provider process until they finish; launch shim paths stay
 stable across candidates. Rebinding is idempotent: activating the same
@@ -176,12 +209,6 @@ stored a versioned binary path needs one reactivation to move onto the alias;
 an administrator-supplied direct release path intentionally pins that
 activation. Saved Supervisor/Lead choices and Peer pool model IDs remain
 Human-controlled; discovering a new model does not select it automatically.
-
-Directory installs are reloaded instead:
-
-```bash
-paseo plugin reload paseo-slp
-```
 
 ## Deactivation and removal
 
@@ -507,7 +534,7 @@ The flow in either mode: the Lead authors a routing `brief` (never raw
 `assignmentFile` bytes) and runs `route-decide <request.json>`; the helper
 computes the eligible candidate set deterministically — the same exclusion
 tokens `prepare` enforces — plus an explicit `no-suitable-option` sentinel,
-and emits `{optionId, catalogSha256, decision}`. `prepare` takes
+and emits `{optionId, catalogSha256, declined, warnings, decision}`. `prepare` takes
 `route.decision` and verifies it offline (internal hash, pinned model,
 catalog hash, candidate membership — plus answer match when armed); a
 supplied receipt is verified even with Jev off. The receipt records the full
@@ -522,6 +549,86 @@ all refuse rather than guess. A decline emits its receipt and exits nonzero —
 the pool is Human-owned, so escalate rather than retry. Controlled
 degradation: while armed an outage blocks only the dependent delegation; the
 Human disables the capability in the Manager card and Lead judgment resumes.
+
+### Communication supervision (optional, shadow-only)
+
+Supervision is a second opt-in capability, configured per Lead route in the
+**Supervision** section inside the SLP Manager's **Jev** tab
+(`<daemonHome>/slp-runtime/state/supervision.json`, 0600, sha256 CAS). It is
+off by default — configuring Jev alone never enables observation, and a
+route does nothing until its mode is explicitly `shadow` *and* Jev is
+enabled with `capabilities.supervision` on.
+
+In shadow mode the plugin's lifecycle hooks
+(`agent.created`/`archived`/`turn_started`/`turn_ended`) capture normalized
+`send_agent_prompt` evidence for the bound Lead's direct Peers, and a
+serialized plugin-owned queue evaluates each Peer handback through Jev's
+three-question assessment (brief quality, handback quality, Lead handling).
+The detector observes only — it never infers authority, certifies
+artifacts, mutates assignments, or messages any agent, and every missing or
+unverifiable input resolves to `unknown`, never a violation. The Manager
+card lists bounded observation metadata (case state, ids, timestamps,
+counts, visibility flags, assessment summary) — message bodies and keys are
+never persisted.
+
+External data and cost: a shadow evaluation sends captured
+brief/handback/room-message content to the configured Jev endpoint, so
+that communication leaves the host and each evaluation is a billable
+provider call. Provider coverage: codex is the only family whose
+normalized send shape is verified against a real timeline; the pi, devin
+and claude fixtures are mapper-derived, so their sends are demoted to
+uncertain (`family-shape-unverified`) and every case in those families
+stays `unknown` until real-timeline fixtures exist. On devin the upstream
+record additionally drops the MCP result body, so delivery evidence would
+stay weaker even after fixture verification. On this host
+`report-route-unverifiable` is always set — there is no machine-readable
+report-recipient signal — so cases currently resolve `unknown` before any
+Jev call; see the open decision on structured report-recipient labels.
+Open cases and the event queue are process-local: a plugin restart does
+not replay missed turns, and only the metadata ring survives
+(`state/supervision-cases.json`, ≤200 entries or 30 days).
+
+Mode `notify` is schema-valid but carries no delivery path in this build —
+notification is a separate Human gate. Live end-to-end validation has not
+run; the design, evidence and open decisions live in
+[docs/spec/supervision-integration.md](docs/spec/supervision-integration.md).
+
+### Work tracker (optional)
+
+The work tracker gives seats an optional durable work graph — beads
+(`bd`), a per-repository issue database — so they query task state
+(issues, assignees, dependencies, comments) instead of rebuilding it from
+conversation, and read it back after resume or compaction. It is
+evidence, never a control plane: Paseo alone owns lifecycle, parentage,
+notifications and report routes; a claim or assignee grants no write
+scope; tracker status never discharges a required review gate; a `closed`
+status is a recorded claim, not acceptance proof.
+
+Enable it on the SLP Manager's **Work tracker** card — the toggle writes
+`<daemonHome>/slp-runtime/state/work-tracker.json` (atomic, 0600; an
+absent file means disabled) and takes effect at the next session entry,
+no re-activation. The card also reports the `bd` it detects on the daemon
+PATH. **Detect, never install:** installing `bd` on the machine
+(`brew install beads`, `npm i -g @beads/bd`, or upstream `install.sh`)
+and initializing a repository (`bd init`) are Human actions — nothing in
+SLP downloads, installs, initializes, upgrades or configures beads, and a
+missing or broken tracker surfaces as a recorded gap, never a spawn
+blocker.
+
+When enabled, managed session entries gain a `Work tracker:` line naming
+the policy reference `src/references/work-tracking.md` (boundaries, the
+writers table — Supervisor owns the root issue, Lead owns children and
+assignment, each seat owns status on its named issue — and procedure) and
+the probe command below. Hook-family seats additionally receive the env
+overlay `BEADS_ACTOR=slp-<role>-<agent id>` plus defaults
+`BD_AGENT_PROFILE=conservative` and `BD_DISABLE_METRICS=1` (caller env
+wins); Devin seats bypass that env path and attribute writes with
+`--actor` per the reference. Disabled, absent or corrupt settings change
+nothing else — a corrupt file is a surfaced gap line, and a disabled
+render is byte-identical to a pre-feature one.
+
+Full design, boundaries and the verify-on-real-`bd` checklist:
+[docs/spec/beads-work-tracker.md](docs/spec/beads-work-tracker.md).
 
 ## Lead provider handoff
 
@@ -615,12 +722,16 @@ Three modes support request authoring — all side-effect free:
   incompatible settings, stale catalog hash — distinguishing a complete
   profile from a live-verified provider. Exits 1 when any stage fails; nothing
   is created.
-- `prepare <request.json> --emit create` prints exactly the `create` member —
-  the create_agent argument record, untrimmed — for callers that pass it
-  through directly. Note the host gap: Paseo has no plan-file consumer today,
-  so pasting or parsing this output into `create_agent` remains a manual
-  mitigation with a cross-check — it does not eliminate the risk of an
-  altered record reaching the host.
+- `prepare <request.json> --emit create` prints an audit artifact:
+  `{ modeId, modeIdSource, create }` — `create` is exactly the `create` member
+  (the create_agent argument record, untrimmed) for callers that pass it
+  through directly, and the mode fields record the resolved mode plus its
+  provenance so a saved emit file is self-describing. Note the host gap:
+  Paseo has no plan-file consumer today, so pasting or parsing `create` into
+  `create_agent` remains a manual mitigation with a cross-check — it does not
+  eliminate the risk of an altered record reaching the host. `--out <path>`
+  writes whichever result a command produced to a file — the response, never
+  the request file.
 
 A complete request carries: `taskLabel` (or the repo name is used), the role
 (and `disposition` for Peer), the real `repository` path and `workspaceId`,
@@ -634,19 +745,55 @@ prose.
 
 ### `route-decide`
 
-`route-decide <request.json> [--paseo-home <absolute-home>]` is the only path
+`route-decide <request.json> [--schema] [--out <path>] [--paseo-home <absolute-home>]`
+is the only path
 that calls Jev — see [Jev-assisted routing](#jev-assisted-routing-optional)
 for what it is and when it applies. The request carries `repository`, an
-optional `role` (default `peer`) and a Lead-authored `brief` (nonempty string
-or object — the only task context Jev sees; carry the task description,
-risk/effort signals, constraints and dependencies — a starved brief drifts
-toward chance-level answers). Output is `{optionId,
-catalogSha256, declined, role, decision}`; feed `optionId`/`catalogSha256`/
+optional `role` (default `peer`) and a Lead-authored `brief` — a nonempty
+string of raw task/assignment text and the only task context Jev sees;
+carry the task description, risk/effort signals, constraints and
+dependencies — a starved brief drifts toward chance-level answers.
+Structured forms are refused (`jev-request-invalid`): a `signals` field or
+object/array let the caller pre-classify the task with Jev's own decision
+vocabulary — inline the facts as prose instead. Standard `axis:value`
+tokens quoted inside the text are flagged as unverified mentions in the
+output `warnings`. Output is `{schemaVersion, optionId,
+catalogSha256, declined, role, tokenConflicts, warnings, poolDrift, decision}`;
+`poolDrift` plus a `warnings` line report any divergence between the
+repository catalog and the live user-scope pool (advisory — the catalog
+still binds, nothing is reconciled). Feed `optionId`/`catalogSha256`/
 `decision` into `route.*` of a `prepare` request. A `no-suitable-option`
 answer still prints its receipt but exits 1. The command fails closed before
 any network when the daemon's Jev config or key is missing/disabled, and a
 source checkout invocation needs a daemon home carrying that config (`--paseo-home`
-or `PASEO_HOME`).
+or `PASEO_HOME`). `--schema` prints the request contract without a request
+file or daemon; `--out` persists the response bytes, never the request.
+
+### `routes`
+
+`routes <repository> [--paseo-home <absolute-home>] [--out <path>]` prints
+the repository's effective routing catalog — the same read `prepare`
+validates against:
+
+```bash
+node "$SLP_RT/bin/slp.mjs" routes /absolute/repository [--paseo-home /absolute/paseo-home]
+```
+
+The repository catalog `.paseo-slp/slp-routing.json` wins when present;
+otherwise the user-scope pool
+`<paseoHome>/slp-runtime/state/peer-pool.json` is the declared fallback —
+a malformed repository file is an authoring error, never a fallback
+trigger. Output carries the catalog fields plus `path`, `scope`, `sha256`
+and `tokenConflicts` — feed an option's `id` and the `catalogSha256` into
+a `prepare` request's `route.*`. When the repository catalog wins while a
+live user pool exists, `userPool` plus an advisory `poolDrift` report
+evidence the two sources disagreeing (nothing is reconciled).
+`jevRouting` reports the daemon's Jev routing mode for the resolved home —
+`unconfigured`, `off`, `shadow`, `armed`, or `error` for a
+configured-but-unreadable config — so a Lead sees whether a
+`route-decide` receipt would bind, merely record, or be unavailable
+before planning a delegation. `--out` writes the response bytes to a
+file, never the request.
 
 ### `inventory` / `agents`
 
@@ -706,12 +853,17 @@ packet and tells the new seat not to claim full-candidate coverage for it.
 
 ### `materialize`
 
-`.paseo-slp/` is gitignored local state with absolute paths, so a fresh
-worktree lacks the protocol entirely. `materialize` clones it from an
-existing checkout:
+`.paseo-slp/` is per-repo operating state. A repository may commit
+`workspace-protocol.md` and `slp-routing.json` (this one does) or keep the
+directory gitignored — `notebook.md` stays untracked Supervisor state
+either way. A fresh worktree can still lack the protocol: gitignored
+files never travel with git, a committed copy may postdate the checkout,
+and an older copy may carry absolute source-root paths in its frontmatter.
+`materialize` clones the current files from an existing checkout:
 
 ```bash
-node "$SLP_RT/bin/slp.mjs" materialize /absolute/target-repo --from /absolute/source-repo
+node "$SLP_RT/bin/slp.mjs" materialize /absolute/target-repo --from /absolute/source-repo \
+  [--include <repo-relative-path>]... [--paseo-home <absolute-home>]
 # dry-run by default; add --apply to write
 ```
 
@@ -719,7 +871,14 @@ It copies `.paseo-slp/workspace-protocol.md`, and `.paseo-slp/slp-routing.json`
 (validated) only when the source actually pins one — a source that never
 created a catalog materializes the protocol alone, and the target resolves
 the user-scope pool exactly like the source does. `notebook.md` is
-Supervisor-owned state and is never copied. Absolute source-root paths inside
+Supervisor-owned state and is never copied. Repeatable `--include` stages
+extra repository-relative files verbatim — untracked spec or evidence the
+seat must read; paths are validated before anything is staged (absolute,
+drive-prefixed, backslash, `.`/`..`/empty-segment, NUL, `.paseo-slp`,
+symlink and non-regular entries are refused), deduped by target path, and
+preserved when already present. `--paseo-home` enables the advisory
+catalog↔live-pool drift report on the result (`poolDrift`). Absolute
+source-root paths inside
 the protocol's YAML frontmatter are rebased to the target root (a longer
 sibling path like `<source>-old` is not a boundary match and stays put). Like
 `init`, existing target files are preserved rather than overwritten; each
@@ -810,12 +969,41 @@ Mutation RPCs (activate/reconcile/deactivate/set-language/set-role-routing)
 stay Human-authority and are not exposed. These probes retire when the host
 ships `paseo plugin invoke` or MCP `invoke_plugin_rpc`.
 
+### `tracker`
+
+`tracker <repository> [--paseo-home <absolute-home>]` is the read-only
+beads probe — the command a managed session-entry line names when the
+work tracker is enabled (see
+[Work tracker](#work-tracker-optional)):
+
+```bash
+node "$SLP_RT/bin/slp.mjs" tracker /absolute/repository [--paseo-home /absolute/paseo-home]
+```
+
+It prints `{tracker, repository, enabled, state, bd, workspace, gaps}`.
+`state` is `ready` (a working `bd` and the repository is a beads
+workspace), `uninitialized` (no beads workspace in the repository) or
+`unavailable` (no working `bd` on PATH); `bd` reports `{path, version}`
+when found and `workspace` reports `{path, prefix, redirectedFrom}`.
+Gaps are data — the command exits 0 even when the state is not `ready`,
+and without `--paseo-home` the enablement setting is not read
+(`enabled: null`). The probe runs `bd version` and `bd where --json`
+with `BD_DISABLE_METRICS=1` forced, a 5 s timeout and a bounded buffer;
+it never installs, initializes or repairs anything — a missing or broken
+tracker is a gap to report, not a fault to fix.
+
 ## Testing
 
 ```bash
 npm test
 npm run check
 ```
+
+Inside a managed session, isolate the suite from ambient runtime env —
+`env -i HOME="$HOME" PATH="$PATH" PASEO_HOME="$(mktemp -d)" npm test`, or
+unset the full `SLP_*` set (`SLP_DAEMON_HOME SLP_MANAGED_RUNTIME
+SLP_RUNTIME_ROOT SLP_NODE_BIN`); a partial unset leaks the runtime into
+the suite and fakes failures.
 
 Local checks cover the manager's transaction/recovery logic, the
 materializer, launch-shim generation, config preservation, protocol and the
@@ -871,6 +1059,10 @@ Implementation specification:
 - [Plugin feasibility audit](docs/spec/paseo-plugin-feasibility.md)
 - [Settings-driven providers + hook injection](docs/spec/settings-driven-providers.md) —
   design exploration
+- [Jev-assisted routing](docs/spec/jev-routing-investigation.md) and
+  [routing criteria](docs/spec/routing-criteria.md)
+- [Communication supervision](docs/spec/supervision-integration.md)
+- [Beads work tracker](docs/spec/beads-work-tracker.md)
 
 Reports and investigations:
 

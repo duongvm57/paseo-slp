@@ -3,6 +3,7 @@ import { isAbsolute, join } from 'node:path';
 import { roles, orchestrates } from './profiles.mjs';
 import { files, hash, readJson } from './package.mjs';
 import { spawnKit } from './spawn-kit.mjs';
+import { workTrackerBlock } from './work-tracker.mjs';
 
 // A Role bundle is the exact policy bytes a role receives at session entry.
 // This module owns the load-path contract that docs/reports/guide-coverage.md documents:
@@ -166,7 +167,12 @@ export function roleDelivery(root, role, env = process.env, options = {}) {
   const carrier = options.carrier === false ? '' : carrierBlock(spawnKit(role), policyLocators(policyRoot, role), sessionLocatorCaption);
   return {
     role, parts, orchestrates: orchestrates(role),
-    entry: ({ explicitLanguageState = false } = {}) => entryPrefix + communicationLanguage(env, explicitLanguageState) + assignment + carrier,
+    // The work-tracker pointer is an entry-time helper like managedHelpers:
+    // managed sessions only, after the language line, before the assignment.
+    // Disabled/absent settings emit nothing — the render stays byte-identical
+    // to the pre-feature one. anchor() never carries it.
+    entry: ({ explicitLanguageState = false } = {}) => entryPrefix + communicationLanguage(env, explicitLanguageState)
+      + (managed ? workTrackerBlock(managed.daemonHome, { cli, policyDir, shq }) : '') + assignment + carrier,
     anchor: () => core + recovery + communicationLanguage(env, true) + assignment,
   };
 }

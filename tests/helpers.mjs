@@ -15,7 +15,7 @@ export const config = {
   settings: { source: 'profiles-and-peer-pool',
     peerPool: { version: 1, policy: 'Synthetic test pool', options: [{ id: 'peer-test', provider: 'codex', roles: ['peer'], model: 'test-peer', enabled: true, availability: 'ready', priority: 1, suitableFor: ['tests'], avoidFor: [], notes: 'Synthetic only' }] },
     profiles: ['supervisor', 'lead'].map(role => ({ id: `slp-${role}`, provider: `slp-codex-${role}`, model: `test-${role}` })),
-    providers: ['supervisor', 'lead', 'peer'].map(role => ({ id: `slp-codex-${role}`, status: 'available' })),
+    providers: ['supervisor', 'lead', 'peer'].map(role => ({ id: `slp-codex-${role}`, enabled: true, status: 'available' })),
   }, confirmer: { id: 'test-confirmer', evidence: 'synthetic test data, no live acceptance' },
 };
 export function temporary(t) {

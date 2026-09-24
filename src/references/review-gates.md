@@ -23,11 +23,21 @@ Two default axes, each on its own fresh seat:
   smells); a documented repo standard overrides the baseline; skip
   whatever tooling already enforces.
 
-When the routing catalog offers a ready option from a different provider
-family than the writers, a third **cross-family** seat runs the same axes —
-different model families have different blind spots. A blocked seat reports
-BLOCKED; it is not permission to merge axes into one seat or to skip the
-gate.
+The two split seats are the complete required gate. A **cross-family**
+seat — one reviewer running the same axes from a provider family different
+from the writer's, whose blind spots differ — is a suggested extra for a
+second opinion worth its cost, never a required seat. When routing declines
+the cross-family option or the pool holds no other-family seat, that seat
+reports BLOCKED: the gate does not fail and still runs on the Spec and
+Standards seats. A blocked seat is never permission to merge axes into one
+seat or to skip the gate.
+
+## Verification stays with the Lead
+
+Reviewer seats read and report findings; verification executes — re-running
+the established checks and pinning the candidate snapshot before and after
+review. Verification is the Lead's own duty around the gate, not a council
+seat, and it binds the same frozen candidate the reviewers saw.
 
 ## Smell baseline
 
@@ -58,3 +68,32 @@ protocol may set seats and axes stricter than this floor; it cannot
 loosen a required gate into one seat — a listed-class exception removes
 the requirement rather than relaxing it, and the Lead decides it and
 records the call in the task's brief or reconcile checkpoint.
+
+## Correction loops
+
+Consecutive rounds returning findings of one class — the same root
+mechanism surfacing at different sites — is the signal to stop briefing
+point-fixes: each correction clears one site while the mechanism produces
+the next. Require an enumeration of the mechanism's sites or a refactor of
+the broken invariant instead of another local patch. When the sweep needs
+independent design judgment, or majors in one cluster repeat across two
+consecutive rounds, escalate to a findings committee rather than issue the
+next correction brief.
+
+Committee shape: two seats from provider families different from the
+writer's — and from each other where the pool allows — briefed neutrally on
+the findings history and the frozen candidate; at most two rounds of
+cross-examination between them; the Lead reconciles and records one binding
+decision. The committee analyzes and recommends; it holds no write
+authority over the candidate.
+
+The same cluster surfacing after the invariant refactor marks the class as
+beyond point-fixing: escalate the strategy as an explicit decision, not the
+default loop. The committee itself still holds no write authority. When the
+decision is a direct patch, the Lead issues a separate Engineer assignment
+— agent-scoped under the Lead, naming the write scope and its single
+owner; the assignee may be a former committee member, but the authority
+comes from that assignment, never from membership. The patch forms a new
+candidate that re-freezes and re-enters the gate — frozen identity, split
+seats, Lead verification — without bypass. The alternative branch is a
+property or enumeration test covering the whole matrix.

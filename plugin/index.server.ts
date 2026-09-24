@@ -3,21 +3,25 @@
 // handlers. Lead wires the lane modules here; manager alone owns the mutation
 // mutex, state transitions and connected SDK calls.
 import type { PluginServerContribution } from "@getpaseo/plugin/server";
-import { homedir } from "node:os";
 import { realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { activate, reconcile, deactivate, status, localTarget, catalog, setLanguage, getRoleRouting, setRoleRouting, getPeerPool, setPeerPool, getJev, setJev, setJevKey, testJev } from "./shared/contracts.ts";
+import { activate, reconcile, deactivate, status, localTarget, catalog, setLanguage, getRoleRouting, setRoleRouting, getPeerPool, setPeerPool, getJev, setJev, setJevKey, testJev, getWorkTracker, setWorkTracker } from "./shared/contracts.ts";
+import { getSupervision, setSupervision } from "./shared/supervision.ts";
 import type { Manager } from "./shared/contracts.ts";
 import { loadCatalog } from "./server/provider-catalog.ts";
 import { createManager } from "./server/manager.ts";
 import { createJev } from "./server/jev.ts";
 import { createStateStore } from "./server/state-store.ts";
+import { createSupervisionState } from "./server/supervision/state.ts";
+import { createSupervisionObserver, type SupervisionObserver } from "./server/supervision/observer.ts";
+import { detectDaemonHome, resolveDaemonHome } from "./server/daemon-home.ts";
 import { createMaterializer } from "./server/materializer.ts";
 import { embeddedPayload } from "./server/generated/runtime-payload.ts";
 import { createExecutableResolver } from "./server/executables.ts";
 import { createLauncherBuilder } from "./server/launchers.ts";
 import { createJournal } from "./server/journal.ts";
 import { createRoleInjection } from "./server/role-injection.ts";
+import { createWorkTracker, readWorkTrackerEnabled } from "./server/work-tracker.ts";
 // Host note: this must stay a hoisted function declaration, not a const —
 // the daemon compiler's Hermes interop eagerly copies export values before
 // module bodies run, so `export default const` evaluates to undefined.
@@ -50,6 +54,43 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   server.handle(setJev, input => jev.setJev(input));
   server.handle(setJevKey, input => jev.setJevKey(input));
   server.handle(testJev, input => jev.testJev(input));
+  // Beads work tracker — same plugin-owned state class (no journal/mutex/
+  // authority gate); bd detection is read-only and never fails the RPC.
+  const tracker = createWorkTracker();
+  server.handle(getWorkTracker, input => tracker.getWorkTracker(input));
+  server.handle(setWorkTracker, input => tracker.setWorkTracker(input));
+  // Supervision route config (spec supervision-integration.md §Configuration):
+  // private supervision.json under the SERVED daemon home — the store binds
+  // the state path to the home this process actually serves (PASEO_HOME env),
+  // refusing reads/writes it cannot verify. Agent validation on save goes
+  // through the connected SDK.
+  // Phase B shadow observer: lifecycle hooks capture the minimal normalized
+  // communication synchronously; a serialized plugin-lifetime queue owns SDK
+  // refreshes, Jev HTTP (via the gated supervision resolver) and the bounded
+  // metadata ring. `notify` routes are never observed; no send() exists here.
+  // An unverifiable served home leaves the observer inert (shadow = null).
+  let observer: SupervisionObserver | null = null;
+  try {
+    const served = detectDaemonHome();
+    // Inert unless the served home is VERIFIED: a default-guessed home would
+    // observe the wrong daemon's state files. Only an exported PASEO_HOME
+    // ("env") proves which home this process serves (spec §Configuration:
+    // the local-target value is a prefill, not proof of host-home mapping).
+    if (served.source === "env") {
+      const binding = resolveDaemonHome(
+        { hostId: "local", daemonHome: served.daemonHome },
+        "config.json must be a regular file, not a link",
+      );
+      observer = createSupervisionObserver({ stableRoot: binding.stableRoot });
+    }
+  } catch {
+    observer = null;
+  }
+  const supervision = createSupervisionState({
+    shadow: stableRoot => observer?.shadow(stableRoot) ?? null,
+  });
+  server.handle(getSupervision, input => supervision.getSupervision(input));
+  server.handle(setSupervision, (input, { paseo }) => supervision.setSupervision(input, paseo));
   // Phase 2 (settings-driven-providers.md §6): the hook-family thin aliases
   // need the two halves the sentinel gate cannot supply — role-bundle
   // injection at agent.create and the session-open grant overlay. Both hooks
@@ -59,6 +100,11 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   const journal = createJournal();
   const injection = createRoleInjection({
     readActiveBinding: () => readActiveBinding(journal),
+    // Same daemon-home resolution as readActiveBinding: the setting lives at
+    // <canonical home>/slp-runtime/state/work-tracker.json. A throw here is
+    // converted to "disabled" inside sessionOpen — never aborts an open.
+    readWorkTrackerEnabled: () =>
+      readWorkTrackerEnabled(join(realpathSync(detectDaemonHome().daemonHome), "slp-runtime")),
     // O1: the create-hook re-verifies the published candidate (cached once
     // per sha) before importing its role bundle — same verifyPublished the
     // management plane uses; covers the gate transitively (see
@@ -68,9 +114,21 @@ export default function contribute(server: Parameters<PluginServerContribution>[
   });
   const offAgentCreate = server.before("agent.create", injection.agentCreate);
   const offSessionOpen = server.before("agent.session_open", injection.sessionOpen);
+  // Shadow-observer lifecycle hooks — synchronous capture only; every async
+  // step (refresh, Jev HTTP, ring write) runs on the observer's own queue.
+  const ob = observer;
+  const offCreated = ob === null ? null : server.on("agent.created", (event, { paseo }) => ob.onCreated(event.agent, paseo));
+  const offArchived = ob === null ? null : server.on("agent.archived", (event, { paseo }) => ob.onArchived(event.agent, paseo));
+  const offStarted = ob === null ? null : server.on("agent.turn_started", event => ob.onStart(event));
+  const offEnded = ob === null ? null : server.on("agent.turn_ended", (event, { paseo }) => ob.onTurn(event, paseo));
   return () => {
     offAgentCreate();
     offSessionOpen();
+    offCreated?.();
+    offArchived?.();
+    offStarted?.();
+    offEnded?.();
+    void ob?.stop();
     manager.close();
   };
 }
@@ -93,15 +151,4 @@ function readActiveBinding(journal: ReturnType<typeof createJournal>) {
     nodePath: binding.node.path,
     daemonHome: receipt.target.daemonHome,
   };
-}
-
-// The plugin child inherits the daemon's environment: PASEO_HOME when the
-// daemon exported it, else the platform default ~/.paseo — the same detection
-// the session-usage plugin uses. This is a prefill suggestion only; the
-// §4 verifiedHostHomeMapping acknowledgment remains a human decision.
-function detectDaemonHome() {
-  const raw = (process.env.PASEO_HOME ?? "").trim();
-  if (!raw) return { daemonHome: join(homedir(), ".paseo"), source: "default" as const };
-  const expanded = raw === "~" ? homedir() : raw.startsWith("~/") ? join(homedir(), raw.slice(2)) : raw;
-  return { daemonHome: resolve(expanded), source: "env" as const };
 }

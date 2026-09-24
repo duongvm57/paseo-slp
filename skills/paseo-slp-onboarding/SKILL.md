@@ -97,16 +97,23 @@ term before relying on it.
      shorthand for the split-axis gate: fresh independent Spec and
      Standards seats in parallel, never one merged seat. The default for
      bounded work.
-   - `Engineer → Reviewer + QC` — write, then the checkers run in
-     parallel: the gate's Spec and Standards seats check the work against
-     the spec and the rules, while QC designs cases from the requirement
-     and runs them on the same finished version. For risky or
-     hard-to-reverse work.
-   - `Analyst → Architect → Engineer → Reviewer + QC` — Analyst pins down
-     what "done" means, Architect designs before code, then as the flow
-     above; Tech Writer can update docs in its own scope. For vague-spec
-     or load-bearing work.
+   - `Engineer → Reviewer` with Lead verification — write, then the
+     checkers: the gate's Spec and Standards seats check the work against
+     the spec and the rules, and the Lead verifies execution — re-runs the
+     established checks and pins the snapshot — on the same frozen
+     candidate before and after the gate. For risky or hard-to-reverse
+     work.
+   - `Analyst → Architect → Engineer → Reviewer` with Lead verification —
+     Analyst pins down what "done" means, Architect designs before code,
+     then as the flow above; Tech Writer can update docs in its own scope.
+     For vague-spec or load-bearing work.
    - **Other** — the Human describes a shape of their own.
+
+   Verification is the Lead's own duty around the gate, not a review seat —
+   the default gate has no QC seat. A cross-family second-opinion seat is
+   optional and spawns only when the Lead calls for it; when no
+   other-family option is routable, that seat is BLOCKED and the gate
+   still runs on Spec and Standards.
 
 2. Offer the full disposition menu, grouped by the judgment each kind
    supplies — the assignment defines the job, so name the job a person
@@ -124,8 +131,8 @@ term before relying on it.
      Engineer, Prototyper (throwaway code to answer a design question),
      Debugger (root mechanism for hard bugs).
    - **Falsify the frozen candidate:** Reviewer (Spec and Standards seats
-     in parallel), Security Auditor (threat model), QC (cases from the
-     spec), Performance Auditor (measure the claim), and any `…Auditor`
+     in parallel), Security Auditor (threat model), Performance Auditor
+     (measure the claim), and any `…Auditor`
      domain lens (accessibility, i18n, compliance).
    - **Audit the evidence chain:** Proof Auditor — did the commands run,
      does the output prove the claim, is the candidate identity real.
@@ -139,8 +146,8 @@ term before relying on it.
    decision in plain words before continuing: what work actually lands
    here and which kinds carry real risk; which shape fits each kind — or
    whether one default covers the repo; which domain skills each chosen
-   disposition should use (a test-design or E2E skill for QC, a writing
-   skill for Tech Writer); which decisions stay Human-only.
+   disposition should use (a test-design or E2E skill for test-authoring
+   seats, a writing skill for Tech Writer); which decisions stay Human-only.
 
 4. Record the confirmed shapes — a repo default plus exceptions, or
    per-class rows — in the Task classes and gates table and each
@@ -215,7 +222,9 @@ route: { optionId, catalogSha256 } to inspect launch arguments without creating
 an agent — or `prepare <request.json> --check` to get every failing stage named
 in one report (missing profile/provider/model, stale hash) with exit 1 on
 failure. `prepare --schema` prints the request contract from a source checkout;
-`prepare <request.json> --emit create` prints the exact create_agent record.
+`prepare <request.json> --emit create` prints the audit artifact
+`{ modeId, modeIdSource, create }` — `create` is the exact create_agent
+record.
 Verify the wrapper/model/settings match the option. Include profiles
 only if useful for discovery; they never select or override the Peer runtime.
 
@@ -245,6 +254,28 @@ imports an explicitly selected source only into a missing catalog. The user-scop
 pool is the only declared fallback, resolved automatically when the repository
 has none; never read another repository's catalog. No automatic import from retired
 profile bindings occurs during host upgrade.
+
+## Optional beads work tracker
+
+The work tracker is opt-in and off by default; onboarding only sets it up when
+the Human asks for durable task state. It needs the Human-installed `bd` CLI
+(beads) — check `bd version`; when absent, hand the Human the install commands
+(`brew install beads`, `npm i -g @beads/bd`, or the upstream `install.sh`)
+rather than installing it silently — SLP detects but never installs,
+initializes, upgrades or configures beads itself. Each participating repository
+is initialized once under explicit authority with
+`bd init --skip-agents --skip-hooks` [verify exact flag names against the
+installed `bd`] — a per-repo step, never run by an SLP seat during a task.
+
+Enable it in the SLP Manager's Work tracker card (the card probes `bd` and
+shows the detected version/path or the install hint). The toggle writes
+`slp-runtime/state/work-tracker.json`; disabling is the same switch. Once
+enabled, every managed seat sees a `Work tracker:` line at session entry and
+reads `src/references/work-tracking.md` for the procedure: probe first, a
+missing or uninitialized `bd` is a recorded gap rather than a block, the
+assignment remains the authority, and beads state is evidence — never the
+control plane. Seats write under their own `BEADS_ACTOR` (hook-family seats
+receive it automatically; Devin seats pass `--actor` per command).
 
 ## Verify and hand back
 

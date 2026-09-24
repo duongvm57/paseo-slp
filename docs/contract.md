@@ -24,7 +24,8 @@ Local installation/transport checks do not constitute workflow acceptance.
 | src/references/governance.md | Supervisor scope, causal notebook, authorized recovery and policy evolution. |
 | src/references/anti-patterns.md | All 20 guide §9 hypotheses with evidence, questions and bounded responses; reached on audit/drift triggers. |
 | src/references/provider-routing.md | Supervisor/Lead profile selection, Peer pool selection, validation and handoff procedure. |
-| src/references/review-gates.md | Review gate structure: parallel axis-split seats (Spec vs Standards, optional cross-family), smell baseline, neutral briefs, non-merged aggregation. |
+| src/references/review-gates.md | Review gate structure: parallel axis-split seats (Spec vs Standards; cross-family seat optional, never required), Lead-owned verification distinct from review seats, smell baseline, neutral briefs, non-merged aggregation and the repeated-class correction-loop escalation. |
+| src/references/work-tracking.md | Conditional beads (`bd`) work-graph doctrine — self-gates on the session-entry `Work tracker: beads (enabled in SLP settings)` pointer: probe first, unavailable/uninitialized is a recorded gap never a block, evidence-not-control-plane boundaries, the one-writer-per-scope table (Supervisor roots / Lead children / a seat's own issue), `BEADS_ACTOR`/`--actor` attribution, and recovery/handback rules. SLP never installs, initializes or configures beads. |
 | src/routing.mjs | Resolve the repository catalog, falling back to the plugin-owned user-scope pool at `<paseoHome>/slp-runtime/state/peer-pool.json` when absent; bind a Lead-selected option with fresh hash and availability checks. `optionExclusions` is the single eligibility predicate — closed-vocabulary tokens (`disabled`, `availability:<state>`, `role-not-listed`) shared by enforcement and Jev candidate generation. `validateCatalog` stays shape-only apart from normalizing the legacy `optionIds` quota-fallback list in place on read (≤1 → `optionId`, >1 fails closed — wave 6) and refusing the Jev decline sentinel as an option id — a shape-level collision; the semantic layer reports a reserved standard-seat id whose tokens diverge from the package set as a Token conflict on every read, and `catalogBinding` refuses to bind one. `catalogBinding` verifies a supplied Jev receipt offline — including the vocabulary version it was issued under — and requires one when the daemon arms `jev.capabilities.routing`. |
 | src/routing-vocabulary.mjs | Canonical routing-criteria vocabulary (docs/spec/routing-criteria.md): the four axes, the 16 standard `axis:value` tokens with definitions, the 12 reserved standard-seat ids with package token sets, the §4 reading helpers and the English Jev guidance — all versioned under `ROUTING_VOCABULARY_VERSION`. `plugin/shared/routing-vocabulary.ts` is its Manager-side mirror; neither side can import the other, so tests pin identical data. |
 | src/jev.mjs | Jev (TypeSafe System One) bounded-decision transport — never an ACP provider. Per-daemon config/key resolution (fail closed, all toggles default off) over two provider kinds: `openrouter` (Decisions API, pinned `typesafe/jev-1.13`, `provider.allow_fallbacks: false` on the wire) and `typesafe` (first-party `POST {baseUrl}/v1/systemone`, pinned `jev-1.13.0`, no provider field; baseUrl may be a custom https origin+path prefix) — each with its own model pin and baseUrl rule, calls with ~5s timeout and at most one bounded retry, typed-answer validation, credential-shaped-string redaction before send, and decision-receipt build/verify with the pin chosen by the receipt's provider kind. Receipts prove consistency, not authenticity; confidence is recorded, never a threshold. |
@@ -42,7 +43,8 @@ Local installation/transport checks do not constitute workflow acceptance.
 | src/notebook.mjs | Read-only locator for a repository's active governance notebook: resolves the repository's git common dir — the property linking a worktree back to its repository — then lists Supervisor agents (provider containing `supervisor`, or a Supervisor-titled state file) whose `cwd` shares it. Output is candidates only, sorted by lastActivityAt, each with notebook path and `notebookExists`; broken agent cwds become gaps. Never copies or mutates notebook content, and picks no authoritative candidate — governance stays per-checkout. |
 | src/package.mjs | Package identity, exclusive staging, integrity checks and stable Git work snapshot; untracked nested Git work-tree roots are snapshotted recursively under `nested`, sub-repos can carry their own `nested`, and index gitlinks record `{path, kind:"gitlink", indexOid, headOid, state}` with non-clean states listed in top-level `incomplete`. |
 | src/runtime-state.mjs | Read-only plugin-state probes (H13 workaround): `localTarget` mirrors the plugin's daemon-home detection; `runtimeStatus` recomputes the file-derivable parts of the daemon `status` view — receipt, owned providers/profiles, runtime and launcher integrity, config-drift presence — and reports daemon-only views (live conflicts, family availability) as gaps, never guesses. The Jev probe reports `hasKey`/`keyPermissionsOk` only — key material never enters output. Fails closed on corrupt plugin state. Mutation RPCs are Human-authority and are not exposed. Retire when the host ships `paseo plugin invoke` or MCP `invoke_plugin_rpc`. |
-| bin/slp.mjs | Install/upgrade/preview, verify/uninstall, init, materialize, routes, prepare/handoff, inventory, agents, monitor, notebook, identity, snapshot, instructions (raw session-entry bundle bytes on stdout, provenance on stderr), route-decide (the only path that calls Jev — explicit invocation, network, emits a receipt; prepare and prepare --check stay offline), status and local-target (read-only plugin-state probes) entrypoints. |
+| src/work-tracker.mjs | Beads (`bd`) detection and enablement — read-only probes only (`bd version`, `bd where --json` with forced `BD_DISABLE_METRICS=1`, 5 s timeout, 64 KiB cap): never installs, initializes, upgrades or configures beads, and a missing or broken tracker is a gap in the result, never a throw or a spawn blocker. `readWorkTrackerSetting` reads `<daemonHome>/slp-runtime/state/work-tracker.json` (mirrored by `plugin/server/work-tracker.ts` — absent = disabled, corrupt/foreign = disabled plus a surfaced error, non-ENOENT errors propagate). `workTrackerBlock` renders the managed session-entry pointer (silent when disabled, one gap line when unreadable); `beadsSeatEnv` supplies the hook-family `BEADS_ACTOR`/BD_* overlay. |
+| bin/slp.mjs | Install/upgrade/preview, verify/uninstall, init, materialize, routes, prepare/handoff, inventory, agents, monitor, notebook, identity, snapshot, instructions (raw session-entry bundle bytes on stdout, provenance on stderr), route-decide (the only path that calls Jev — explicit invocation, network, emits a receipt; prepare and prepare --check stay offline), status and local-target (read-only plugin-state probes), and tracker (the read-only beads probe — prints the probe JSON and exits 0 even when not `ready`) entrypoints. |
 | skills/paseo-slp-e2e/SKILL.md | Single-session full-suite execution procedure; requires the source checkout and authorized Paseo actors. |
 | e2e/evidence.mjs | One contract per evidence kind: what may enter the ledger and what discharges the kind's requirement at seal. |
 | e2e/criteria.mjs | U1–U7 as code, each naming the evidence kinds that can support it; the mapping a reviewer previously held in their head. |
@@ -92,7 +94,13 @@ in paseo-binding.json retiredProfiles for review. Other profiles remain untouche
 The user-scope Peer pool is plugin-owned mutable state at
 <paseo-home>/slp-runtime/state/peer-pool.json (mode 0600, atomic
 whole-file writes under a sha256 compare-and-swap; the manager surface is
-its sole writer). Standalone host install/upgrade/uninstall and plugin
+its sole writer). The beads work-tracker toggle is plugin-owned mutable
+state of the same class at
+<paseo-home>/slp-runtime/state/work-tracker.json (mode 0600, atomic
+whole-file write; the manager surface via `set-work-tracker` is its sole
+writer). An absent file means disabled — upgrading SLP never changes the
+behavior of an existing installation — and a corrupt or foreign file
+degrades to disabled plus a surfaced gap, never a spawn block. Standalone host install/upgrade/uninstall and plugin
 activation/deactivation create, edit, and delete no routing catalogs —
 a repository catalog exists only where `init --routing-from` imported an
 explicitly chosen file. A legacy <paseo-home>/slp-routing.json is read for
@@ -236,6 +244,37 @@ Confidence lands on the receipt as evidence, never as a routing threshold,
 and receipts prove consistency, not cryptographic authenticity. Accepted
 risk (recorded): the key file is 0600 inside the daemon home, yet any
 same-user process can read it — daemon-home integrity is the boundary.
+
+Communication supervision is a second opt-in capability, bound per Lead
+route in <daemonHome>/slp-runtime/state/supervision.json (0600, whole-file
+sha256 CAS through the supervision card — its sole writer). Off by default;
+configuring Jev never enables a route, and a route enables nothing until
+mode is explicitly shadow. When enabled, the plugin's lifecycle hooks
+(agent.created/archived/turn_started/turn_ended) synchronously capture
+normalized send_agent_prompt evidence for the bound Lead's direct Peers,
+and a serialized plugin-owned queue evaluates each Peer handback through
+Jev's three-question assessment — a second Jev consumer that requires
+capabilities.supervision in addition to enabled. The detector observes
+communication only: it never infers authority, certifies artifacts,
+mutates assignments, or prompts any agent, and every missing or
+unverifiable input resolves to unknown rather than drift. Persisted output
+is a bounded metadata ring (state/supervision-cases.json, ≤200 entries,
+≤30 days — fingerprints, ids, counts, flags, assessment summaries; never
+message bodies or keys); open cases and the queue are process-local and
+are not replayed after a restart. External data/cost: shadow evaluation
+sends captured brief/handback/room-message content to the configured Jev
+endpoint, so communication leaves the host and each evaluation is a paid
+provider call. Mode notify is schema-valid but has no delivery
+implementation — notification is a separate Human gate. Provider coverage:
+only the codex normalized send shape is verified against a real timeline;
+pi/devin/claude fixtures are mapper-derived, so their sends stay uncertain
+(family-shape-unverified) and their cases resolve unknown until real
+fixtures exist — devin additionally drops the MCP result body upstream.
+Because no machine-readable report-recipient signal exists on this host,
+report-route-unverifiable is set on every case, so all cases currently
+resolve unknown before any Jev call — accepted, pending the structured
+report-recipient decision. Live E2E validation has not run; see
+docs/spec/supervision-integration.md.
 
 prepare accepts repository, workspaceId, assignment and role. Supervisor/Lead use
 fresh profiles/providers; Peer uses providers and route.optionId/catalogSha256.

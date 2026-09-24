@@ -101,15 +101,22 @@ are starting shapes, not a limit on which dispositions may appear:
   `Reviewer` is shorthand for a split-axis gate: a Spec seat checks the
   work against the spec and a Standards seat checks it against the rules,
   in parallel. The default for bounded work.
-- `Engineer → Reviewer + QC` — write, then three checkers in parallel: the
-  Spec and Standards seats above, plus QC, which designs cases from the
-  requirement and runs them on the same finished version. For risky or
+- `Engineer → Reviewer` with Lead verification — write, then the
+  checkers: the Spec and Standards seats above, and the Lead verifies
+  execution — re-runs the established checks and pins the snapshot — on
+  the same frozen candidate before and after the gate. For risky or
   hard-to-reverse work.
-- `Analyst → Architect → Engineer → Reviewer + QC` — Analyst pins down
-  what "done" means, Architect designs before code, then as the flow
-  above; Tech Writer can update docs in its own scope. For vague-spec or
-  load-bearing work.
+- `Analyst → Architect → Engineer → Reviewer` with Lead verification —
+  Analyst pins down what "done" means, Architect designs before code,
+  then as the flow above; Tech Writer can update docs in its own scope.
+  For vague-spec or load-bearing work.
 - **Other** — the Human describes a shape of their own.
+
+Verification is the Lead's own duty around the gate, not a review seat —
+the default gate has no QC seat. A cross-family second-opinion seat is
+optional and spawns only when the Lead calls for it; when no other-family
+option is routable, that seat is BLOCKED and the gate still runs on Spec
+and Standards.
 
 Offer the full disposition menu, grouped by the judgment each kind
 supplies — the assignment defines the job, so name the job a person would
@@ -127,9 +134,9 @@ disposition an assignment needs, on any flow:
   Engineer, Prototyper (throwaway code to answer a design question),
   Debugger (root mechanism for hard bugs).
 - **Falsify the frozen candidate:** Reviewer (Spec and Standards seats in
-  parallel), Security Auditor (threat model), QC (cases from the spec),
-  Performance Auditor (measure the claim), and any `…Auditor` domain lens
-  (accessibility, i18n, compliance).
+  parallel), Security Auditor (threat model), Performance Auditor
+  (measure the claim), and any `…Auditor` domain lens (accessibility,
+  i18n, compliance).
 - **Audit the evidence chain:** Proof Auditor — did the commands run, does
   the output prove the claim, is the candidate identity real.
 
@@ -142,8 +149,8 @@ Then grill one group at a time, each option on its own line, restating
 every decision in plain words before continuing: what work actually lands
 here and which kinds carry real risk; which shape fits each kind — or
 whether one default covers the repo; which domain skills each chosen
-disposition should use (a test-design or E2E skill for QC, a writing
-skill for Tech Writer); which decisions stay Human-only.
+disposition should use (a test-design or E2E skill for test-authoring
+seats, a writing skill for Tech Writer); which decisions stay Human-only.
 
 The interview is complete when every work kind the Human named has a shape
 and gate, each chosen disposition has its skills noted, and the Human has

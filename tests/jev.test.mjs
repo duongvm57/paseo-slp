@@ -215,7 +215,7 @@ test('route-decide asks Jev over the eligible set and returns a verifiable recei
     calls.push({ url, init });
     return okFetch(choiceAnswer('luna-code'))(url, init);
   };
-  const result = await routeDecide({ repository: repo, brief: { task: 'implement the jev transport', tags: ['implementation'] } }, { home, fetchImpl });
+  const result = await routeDecide({ repository: repo, brief: 'implement the jev transport' }, { home, fetchImpl });
   assert.equal(result.optionId, 'luna-code');
   assert.equal(result.declined, false);
   assert.equal(result.catalogSha256, sha256);
@@ -242,7 +242,8 @@ test('route-decide asks Jev over the eligible set and returns a verifiable recei
   assert.match(criteria['luna-code'], /thinking: provider default/, 'criteria prose renders null as provider default');
   assert.match(criteria['luna-reason'], /thinking: xhigh/, 'criteria prose renders the catalog thinking id');
   assert.match(body.questions[ROUTE_DECISION_QUESTION].instructions, /thinking option/, 'instructions name the thinking field');
-  assert.equal(body.state.task.task, 'implement the jev transport');
+  assert.equal(body.state.task, 'implement the jev transport');
+  assert.deepEqual(result.warnings, []);
   assert.equal(verifyReceipt(result.decision), true);
   assert.equal(result.decision.model, 'typesafe/jev-1.13');
   assert.equal(result.decision.resolvedModel, 'typesafe/jev-1.13-20260917');
@@ -251,6 +252,32 @@ test('route-decide asks Jev over the eligible set and returns a verifiable recei
   assert.equal(result.decision.attempts, 1);
   assert.ok(typeof result.decision.issuedAt === 'string' && result.decision.latencyMs >= 0);
   assert.equal(result.decision.answers[ROUTE_DECISION_QUESTION].confidence, 0.9);
+});
+
+test('verbatim suitability tokens inside the brief are flagged, never stripped or classified by the caller', async t => {
+  const { repo, home } = fixture(t);
+  catalogFixture(repo);
+  jevHome(home);
+  let body;
+  const fetchImpl = async (url, init) => { body = JSON.parse(init.body); return okFetch(choiceAnswer('luna-code'))(); };
+  // The brief ships verbatim — tokens stay in the text — but every standard
+  // token hit is flagged for the caller and the instructions tell Jev to read
+  // them as unverified mentions, so quoting the vocabulary cannot
+  // pre-classify the task.
+  const brief = 'change the guard in work:change style; domain:software and domain:security obligations, plus a nonstandard axis:custom label';
+  const result = await routeDecide({ repository: repo, brief }, { home, fetchImpl });
+  assert.equal(result.optionId, 'luna-code');
+  assert.equal(result.warnings.length, 1);
+  assert.match(result.warnings[0], /3 verbatim suitability token\(s\) \(work:change, domain:software, domain:security\)/);
+  assert.match(result.warnings[0], /unverified mentions/);
+  assert.equal(body.state.task, brief, 'the brief text ships verbatim — nothing is rewritten or stripped');
+  const instructions = body.questions[ROUTE_DECISION_QUESTION].instructions;
+  assert.match(instructions, /unverified mentions, not the caller's classification/);
+  // A nonstandard axis:value string is free text — flagged only when it is a
+  // verbatim standard token.
+  const clean = await routeDecide({ repository: repo, brief: 'migrate the queue consumer to the new topic naming' }, { home, fetchImpl });
+  assert.deepEqual(clean.warnings, []);
+  assert.equal(verifyReceipt(result.decision), true);
 });
 
 test('route-decide records the decline verdict instead of inventing a seat', async t => {
@@ -262,6 +289,26 @@ test('route-decide records the decline verdict instead of inventing a seat', asy
   assert.equal(result.optionId, null);
   assert.equal(verifyReceipt(result.decision), true);
   assert.equal(result.decision.answers[ROUTE_DECISION_QUESTION].choice, ROUTE_DECLINE_CANDIDATE);
+});
+
+test('route-decide surfaces live-pool drift warnings alongside the receipt', async t => {
+  const { repo, home } = fixture(t);
+  catalogFixture(repo);
+  jevHome(home);
+  // The live pool disagrees on the chosen seat's model — the repository
+  // catalog already won the binding; the decision run reports the drift.
+  const pool = testCatalog();
+  pool.options.find(option => option.id === 'luna-code').model = 'gpt-5.6-drift';
+  writeFileSync(join(home, 'slp-runtime', 'state', 'peer-pool.json'), json(pool));
+  const result = await routeDecide({ repository: repo, brief: 'x' }, { home, fetchImpl: okFetch(choiceAnswer('luna-code')) });
+  assert.equal(result.optionId, 'luna-code');
+  assert.equal(result.poolDrift.identical, false);
+  assert.equal(result.poolDrift.userPoolPath, join(home, 'slp-runtime', 'state', 'peer-pool.json'));
+  assert.match(result.warnings.find(w => w.includes('differs from the live user-scope pool')), /"gpt-5.6-luna" \(catalog\) vs "gpt-5.6-drift" \(pool\)/);
+  // Identical sources leave no drift warning.
+  writeFileSync(join(home, 'slp-runtime', 'state', 'peer-pool.json'), json(testCatalog()));
+  const clean = await routeDecide({ repository: repo, brief: 'x' }, { home, fetchImpl: okFetch(choiceAnswer('luna-code')) });
+  assert.deepEqual(clean.warnings, []);
 });
 
 test('route-decide fails closed when every option is excluded', async t => {
@@ -284,6 +331,19 @@ test('route-decide rejects invalid input and a decline-sentinel collision', asyn
   catalogFixture(repo);
   jevHome(home);
   await assert.rejects(routeDecide({ repository: repo }, { home }), /requires brief/);
+  await assert.rejects(routeDecide({ repository: repo, brief: '   ' }, { home }), /requires brief/);
+  // Structured briefs were removed (F10): object/array forms — including a
+  // signals field that pre-classifies with Jev's own vocabulary — are
+  // request-invalid, and the error says why.
+  for (const brief of [
+    { task: 'implement the jev transport', tags: ['implementation'] },
+    { task: 'change the guard', signals: ['work:change', 'depth:bounded'] },
+    ['work:change', 'depth:bounded'],
+    { task: 'x' },
+  ]) {
+    await assert.rejects(routeDecide({ repository: repo, brief }, { home }),
+      error => error instanceof JevError && error.code === 'jev-request-invalid' && /nonempty string of raw task/.test(error.message));
+  }
   await assert.rejects(routeDecide({ repository: join(dir, 'missing'), brief: 'x' }, { home }), /absolute repository/);
   await assert.rejects(routeDecide({ repository: repo, brief: 'x', role: 'peer-architect' }, { home }), /role must be one of/);
   const catalog = testCatalog();
@@ -425,9 +485,9 @@ test('redaction guard fires before any network call and never echoes the secret'
   const fetchImpl = async () => { fetched = true; return okFetch(choiceAnswer('luna-code'))(); };
   const briefs = [
     'uses key ' + fakeOrKey('abcdef0123456789abcdef'),
-    { task: 'see Bearer abcdefghijklmnopqrstuvwxyz012345' },
-    { task: 'log ' + fakePem('OPENSSH') },
-    [fakeAwsKey()],
+    'see Bearer abcdefghijklmnopqrstuvwxyz012345',
+    'log ' + fakePem('OPENSSH'),
+    fakeAwsKey(),
   ];
   for (const brief of briefs) {
     try {
@@ -441,14 +501,7 @@ test('redaction guard fires before any network call and never echoes the secret'
   // Credential at object KEY position is blocked too — and the key name itself
   // never reaches the error (position is reported at the parent path only).
   const keyPosition = fakeOrKey('keypositionsecret00');
-  try {
-    await routeDecide({ repository: repo, brief: { [keyPosition]: 'x', task: 'x' } }, { home, fetchImpl });
-    assert.fail('expected jev-redacted for a credential-shaped key');
-  } catch (error) {
-    assert.equal(error.code, 'jev-redacted');
-    assert.match(error.message, /object key/);
-    assert.ok(!error.message.includes(keyPosition), 'the key name never reaches the error path');
-  }
+  assert.throws(() => assertRedacted({ state: { [keyPosition]: 'x', task: 'x' } }), error => error.code === 'jev-redacted' && /object key/.test(error.message) && !error.message.includes(keyPosition));
   assert.throws(() => assertRedacted({ state: { [fakeAwsKey()]: 'v' } }), /object key.*at state/);
   assert.equal(fetched, false);
   assert.doesNotThrow(() => assertRedacted({ state: 'an ordinary brief', questions: { q: { instructions: 'pick', criteria: { a: 'x' } } } }));

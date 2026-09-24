@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { install, json, hash } from '../src/package.mjs';
 import { launchPlan, handoffPlan, launchCheck, requestSchema } from '../src/launch.mjs';
 import { readCatalog } from '../src/routing.mjs';
@@ -32,20 +32,50 @@ function catalogFixture(dir) {
   return { optionId: 'devin-peer', catalogSha256: readCatalog(dir).sha256 };
 }
 
-test('plan surfaces the intended modeId and warns when the binding lacks one', t => {
+const NO_MODE_WARNING = 'no modeId resolved (none in the binding and no agent_mode in .paseo-slp/workspace-protocol.md) — the spawn would inherit the caller default and cross-family inheritance fails at the host; pin modeId in the pool option or saved profile, or ask the Human';
+
+test('plan surfaces the intended modeId with its provenance and warns when nothing resolves one', t => {
   const { dir, installed } = fixture(t);
   const base = { ...request, repository: dir, role: 'lead' };
   const withMode = launchPlan(installed, { ...base, binding: { ...piBinding, modeId: 'bypass' } });
   assert.equal(withMode.modeId, 'bypass');
+  assert.equal(withMode.modeIdSource, 'binding');
   assert.equal(withMode.warnings, undefined);
   assert.deepEqual(withMode.create.settings, { modeId: 'bypass', features: {} });
   const noMode = launchPlan(installed, { ...base, binding: piBinding });
   assert.equal(noMode.modeId, null);
-  assert.deepEqual(noMode.warnings, ['no modeId in binding — spawn inherits caller default']);
+  assert.equal(noMode.modeIdSource, 'none');
+  assert.deepEqual(noMode.warnings, [NO_MODE_WARNING]);
   assert.deepEqual(noMode.create.settings, { features: {} });
   // The create.* argument record is unchanged: only additive top-level fields.
   assert.deepEqual(Object.keys(noMode.create).sort(),
     ['initialPrompt', 'notifyOnFinish', 'provider', 'settings', 'title', 'workspaceId']);
+});
+
+test('agent_mode frontmatter is the declared mode fallback — emitted, sourced and warned', t => {
+  const { dir, installed } = fixture(t);
+  // A bundle-level pin always wins over the repository's declared default.
+  mkdirSync(join(dir, '.paseo-slp'), { recursive: true });
+  writeFileSync(join(dir, '.paseo-slp', 'workspace-protocol.md'),
+    '---\nversion: \'1\'\nagent_mode: \'full-access\'\n---\n\n# Protocol\n');
+  const pinned = launchPlan(installed, { ...request, repository: dir, role: 'lead', binding: { ...piBinding, modeId: 'bypass' } });
+  assert.equal(pinned.modeId, 'bypass');
+  assert.equal(pinned.modeIdSource, 'binding');
+  assert.equal(pinned.warnings, undefined);
+  // No pin → the protocol's agent_mode resolves into create.settings.modeId.
+  const fallback = launchPlan(installed, { ...request, repository: dir, role: 'lead', binding: piBinding });
+  assert.equal(fallback.modeId, 'full-access');
+  assert.equal(fallback.modeIdSource, 'agent_mode');
+  assert.deepEqual(fallback.create.settings, { modeId: 'full-access', features: {} });
+  assert.equal(fallback.warnings.length, 1);
+  assert.match(fallback.warnings[0], /agent_mode, not pinned in the binding/);
+  // An empty agent_mode is the same as absent — nothing resolves to 'none'.
+  writeFileSync(join(dir, '.paseo-slp', 'workspace-protocol.md'),
+    '---\nversion: \'1\'\nagent_mode: \'\'\n---\n\n# Protocol\n');
+  const none = launchPlan(installed, { ...request, repository: dir, role: 'lead', binding: piBinding });
+  assert.equal(none.modeId, null);
+  assert.equal(none.modeIdSource, 'none');
+  assert.deepEqual(none.warnings, [NO_MODE_WARNING]);
 });
 
 test('prepare on a non-installed root names the root and the installed CLI, never raw ENOENT', t => {
@@ -137,6 +167,55 @@ test('the prompt carrier is dropped only when the target wrapper provably inject
   assert.equal(alien.create.initialPrompt.split('Policy locators —').length - 1, 1);
 });
 
+test('verbatim provider shape is enforced — added, removed or forged fields refuse verification', t => {
+  const { dir, installed } = fixture(t);
+  const route = catalogFixture(dir);
+  const base = { ...request, repository: dir, role: 'peer', route };
+  const observed = { id: 'slp-devin-peer', enabled: true, status: 'available' };
+  const plan = launchPlan(installed, { ...base, providers: [observed] });
+  assert.match(plan.create.provider, /^slp-devin-peer\//);
+  // Added field — a forged marker is outside the live record vocabulary.
+  assert.throws(() => launchPlan(installed, { ...base, providers: [{ ...observed, forged: true }] }),
+    /unexpected field\(s\) 'forged'.*verbatim/);
+  // Removed required field — a stripped `enabled` fails the fail-closed gate
+  // (undefined is not true).
+  const { enabled: _enabled, ...noEnabled } = observed;
+  assert.throws(() => launchPlan(installed, { ...base, providers: [noEnabled] }),
+    /enabled===true.*observed enabled: undefined/);
+  // A forged provenance key cannot dress a static read as live evidence.
+  assert.throws(() => launchPlan(installed, { ...base, providers: [{ ...observed, provenance: 'live' }] }),
+    /unexpected field\(s\) 'provenance'/);
+  // Edited extends still refuses on the family check.
+  assert.throws(() => launchPlan(installed, { ...base, providers: [{ ...observed, extends: 'pi' }] }),
+    /'extends' \(pi\) does not match the 'devin' transport/);
+  // Advisory path: an explicit binding keeps the prompt carrier when the
+  // observed entry fails the shape check.
+  const wrapped = { ...piBinding, provider: 'slp-codex-lead' };
+  const forged = launchPlan(installed, { ...request, repository: dir, role: 'lead', binding: wrapped,
+    providers: [{ id: 'slp-codex-lead', enabled: true, status: 'available', forged: true }] });
+  assert.equal(forged.create.initialPrompt.split('Policy locators —').length - 1, 1);
+});
+
+test('verifyProvider fails closed on enabled — null (unknown) refuses like false', t => {
+  const { dir, installed } = fixture(t);
+  const route = catalogFixture(dir);
+  const base = { ...request, repository: dir, role: 'peer', route };
+  // Tri-state null from inventory normalization means "unknown", never
+  // enabled — it must not pass as live-verified.
+  assert.throws(() => launchPlan(installed, { ...base,
+    providers: [{ id: 'slp-devin-peer', enabled: null, status: 'available' }] }),
+    /enabled===true.*observed enabled: null/);
+  assert.throws(() => launchPlan(installed, { ...base,
+    providers: [{ id: 'slp-devin-peer', enabled: false, status: 'available' }] }),
+    /observed enabled: false/);
+  // Advisory path: enabled:null keeps the prompt carrier — the provider is
+  // unproven, so the fallback block stays.
+  const wrapped = { ...piBinding, provider: 'slp-codex-lead' };
+  const unknown = launchPlan(installed, { ...request, repository: dir, role: 'lead', binding: wrapped,
+    providers: [{ id: 'slp-codex-lead', enabled: null, status: 'available' }] });
+  assert.equal(unknown.create.initialPrompt.split('Policy locators —').length - 1, 1);
+});
+
 test('orientation carries mechanical locators only', t => {
   const { dir, installed } = fixture(t);
   const lead = launchPlan(installed, { ...request, repository: dir, role: 'lead', binding: piBinding });
@@ -154,12 +233,13 @@ test('orientation carries mechanical locators only', t => {
   for (const rel of ['src/common.md', 'src/roles/lead.md', 'src/delegation.md',
     'src/references/delegation-formation.md', 'src/references/delegation-execution.md',
     'src/references/anti-patterns.md', 'src/references/governance.md', 'src/references/monitoring.md',
-    'src/references/orchestration.md', 'src/references/provider-routing.md', 'src/references/review-gates.md']) {
+    'src/references/orchestration.md', 'src/references/provider-routing.md', 'src/references/review-gates.md',
+    'src/references/work-tracking.md']) {
     const entry = byPath[join(installed, rel)];
     const bytes = readFileSync(join(installed, rel));
     assert.deepEqual(entry, { path: join(installed, rel), bytes: bytes.length, sha256: hash(bytes) });
   }
-  assert.equal(lead.orientation.policyBytes.length, 11);
+  assert.equal(lead.orientation.policyBytes.length, 12);
   // Carrier: locators must survive into initialPrompt on the fallback path
   // (stock piBinding is not an injecting wrapper, so the carrier stays).
   assert.ok(lead.create.initialPrompt.includes(`- ${join(installed, 'src/common.md')} — `));
@@ -172,7 +252,7 @@ test('orientation carries mechanical locators only', t => {
   const peerPaths = peer.orientation.policyBytes.map(entry => entry.path);
   assert.ok(peerPaths.includes(join(installed, 'src/roles/peer.md')));
   assert.ok(!peerPaths.includes(join(installed, 'src/delegation.md')));
-  assert.equal(peer.orientation.policyBytes.length, 10);
+  assert.equal(peer.orientation.policyBytes.length, 11);
 });
 
 test('launchCheck names every failing stage and separates profile completeness from live provider verification', t => {
@@ -207,7 +287,7 @@ test('launchCheck names every failing stage and separates profile completeness f
   const noMode = launchCheck(installed, { ...request, repository: dir, role: 'lead',
     profiles: [{ id: 'slp-lead', provider: 'slp-codex-lead', model: 'gpt-5.6-luna' }], providers: goodProviders });
   assert.equal(noMode.ok, true);
-  assert.deepEqual(noMode.warnings, ['no modeId in binding — spawn inherits caller default']);
+  assert.deepEqual(noMode.warnings, [NO_MODE_WARNING]);
   // Stale catalog hash is reported before create on the Peer path, while the
   // wrapper's live state is still reported separately.
   const peer = launchCheck(installed, { ...request, repository: dir, role: 'peer', providers,
@@ -267,13 +347,80 @@ test('handoff plans carry modeId, spawnKit and orientation alongside the packet'
     state: 'paused on snapshot', previousOwner: { settled: true, evidence: 'cancel receipt' }, resources: [] };
   const plan = handoffPlan(installed, { ...request, role: 'lead', binding: piBinding, handoff });
   assert.equal(plan.modeId, null);
-  assert.deepEqual(plan.warnings, ['no modeId in binding — spawn inherits caller default']);
+  assert.equal(plan.modeIdSource, 'none');
+  assert.deepEqual(plan.warnings, [NO_MODE_WARNING]);
   assert.equal(plan.spawnKit.tools.length, 12);
   assert.equal(plan.orientation.installedRoot, installed);
   assert.equal(plan.handoff.previousAgentId, 'old-lead');
   // Handed-off seats receive the carrier inside the prompt too.
   assert.ok(plan.create.initialPrompt.includes('- create_agent(title: string'));
   assert.match(plan.create.initialPrompt, /Provider handoff evidence:/);
+});
+
+test('prepare paths are tracker-agnostic: off renders identical, on adds one line (T3)', t => {
+  const { dir, installed } = fixture(t);
+  // The prepare CLI must run from an installed root — source checkouts refuse.
+  const slp = join(installed, 'bin/slp.mjs');
+  const home = join(dir, 'home');
+  mkdirSync(join(home, 'slp-runtime/state'), { recursive: true });
+  const setting = join(home, 'slp-runtime/state/work-tracker.json');
+  const baseEnv = { PATH: process.env.PATH };
+  const managed = {
+    ...baseEnv,
+    SLP_MANAGED_RUNTIME: '1', SLP_NODE_BIN: process.execPath,
+    SLP_RUNTIME_ROOT: installed, SLP_DAEMON_HOME: home,
+  };
+  // A stock provider inlines the full role instructions into the prompt —
+  // the only prepare path where session-entry helpers (language, tracker)
+  // can appear. slp-* wrappers render the short role tag instead and inject
+  // the bundle through the hook, which is a different entry surface.
+  const request = { repository: dir, workspaceId: 'wks-t3', assignment: 'x', role: 'lead',
+    binding: { provider: 'pi', model: 'm' } };
+  const reqFile = join(dir, 'req.json');
+  writeFileSync(reqFile, json(request));
+  const handoff = { previousAgentId: 'a', reason: 'r', authority: 'Human', state: 'settled',
+    previousOwner: { settled: true, evidence: 'e' }, resources: [] };
+  const handoffFile = join(dir, 'handoff.json');
+  // handoffPacket snapshots the repository — point it at a real git root.
+  writeFileSync(handoffFile, json({ ...request, repository: root, handoff }));
+  const run = (args, env) => spawnSync(process.execPath, [slp, ...args], { env, encoding: 'utf8' });
+  const trackerLine = /Work tracker:[^\n]*\n/;
+
+  for (const [command, file] of [['prepare', reqFile], ['prepare-handoff', handoffFile]]) {
+    // Unmanaged seat env: the setting file is never consulted.
+    rmSync(setting, { force: true });
+    const unmanagedOff = run([command, file], baseEnv);
+    writeFileSync(setting, json({ schemaVersion: 1, tracker: 'beads', enabled: true }));
+    const unmanagedOn = run([command, file], baseEnv);
+    assert.equal(unmanagedOn.stdout, unmanagedOff.stdout, `${command}: unmanaged output must not change`);
+    assert.ok(!unmanagedOff.stdout.includes('Work tracker:'));
+    // Managed seat env: enabled adds exactly the tracker line inside the
+    // rendered instructions; every other plan byte is identical.
+    rmSync(setting, { force: true });
+    const off = run([command, file], managed);
+    writeFileSync(setting, json({ schemaVersion: 1, tracker: 'beads', enabled: true }));
+    const on = run([command, file], managed);
+    assert.equal(off.status, 0, off.stderr);
+    assert.equal(on.status, 0, on.stderr);
+    const offPlan = JSON.parse(off.stdout);
+    const onPlan = JSON.parse(on.stdout);
+    assert.match(onPlan.create.initialPrompt, trackerLine);
+    assert.ok(!offPlan.create.initialPrompt.includes('Work tracker:'));
+    const stripped = onPlan.create.initialPrompt.replace(trackerLine, '');
+    assert.deepEqual({ ...onPlan, create: { ...onPlan.create, initialPrompt: stripped } }, offPlan,
+      `${command}: enabled adds only the tracker line`);
+    // Explicit disabled is byte-identical to absent.
+    writeFileSync(setting, json({ schemaVersion: 1, tracker: 'beads', enabled: false }));
+    assert.equal(run([command, file], managed).stdout, off.stdout, `${command}: explicit off == absent`);
+  }
+  // prepare --check emits the stage report — never role instructions — so the
+  // bytes are identical whether the tracker is on or off.
+  rmSync(setting, { force: true });
+  const checkOff = run(['prepare', '--check', reqFile], managed);
+  writeFileSync(setting, json({ schemaVersion: 1, tracker: 'beads', enabled: true }));
+  const checkOn = run(['prepare', '--check', reqFile], managed);
+  assert.equal(checkOn.stdout, checkOff.stdout, 'prepare --check output is identical on/off');
+  assert.equal(checkOn.status, checkOff.status);
 });
 
 test('handoff packet surfaces unproven submodule scope as an evidence gap, not a refusal', t => {

@@ -17,7 +17,8 @@ import {
   Text,
   View,
 } from "react-native";
-import { activate, catalog, deactivate, reconcile, status, localTarget, setLanguage, getRoleRouting, setRoleRouting, getJev, setJev, setJevKey, testJev, getPeerPool, setPeerPool } from "../shared/contracts.ts";
+import { activate, catalog, deactivate, reconcile, status, localTarget, setLanguage, getRoleRouting, setRoleRouting, getJev, setJev, setJevKey, testJev, getPeerPool, setPeerPool, getWorkTracker, setWorkTracker } from "../shared/contracts.ts";
+import { getSupervision, setSupervision } from "../shared/supervision.ts";
 import { FAMILY_IDS, FAMILY_LABEL, FAMILY_PICKER_ORDER } from "../shared/families.ts";
 import type { RoleName } from "../shared/families.ts";
 import { PEER_SEAT_ARCHETYPES } from "../shared/archetypes.ts";
@@ -84,6 +85,8 @@ import { useLanguageCard } from "./cards/language.ts";
 import { useRoutingCard, RoutingCard } from "./cards/routing.tsx";
 import { useJevCard, JevCard, JEV_KIND_DEFAULT, JEV_KIND_LABEL } from "./cards/jev.tsx";
 import { usePeerPoolCard, PeerPoolCard } from "./cards/peer-pool.tsx";
+import { useWorkTrackerCard, WorkTrackerCard } from "./cards/work-tracker.tsx";
+import { useSupervisionCard, SupervisionCard } from "./cards/supervision.tsx";
 
 // Family knowledge derives from the shared registry (shared/families.ts):
 // FAMILY_IDS is the canonical order, FAMILY_PICKER_ORDER the picker order
@@ -97,6 +100,7 @@ const MANAGER_SECTIONS = [
   { id: "profiles", label: "Role profiles" },
   { id: "pool", label: "Peer pool" },
   { id: "language", label: "Communication language" },
+  { id: "tracker", label: "Work tracker" },
   { id: "jev", label: "Jev" },
 ] as const;
 type ManagerSectionId = (typeof MANAGER_SECTIONS)[number]["id"];
@@ -137,7 +141,11 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
   const callSetJevKey = useRpc(setJevKey);
   const callTestJev = useRpc(testJev);
   const callGetPeerPool = useRpc(getPeerPool);
+  const callGetWorkTracker = useRpc(getWorkTracker);
+  const callSetWorkTracker = useRpc(setWorkTracker);
   const callSetPeerPool = useRpc(setPeerPool);
+  const callGetSupervision = useRpc(getSupervision);
+  const callSetSupervision = useRpc(setSupervision);
 
   const [detectedHome, setDetectedHome] = useState<string | null>(null);
   const [homeOverride, setHomeOverride] = useState("");
@@ -301,6 +309,18 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     update,
   });
 
+  // The work-tracker card owns its view, once-per-target load and the
+  // immediate toggle — cards/work-tracker.tsx. Per-daemon-home like Jev:
+  // shows whenever a target resolves, independent of activation state.
+  const tracker = useWorkTrackerCard({
+    target,
+    targetKey: key,
+    sameTarget,
+    callGetWorkTracker,
+    callSetWorkTracker,
+    update,
+  });
+
   // The peer-pool card owns its snapshot/draft, seat handlers, editor UI
   // state and save/reload/import/copy — cards/peer-pool.tsx. `form` and
   // `featureKeys` feed the catalog-demand computation below; the caches,
@@ -315,6 +335,18 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
     featureSets,
     featuresLoadingFor,
     scrollFocusNode,
+    update,
+  });
+
+  // The supervision card owns the route snapshot, per-route draft, CAS
+  // save/reload and the Jev-capability gate readout — cards/supervision.tsx.
+  // It loads with the target (independent of binding, like the Jev card).
+  const supervision = useSupervisionCard({
+    target,
+    targetKey: key,
+    isCurrentKey,
+    callGetSupervision,
+    callSetSupervision,
     update,
   });
 
@@ -833,6 +865,15 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
       ) : null}
 
       {target ? (
+        // Work tracker is per-daemon-home like Jev — shows whenever a target
+        // resolves. Detect, never install: the card reports bd presence and
+        // the toggle only; there is deliberately no install/init button.
+        <View style={sectionShown("tracker")}>
+        <WorkTrackerCard colors={colors} target={target} tracker={tracker} />
+        </View>
+      ) : null}
+
+      {target ? (
         // Jev config is per-daemon-home — independent of activation state, so
         // the card shows whenever a target resolves (unlike the binding-bound
         // cards above). Provider kind selects the wire contract (OpenRouter
@@ -843,6 +884,12 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
         // value.
         <View style={sectionShown("jev")}>
         <JevCard colors={colors} target={target} jev={jev} />
+        {/* Supervision routes are per-daemon-home plugin state (same class as
+            the Jev card) — one explicit Lead→Supervisor route per Lead ID,
+            CAS-guarded whole-file saves, served-home verified server-side.
+            The card mounts inside the Jev section: supervision assessments
+            run through the same Jev config this section edits. */}
+        <SupervisionCard colors={colors} target={target} jev={jev} supervision={supervision} />
         </View>
       ) : null}
 

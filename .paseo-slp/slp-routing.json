@@ -1,0 +1,145 @@
+{
+  "version": 1,
+  "policy": "Human maintains model suitability and quota. Lead chooses within the current assignment budget.",
+  "quotaFallback": {
+    "enabled": true,
+    "optionId": "standard-coding"
+  },
+  "options": [
+    {
+      "id": "lightweight-recon",
+      "provider": "devin",
+      "roles": [
+        "peer"
+      ],
+      "model": "swe-2-medium",
+      "enabled": true,
+      "availability": "ready",
+      "suitableFor": [
+        "work:enumerate",
+        "depth:mechanical",
+        "depth:bounded"
+      ],
+      "avoidFor": [
+        "work:change",
+        "work:design",
+        "work:verify",
+        "depth:open"
+      ],
+      "notes": "Package-managed seat: collects and summarizes against already-clear requirements — inventory, extraction, triage by an existing rubric. Fill provider and model from discovery; a cheap model is usually enough."
+    },
+    {
+      "id": "standard-coding",
+      "provider": "devin",
+      "roles": [
+        "peer"
+      ],
+      "model": "swe-2-max",
+      "enabled": true,
+      "availability": "ready",
+      "suitableFor": [
+        "work:change",
+        "depth:mechanical",
+        "depth:bounded",
+        "domain:software",
+        "domain:tests"
+      ],
+      "avoidFor": [
+        "work:design",
+        "depth:open"
+      ],
+      "notes": "Package-managed seat: produces software changes or test sets under settled acceptance — the default work seat. Deciding a new contract or investigating an open mechanism belongs to a more suitable seat."
+    },
+    {
+      "id": "deep-reasoning",
+      "provider": "devin",
+      "roles": [
+        "peer"
+      ],
+      "model": "swe-2-max",
+      "enabled": true,
+      "availability": "ready",
+      "suitableFor": [
+        "work:investigate",
+        "work:design",
+        "work:verify",
+        "depth:bounded",
+        "depth:open"
+      ],
+      "avoidFor": [
+        "depth:mechanical"
+      ],
+      "notes": "Package-managed seat: judgment-heavy reasoning, design and verification — pick a stronger model or higher reasoning effort. Warns on fully rule-following (mechanical) work to avoid spending a heavy runtime."
+    },
+    {
+      "id": "independent-second-opinion",
+      "provider": "codex",
+      "roles": [
+        "peer"
+      ],
+      "model": "gpt-5.6-luna",
+      "enabled": true,
+      "availability": "ready",
+      "thinkingOptionId": "max",
+      "suitableFor": [
+        "work:verify"
+      ],
+      "avoidFor": [],
+      "notes": "Package-managed seat: an independent verdict on an existing candidate or proposal. Independence is checked against the writer per assignment — prefer a different provider family than the implementation seats."
+    },
+    {
+      "id": "autonomous-long-running",
+      "provider": "devin",
+      "roles": [
+        "peer"
+      ],
+      "model": "swe-2-high",
+      "enabled": true,
+      "availability": "ready",
+      "suitableFor": [
+        "flow:staged"
+      ],
+      "avoidFor": [
+        "flow:direct"
+      ],
+      "notes": "Package-managed seat: work that must pass checkpoints and continue after each intermediate result (staged flow). A Devin-family seat requires a swe-2 model id — fill the exact variant from discovery."
+    },
+    {
+      "id": "security-review",
+      "provider": "devin",
+      "roles": [
+        "peer"
+      ],
+      "model": "swe-2-max",
+      "enabled": true,
+      "availability": "ready",
+      "suitableFor": [
+        "work:design",
+        "work:verify",
+        "domain:security"
+      ],
+      "avoidFor": [
+        "work:change"
+      ],
+      "notes": "Package-managed seat: builds threat models or verifies security on a candidate — auth boundaries, abuse cases, secrets, dependency risk. Fixing the product is a separate change assignment."
+    },
+    {
+      "id": "spec-docs-writing",
+      "provider": "devin",
+      "roles": [
+        "peer"
+      ],
+      "model": "swe-2-high",
+      "enabled": true,
+      "availability": "ready",
+      "suitableFor": [
+        "work:change",
+        "domain:prose"
+      ],
+      "avoidFor": [
+        "domain:software"
+      ],
+      "notes": "Package-managed seat: documentation and specs recording existing decisions — prose quality and accuracy are the product. Work that must itself decide software behavior routes by that technical obligation first."
+    }
+  ]
+}

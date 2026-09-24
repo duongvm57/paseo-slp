@@ -138,10 +138,66 @@ test('materialize preserves existing target files and the CLI reports per-file r
   assert.equal(protocol.applied, true);
   for (const [argv, pattern] of [
     [[cli, 'materialize', target], /materialize requires --from/],
-    [[cli, 'materialize', target, '--from', source, '--paseo-home', dir], /--paseo-home is not valid for materialize/],
+    [[cli, 'materialize', target, '--from', source, '--check'], /--check is not valid for materialize/],
   ]) {
     const fail = spawnSync(process.execPath, argv, { encoding: 'utf8' });
     assert.equal(fail.status, 1, argv.join(' '));
     assert.match(fail.stderr, pattern);
   }
+});
+
+test('materialize --include stages extra repository files verbatim, deduped and preserved', t => {
+  const dir = fixture(t), source = slpCheckout(join(dir, 'source')), target = join(dir, 'target');
+  mkdirSync(target);
+  // Untracked spec/evidence the seats must see — outside .paseo-slp/, nested
+  // directories and a file also reachable through its parent dir.
+  mkdirSync(join(source, 'docs/spec'), { recursive: true });
+  writeFileSync(join(source, 'docs/spec/supervision.md'), '# Spec\n');
+  writeFileSync(join(source, 'docs/spec/routing.md'), '# Routing\n');
+  writeFileSync(join(source, 'notes.txt'), 'loose file\n');
+  const plan = materializeWorkspace(source, target, false, { includePaths: ['docs/spec', 'docs/spec/routing.md', 'notes.txt'] });
+  assert.equal(plan.applied, false);
+  assert.equal(plan.files.length, 5, 'protocol + catalog + 3 unique include targets');
+  const applied = materializeWorkspace(source, target, true, { includePaths: ['docs/spec', 'docs/spec/routing.md', 'notes.txt'] });
+  assert.equal(applied.applied, true);
+  assert.equal(readFileSync(join(target, 'docs/spec/supervision.md'), 'utf8'), '# Spec\n');
+  assert.equal(readFileSync(join(target, 'docs/spec/routing.md'), 'utf8'), '# Routing\n');
+  assert.equal(readFileSync(join(target, 'notes.txt'), 'utf8'), 'loose file\n');
+  // Existing target files win — includes never overwrite.
+  writeFileSync(join(target, 'notes.txt'), 'target-owned\n');
+  const again = materializeWorkspace(source, target, true, { includePaths: ['notes.txt'] });
+  assert.equal(again.files.find(file => file.path.endsWith('notes.txt')).preserved, true);
+  assert.equal(readFileSync(join(target, 'notes.txt'), 'utf8'), 'target-owned\n');
+  // Path discipline: traversal, absolute forms, backslashes, dot segments and
+  // the managed .paseo-slp tree are all refused before any write.
+  for (const bad of ['../escape', '/abs/path', 'a//b', './x', 'a/../b', '.paseo-slp/x.md', 'a\\b']) {
+    assert.throws(() => materializeWorkspace(source, target, false, { includePaths: [bad] }), /Invalid include path|managed by materialize/, bad);
+  }
+  assert.throws(() => materializeWorkspace(source, target, false, { includePaths: ['missing.md'] }), /does not exist/);
+  // The CLI wires repeatable --include flags into the same plan.
+  const cli = join(root, 'bin/slp.mjs');
+  const target2 = join(dir, 'target2'); mkdirSync(target2);
+  const out = JSON.parse(execFileSync(process.execPath, [cli, 'materialize', target2, '--from', source, '--include', 'docs/spec', '--include', 'notes.txt', '--apply'], { encoding: 'utf8' }));
+  assert.equal(out.files.length, 5);
+  assert.equal(readFileSync(join(target2, 'docs/spec/routing.md'), 'utf8'), '# Routing\n');
+});
+
+test('materialize reports repository catalog vs live user-scope pool drift', t => {
+  const dir = fixture(t), source = slpCheckout(join(dir, 'source')), target = join(dir, 'target');
+  mkdirSync(target);
+  const catalog = { version: 1, policy: 'test pool', options: [
+    { id: 'seat-a', provider: 'devin', roles: ['peer'], model: 'swe-2-max', modeId: 'bypass', enabled: true, availability: 'ready', suitableFor: [], avoidFor: [], notes: 'devin seat' },
+  ] };
+  writeFileSync(join(source, '.paseo-slp/slp-routing.json'), json(catalog));
+  // Live pool under a fake daemon home: same seat id, different model — the
+  // run-5 drift shape. home=null skips the probe entirely.
+  const home = join(dir, 'home');
+  mkdirSync(join(home, 'slp-runtime/state'), { recursive: true });
+  const pool = { ...catalog, options: [{ ...catalog.options[0], model: 'swe-2-high' }] };
+  writeFileSync(join(home, 'slp-runtime/state/peer-pool.json'), json(pool));
+  const drifted = materializeWorkspace(source, target, false, { home });
+  assert.equal(drifted.poolDrift.identical, false);
+  assert.deepEqual(drifted.poolDrift.options[0].fields.model, { catalog: 'swe-2-max', pool: 'swe-2-high' });
+  const clean = materializeWorkspace(source, target, false);
+  assert.equal(clean.poolDrift, undefined);
 });

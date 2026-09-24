@@ -71,11 +71,80 @@ export function routingPath(repository) {
 
 export const paseoHome = () => process.env.PASEO_HOME || join(homedir(), '.paseo');
 
+// The live user-scope pool the plugin owns (<home>/slp-runtime/state/
+// peer-pool.json). Probed advisory-only: absent → null; a file that fails
+// JSON/schema validation still reports its sha256 and the parse error so the
+// disagreement surfaces as evidence rather than reading as no pool.
+export function probeUserPool(home) {
+  const path = join(home, 'slp-runtime', 'state', 'peer-pool.json');
+  let stat;
+  try { stat = lstatSync(path); }
+  catch (error) { if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return null; throw error; }
+  if (!stat.isFile()) return null;
+  const bytes = readFileSync(path, 'utf8');
+  const sha256 = hash(bytes);
+  try { return { path, sha256, catalog: validateCatalog(JSON.parse(bytes)) }; }
+  catch (error) { return { path, sha256, error: error instanceof Error ? error.message : String(error) }; }
+}
+
+// Runtime bundle fields compared for drift — the fields a bound seat ships
+// to the host (notes, priority, enabled/availability and suitability are
+// Lead-facing or eligibility inputs, not the runtime bundle).
+const DRIFT_FIELDS = ['provider', 'model', 'thinkingOptionId', 'modeId', 'features'];
+
+// Cross-check a resolved repository catalog against the probed live pool
+// (catalog.userPool, attached by readCatalog). The repository catalog still
+// wins the binding — drift is reported, never reconciled: the pool file is
+// Human-owned. Returns null when there is no live pool to compare.
+export function catalogPoolDrift(catalog) {
+  const pool = catalog.userPool;
+  if (pool == null) return null;
+  const base = { userPoolPath: pool.path, catalogSha256: catalog.sha256, userPoolSha256: pool.sha256, identical: catalog.sha256 === pool.sha256 };
+  if (pool.error != null) return { ...base, error: pool.error };
+  const poolById = new Map(pool.catalog.options.map(option => [option.id, option]));
+  const catalogById = new Map(catalog.options.map(option => [option.id, option]));
+  const options = [];
+  for (const option of catalog.options) {
+    const seat = poolById.get(option.id);
+    if (!seat) { options.push({ id: option.id, onlyIn: 'catalog' }); continue; }
+    const fields = Object.fromEntries(DRIFT_FIELDS
+      .filter(key => JSON.stringify(option[key] ?? null) !== JSON.stringify(seat[key] ?? null))
+      .map(key => [key, { catalog: option[key] ?? null, pool: seat[key] ?? null }]));
+    if (Object.keys(fields).length) options.push({ id: option.id, fields });
+  }
+  for (const option of pool.catalog.options) {
+    if (!catalogById.has(option.id)) options.push({ id: option.id, onlyIn: 'pool' });
+  }
+  return { ...base, options };
+}
+
+// Advisory drift lines for one chosen option (or the pool file itself when it
+// cannot be compared). The repository catalog wins either way — the warnings
+// name the disagreement so callers reconcile the two Human-owned sources
+// instead of silently binding a seat the runtime pool no longer matches.
+export function poolDriftWarnings(drift, optionId) {
+  if (drift == null) return [];
+  const warnings = [];
+  if (drift.error != null) {
+    warnings.push(`live user-scope pool ${drift.userPoolPath} could not be compared (${drift.error}) — the repository catalog wins the binding; reconcile the two sources`);
+  }
+  const entry = optionId == null ? null : drift.options?.find(item => item.id === optionId);
+  if (entry?.fields != null) {
+    const detail = Object.entries(entry.fields).map(([key, pair]) => `${key} ${JSON.stringify(pair.catalog)} (catalog) vs ${JSON.stringify(pair.pool)} (pool)`).join('; ');
+    warnings.push(`routing option ${optionId} differs from the live user-scope pool ${drift.userPoolPath}: ${detail} — the repository catalog wins the binding; reconcile the two sources`);
+  } else if (entry?.onlyIn === 'catalog') {
+    warnings.push(`routing option ${optionId} has no seat in the live user-scope pool ${drift.userPoolPath} — the repository catalog wins the binding; reconcile the two sources`);
+  }
+  return warnings;
+}
+
 // Resolution is skill-style: the repository catalog wins when present, otherwise
 // the plugin-owned user-scope pool <paseoHome>/slp-runtime/state/peer-pool.json
 // is the declared fallback. A malformed or structurally invalid repository file
 // is an authoring error, not a fallback trigger; never substitute another
-// repository's catalog.
+// repository's catalog. When the repository catalog wins, the live pool (if
+// any) is attached as `userPool` plus its `poolDrift` report — advisory
+// evidence of the two sources disagreeing, never a rewrite of either file.
 export function readCatalog(repository, home = paseoHome()) {
   if (typeof home !== 'string' || !isAbsolute(home)) throw new Error('Absolute Paseo home required');
   // ENOENT and ENOTDIR both mean "no catalog at this path" — the user-scope
@@ -101,7 +170,11 @@ export function readCatalog(repository, home = paseoHome()) {
   // used as a standard seat. It is a content error, not a schema rejection:
   // validateCatalog stays shape-only so custom seats keep free strings.
   const tokenConflicts = catalogTokenConflicts(catalog);
-  return { ...catalog, path, scope, sha256: hash(bytes), tokenConflicts };
+  const sha256 = hash(bytes);
+  const userPool = scope === 'repository' ? probeUserPool(home) : null;
+  const result = { ...catalog, path, scope, sha256, tokenConflicts };
+  if (userPool) Object.assign(result, { userPool, poolDrift: catalogPoolDrift({ ...result, userPool }) });
+  return result;
 }
 
 // Deterministic eligibility — one predicate, two consumers (view and
@@ -203,8 +276,13 @@ export function catalogBinding(repository, role, providers, route, home) {
   verifyProvider(providers, provider, () => option.provider, provider);
   const jev = { required: jevMode, decision: decision != null ? 'verified' : 'none' };
   if (decision != null) Object.assign(jev, { jevChoice, declined: jevDeclined });
+  // The repository catalog already won this binding — drift with the live
+  // user-scope pool is reported so the two Human-owned sources get
+  // reconciled instead of silently diverging.
+  const warnings = poolDriftWarnings(catalog.poolDrift, option.id);
   return {
     binding: { provider, model: option.model, modeId: option.modeId, thinkingOptionId: option.thinkingOptionId, features: structuredClone(option.features ?? {}) },
-    routing: { catalogFile: catalog.path, catalogScope: catalog.scope, catalogSha256: catalog.sha256, optionId: option.id, jev, ...(route.quotaFallbackFrom ? { quotaFallbackFrom: route.quotaFallbackFrom } : {}) },
+    routing: { catalogFile: catalog.path, catalogScope: catalog.scope, catalogSha256: catalog.sha256, optionId: option.id, jev, ...(route.quotaFallbackFrom ? { quotaFallbackFrom: route.quotaFallbackFrom } : {}), ...(catalog.poolDrift ? { poolDrift: catalog.poolDrift } : {}) },
+    warnings,
   };
 }

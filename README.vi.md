@@ -17,13 +17,11 @@ spawn kit, policy locators kèm sha256 và managed runtime helpers — phần
 này được inject lúc tạo session và không hiện trong tab agent. Chi tiết ở
 [Kiến trúc plugin](docs/architecture.md).
 
-## Vì sao SLP
+## Vì sao subagent chưa đủ
 
-Paseo đã sẵn tạo agent, workspace, parentage và timeline — nó giải quyết
-*tạo tiến trình*. Phần nó không quyết là ownership, phán đoán độc lập,
-kỷ luật phối hợp và nghiệm thu. Thêm agent mà thiếu những thứ đó chỉ tăng
-niềm tin và hoạt động, không tăng correctness. Công việc đa-agent thường
-hỏng theo vài cách quen thuộc:
+API subagent giải quyết tạo tiến trình. Nó không giải quyết ownership,
+phán đoán độc lập, phối hợp, hay nghiệm thu. Trong thực tế, code đa-agent
+thường hỏng theo vài cách quen thuộc:
 
 - **Authority gradient** — parent đưa sẵn câu trả lời thì nhận lại sự đồng
   thuận, không phải sự kiểm tra premise.
@@ -31,22 +29,28 @@ hỏng theo vài cách quen thuộc:
   worker thành tay đánh máy; dependency thật lộ ra muộn dưới dạng vá.
 - **Attention dilution** — coordinator vừa điều phối vừa implement sẽ mất
   tầm nhìn toàn dự án về ownership, dependency và lifecycle.
-- **Song song không an toàn** — hai agent cùng một checkout ghi đè cùng
-  file đang thay đổi; workspace hay agent ID không phải filesystem
-  isolation.
-- **Review thiên lệch hoặc cũ** — reviewer thừa hưởng framing của tác
-  giả, hoặc review file vẫn đang thay đổi, sẽ duyệt một candidate không
-  còn tồn tại.
-- **Hoàn thành giả** — `finished`, `idle`, "xong" và test xanh là tín
-  hiệu, không phải bằng chứng rằng đúng artifact đã được đúng authority
-  review.
-- **Tách control plane** — worker tự spawn worker không ai biết khiến
-  không hệ nào biết ai sở hữu task, workspace hay đợt sửa.
+- **Unsafe parallelism** (song song không an toàn) — hai agent cùng một
+  checkout ghi đè cùng file đang thay đổi; workspace hay agent ID không
+  phải filesystem isolation.
+- **Biased or stale review** (review thiên lệch hoặc cũ) — reviewer thừa
+  hưởng framing của tác giả, hoặc review file vẫn đang thay đổi, sẽ duyệt
+  một candidate không còn tồn tại.
+- **False completion** (hoàn thành giả) — `finished`, `idle`, "xong" và
+  test xanh là tín hiệu, không phải bằng chứng rằng đúng artifact đã được
+  đúng authority review.
+- **Split control planes** (tách control plane) — worker tự spawn worker
+  không ai biết khiến không hệ nào biết ai sở hữu task, workspace hay đợt
+  sửa.
 
-SLP trả lời bằng cách tách *các loại phán đoán* thay vì xây một thứ bậc
-cứng `Supervisor > Lead > Peer`:
+Thêm agent có thể tăng niềm tin và hoạt động mà không tăng correctness.
 
-![Mô hình role Paseo SLP: Human giữ intent, ranh giới và nghiệm thu cuối; Supervisor quan sát workflow của Lead nhưng không tham gia execution; Lead điều phối project và giao outcome hữu hạn cho các Peer Engineer, Architect, Reviewer và Scout độc lập. Peer trả evidence, challenge, dependency request hoặc BLOCKED về Lead.](docs/images/slp-role-model.png)
+## Vì sao SLP
+
+Paseo đã sẵn tạo agent, workspace, parentage và timeline — phần *tạo tiến
+trình*. SLP trả lời phần còn lại bằng cách tách *các loại phán đoán* thay
+vì xây một thứ bậc cứng `Supervisor > Lead > Peer`:
+
+![Mô hình role Paseo SLP: Human giữ intent, ranh giới và nghiệm thu cuối; Supervisor quan sát workflow của Lead nhưng không tham gia execution; Lead điều phối project và giao outcome hữu hạn cho các Peer Engineer, Architect, Reviewer và Scout độc lập. Peer trả evidence, challenge, dependency request hoặc BLOCKED về Lead; hai instrument Jev advisory tùy chọn — routing advisory tap vào kênh delegation và supervision assessment tap vào kênh evidence-return — không bao giờ là ghế của team.](docs/images/slp-role-model.svg)
 
 - **Human** giữ owner authority: intent, trade-off quan trọng, grant đặc
   biệt, thay đổi protocol và nghiệm thu cuối.
@@ -151,22 +155,42 @@ của từng family và conflicts trước khi đổi gì.
 
 ## Nâng cấp
 
-Bản cài qua Git được cập nhật qua Paseo:
+Đường update tới daemon phụ thuộc kiểu cài plugin — `paseo plugin ls` hiển
+thị kiểu source của từng plugin.
+
+**Git source bám default branch** — cài bằng
+`paseo plugin install duongvm57/paseo-slp-plugin:plugin` không kèm `--ref` —
+cập nhật qua Paseo:
 
 ```bash
-paseo plugin update paseo-slp
+paseo plugin update paseo-slp          # review rồi áp dụng
+paseo plugin update paseo-slp --check  # chỉ xem update, không cài
+paseo plugin update paseo-slp --yes    # áp dụng không hỏi
 ```
 
-Daemon fetch source, build checkout và reload plugin. Kích hoạt lại sẽ rebind
-candidate hiện hành và build lại launchers. Session đang chạy giữ provider
-process cho tới khi xong; đường dẫn launch shim ổn định qua các candidate.
-Rebind là idempotent: kích hoạt hai lần cùng một candidate là `no-op`.
+Daemon fetch source, build checkout và reload plugin.
 
-Bản cài directory thì reload:
+**Git source pin theo ref** — cài với `--ref v0.2.0` — đứng yên trên tag
+hay commit đó; `update` thường không có gì mới để đưa vì pin không tự dịch
+chuyển. Chọn ref mới tường minh:
+
+```bash
+paseo plugin update paseo-slp --ref v0.3.0
+```
+
+**Directory install** — `paseo plugin install /absolute/path/to/plugin` —
+trỏ thẳng vào checkout đó thay vì một bản copy do daemon quản lý. Code mới
+vào khi chính checkout thay đổi (pull, merge, hoặc sửa tay); build lại và
+reload để chạy code mới:
 
 ```bash
 paseo plugin reload paseo-slp
 ```
+
+Kích hoạt lại sẽ rebind
+candidate hiện hành và build lại launchers. Session đang chạy giữ provider
+process cho tới khi xong; đường dẫn launch shim ổn định qua các candidate.
+Rebind là idempotent: kích hoạt hai lần cùng một candidate là `no-op`.
 
 ## Gỡ kích hoạt và gỡ cài
 
@@ -494,6 +518,84 @@ quyền Human nên escalate thay vì thử lại. Degradation có kiểm soát: 
 bật, một outage chỉ chặn delegation phụ thuộc; Human tắt capability trong
 Manager card và phán đoán của Lead được khôi phục.
 
+### Giám sát giao tiếp (tùy chọn, chỉ shadow)
+
+Supervision là capability opt-in thứ hai, cấu hình theo từng route Lead trong
+section **Supervision** nằm trong tab **Jev** của SLP Manager
+(`<daemonHome>/slp-runtime/state/supervision.json`, 0600, sha256 CAS). Mặc
+định tắt — chỉ cấu hình Jev không bao giờ bật quan sát, và một route không
+làm gì cho tới khi mode được đặt tường minh là `shadow` *và* Jev được bật
+với `capabilities.supervision`.
+
+Ở mode shadow, các lifecycle hook của plugin
+(`agent.created`/`archived`/`turn_started`/`turn_ended`) capture evidence
+`send_agent_prompt` đã chuẩn hóa cho các Peer trực tiếp của Lead được bind,
+và một hàng đợi tuần tự do plugin sở hữu đánh giá từng handback của Peer qua
+bộ ba câu hỏi Jev (chất lượng brief, chất lượng handback, cách Lead xử lý).
+Detector chỉ quan sát — không suy ra authority, không chứng nhận artifact,
+không sửa assignment, không nhắn cho agent nào; mọi đầu vào thiếu hoặc không
+verify được đều thành `unknown`, không bao giờ là vi phạm. Card Manager liệt
+kê metadata quan sát có giới hạn (trạng thái case, id, timestamp, đếm, cờ
+visibility, tóm tắt assessment) — body message và key không bao giờ được
+persist.
+
+Dữ liệu ra ngoài và chi phí: một lượt đánh giá shadow gửi nội dung
+brief/handback/room-message đã capture tới Jev endpoint đã cấu hình, nghĩa là
+giao tiếp đó rời khỏi host và mỗi lượt đánh giá là một provider call trả
+phí. Coverage provider: chỉ codex có send shape đã verify trên timeline
+thật; fixture pi, devin và claude là mapper-derived nên send của chúng bị
+demote thành uncertain (`family-shape-unverified`) và mọi case của các
+family đó giữ `unknown` tới khi có fixture timeline thật. Trên devin, bản
+ghi upstream còn drop body của MCP result nên evidence giao hàng vẫn yếu
+hơn cả sau khi fixture được verify. Trên host này
+`report-route-unverifiable` luôn được set — không có report-recipient
+signal đọc được bằng máy — nên hiện mọi case resolve `unknown` trước cả
+Jev call; xem open decision về structured report-recipient label. Các case
+đang mở và hàng đợi event là process-local: restart plugin không replay
+các turn đã lỡ, chỉ ring metadata tồn tại (`state/supervision-cases.json`,
+≤200 mục hoặc 30 ngày).
+
+Mode `notify` hợp lệ về schema nhưng không có đường delivery trong build
+này — notification là một gate Human riêng. Validation E2E live chưa chạy;
+thiết kế, evidence và các quyết định còn mở nằm trong
+[docs/spec/supervision-integration.md](docs/spec/supervision-integration.md).
+
+### Work tracker (tùy chọn)
+
+Work tracker cho các seat một đồ thị công việc bền tùy chọn — beads
+(`bd`), một issue database theo từng repository — để chúng truy vấn trạng
+thái task (issue, assignee, dependency, comment) thay vì dựng lại từ hội
+thoại, và đọc lại sau resume hay compaction. Nó là evidence, không bao giờ
+là control plane: chỉ Paseo sở hữu lifecycle, parentage, notification và
+report route; một claim hay assignee không cấp write scope; trạng thái
+tracker không bao giờ thay thế một review gate bắt buộc; status `closed`
+là một claim đã ghi, không phải bằng chứng nghiệm thu.
+
+Bật nó trên card **Work tracker** của SLP Manager — toggle ghi
+`<daemonHome>/slp-runtime/state/work-tracker.json` (atomic, 0600; file vắng
+mặt nghĩa là tắt) và có hiệu lực ở session entry kế tiếp, không cần
+re-activation. Card cũng báo `bd` mà nó phát hiện trên PATH của daemon.
+**Detect, không bao giờ install:** cài `bd` lên máy (`brew install beads`,
+`npm i -g @beads/bd`, hoặc `install.sh` của upstream) và khởi tạo một
+repository (`bd init`) là hành động của Human — không gì trong SLP tải,
+cài, khởi tạo, nâng cấp hay cấu hình beads, và tracker thiếu hoặc hỏng hiện
+ra như một gap đã ghi, không bao giờ là spawn blocker.
+
+Khi bật, các managed session entry có thêm dòng `Work tracker:` nêu policy
+reference `src/references/work-tracking.md` (ranh giới, bảng writer —
+Supervisor sở hữu root issue, Lead sở hữu children và assignment, mỗi seat
+sở hữu status trên issue mang tên nó — và procedure) cùng lệnh probe bên
+dưới. Các seat họ hook nhận thêm env overlay
+`BEADS_ACTOR=slp-<role>-<agent id>` kèm mặc định
+`BD_AGENT_PROFILE=conservative` và `BD_DISABLE_METRICS=1` (env của caller
+thắng); seat Devin đi đường khác, không qua env đó, và attribute write bằng
+`--actor` theo reference. Settings tắt, vắng mặt hay corrupt không đổi gì
+khác — file corrupt là một gap line được surface, và render lúc tắt thì
+byte-identical với render trước feature.
+
+Thiết kế đầy đủ, ranh giới và checklist verify trên `bd` thật:
+[docs/spec/beads-work-tracker.md](docs/spec/beads-work-tracker.md).
+
 ## Handoff provider của Lead
 
 Đổi Lead sang Pi khi Codex hết quota: đổi provider của **SLP Lead** thành
@@ -580,11 +682,15 @@ Ba mode hỗ trợ viết request — đều không có side effect:
   và report từng stage fail theo tên — thiếu profile/provider/model, settings
   không tương thích, catalog hash stale — phân biệt "profile đầy đủ" với
   "provider đã live-verify". Exit 1 khi có stage fail; không tạo gì.
-- `prepare <request.json> --emit create` in đúng member `create` — record
-  create_agent arguments nguyên vẹn — cho caller truyền thẳng. Lưu ý host gap:
-  Paseo hiện không có consumer đọc plan-file trực tiếp, nên paste/parse output
-  này vào `create_agent` vẫn là mitigation thủ công cần đối chiếu chéo — chưa
-  loại bỏ rủi ro record bị sửa trước khi tới host.
+- `prepare <request.json> --emit create` in artifact audit:
+  `{ modeId, modeIdSource, create }` — `create` là đúng member `create`
+  (record create_agent arguments nguyên vẹn) cho caller truyền thẳng, còn hai
+  trường mode ghi lại mode đã resolve và nguồn của nó để file emit tự mô tả
+  phục vụ audit. Lưu ý host gap: Paseo hiện không có consumer đọc plan-file
+  trực tiếp, nên paste/parse `create` vào `create_agent` vẫn là mitigation
+  thủ công cần đối chiếu chéo — chưa loại bỏ rủi ro record bị sửa trước khi
+  tới host. `--out <path>` ghi kết quả của lệnh ra file — là response, không
+  bao giờ là request file.
 
 Một request đầy đủ gồm: `taskLabel` (mặc định tên repo), role (và
 `disposition` cho Peer), `repository` path và `workspaceId` thật,
@@ -597,17 +703,51 @@ lý do là phân phối trên decision receipt chứ không phải văn xuôi.
 
 ### `route-decide`
 
-`route-decide <request.json> [--paseo-home <absolute-home>]` là đường duy nhất
+`route-decide <request.json> [--schema] [--out <path>] [--paseo-home <absolute-home>]`
+là đường duy nhất
 gọi Jev — xem [Routing có Jev hỗ trợ](#routing-có-jev-hỗ-trợ-tùy-chọn) để biết
 nó là gì và áp dụng khi nào. Request mang `repository`, `role` tùy chọn (mặc
-định `peer`) và `brief` do Lead viết (string hoặc object không rỗng — context
-duy nhất Jev thấy về task; mang theo mô tả tác vụ, tín hiệu rủi ro/effort,
-ràng buộc và dependencies — brief cằn sẽ trôi về mức ngẫu nhiên). Output là `{optionId, catalogSha256, declined,
-role, decision}`; đưa `optionId`/`catalogSha256`/`decision` vào `route.*` của
+định `peer`) và `brief` do Lead viết — một string không rỗng chứa text
+task/assignment thô, là context duy nhất Jev thấy về task; mang theo mô tả
+tác vụ, tín hiệu rủi ro/effort, ràng buộc và dependencies — brief cằn sẽ
+trôi về mức ngẫu nhiên. Dạng có cấu trúc bị từ chối
+(`jev-request-invalid`): field `signals` hay object/array cho phép caller
+tự phân loại task bằng chính vocabulary quyết định của Jev — hãy đưa sự
+kiện vào văn xuôi. Token `axis:value` chuẩn trích trong text được gắn cờ
+là unverified mention trong `warnings` của output. Output là `{schemaVersion, optionId, catalogSha256, declined,
+role, tokenConflicts, warnings, poolDrift, decision}`; `poolDrift` cùng một
+dòng `warnings` báo divergence giữa catalog repo và pool user-scope live
+(advisory — catalog vẫn bind, không reconcile). Đưa `optionId`/`catalogSha256`/`decision` vào `route.*` của
 request `prepare`. Đáp án `no-suitable-option` vẫn in receipt nhưng exit 1.
 Lệnh fail closed trước cả network khi config/key Jev của daemon thiếu hoặc
 tắt, và gọi từ source checkout cần một daemon home có config đó
-(`--paseo-home` hoặc `PASEO_HOME`).
+(`--paseo-home` hoặc `PASEO_HOME`). `--schema` in request contract mà không
+cần request file hay daemon; `--out` ghi bytes của response, không bao giờ
+là request file.
+
+### `routes`
+
+`routes <repository> [--paseo-home <absolute-home>] [--out <path>]` in
+catalog routing hiệu lực của repository — đúng bản đọc mà `prepare`
+validate:
+
+```bash
+node "$SLP_RT/bin/slp.mjs" routes /absolute/repository [--paseo-home /absolute/paseo-home]
+```
+
+Catalog trong repo `.paseo-slp/slp-routing.json` thắng khi có mặt; ngược
+lại pool user-scope `<paseoHome>/slp-runtime/state/peer-pool.json` là
+fallback đã declare — file repo malformed là lỗi authoring, không bao giờ
+là trigger fallback. Output mang các field catalog cộng `path`, `scope`,
+`sha256` và `tokenConflicts` — đưa `id` của một option và `catalogSha256`
+vào `route.*` của request `prepare`. Khi catalog repo thắng trong lúc pool
+user live vẫn tồn tại, `userPool` cùng `poolDrift` advisory báo bằng chứng
+hai nguồn lệch nhau (không reconcile gì). `jevRouting` báo mode Jev
+routing của daemon cho home đã resolve — `unconfigured`, `off`, `shadow`,
+`armed`, hoặc `error` cho config đã cấu hình nhưng không đọc được — để
+Lead thấy trước một receipt `route-decide` sẽ ràng buộc, chỉ ghi lại, hay
+không khả dụng trước khi lên kế hoạch delegation. `--out` ghi bytes
+response ra file, không bao giờ là request file.
 
 ### `inventory` / `agents`
 
@@ -665,11 +805,18 @@ và báo seat mới không được claim full-candidate coverage cho phạm vi 
 
 ### `materialize`
 
-`.paseo-slp/` là local state bị gitignore chứa absolute path, nên worktree
-mới thiếu hẳn protocol. `materialize` clone nó từ một checkout có sẵn:
+`.paseo-slp/` là operating state của từng repo. Một repository có thể
+commit `workspace-protocol.md` và `slp-routing.json` (repo này làm vậy)
+hoặc giữ thư mục đó gitignored — `notebook.md` vẫn là state Supervisor
+không track trong cả hai trường hợp. Worktree mới vẫn có thể thiếu
+protocol: file bị gitignore không đi theo git, bản đã commit có thể mới
+hơn checkout, và bản cũ có thể mang absolute source-root path trong
+frontmatter. `materialize` clone các file hiện hành từ một checkout có
+sẵn:
 
 ```bash
-node "$SLP_RT/bin/slp.mjs" materialize /absolute/target-repo --from /absolute/source-repo
+node "$SLP_RT/bin/slp.mjs" materialize /absolute/target-repo --from /absolute/source-repo \
+  [--include <repo-relative-path>]... [--paseo-home <absolute-home>]
 # mặc định dry-run; thêm --apply để ghi
 ```
 
@@ -677,7 +824,13 @@ Lệnh copy `.paseo-slp/workspace-protocol.md`, và `.paseo-slp/slp-routing.json
 (đã validate) chỉ khi source thật sự pin catalog — source chưa từng tạo
 catalog thì materialize chỉ mang protocol, và target đọc pool user-scope y
 hệt source. `notebook.md` là state do Supervisor sở hữu và không bao giờ
-được copy. Absolute path nằm dưới source root trong YAML frontmatter của
+được copy. `--include` lặp lại được để stage thêm file repository-relative
+nguyên byte — spec/evidence chưa track mà seat cần đọc; path được validate
+trước khi stage bất cứ thứ gì (từ chối absolute, drive-prefixed, backslash,
+segment rỗng/`.`/`..`, NUL, path dưới `.paseo-slp`, symlink và object không
+phải regular file), dedupe theo target path và preserve khi đã tồn tại.
+`--paseo-home` bật report drift advisory catalog↔pool live trên kết quả
+(`poolDrift`). Absolute path nằm dưới source root trong YAML frontmatter của
 protocol được rebase sang target root (path anh em dài hơn kiểu
 `<source>-old` không khớp boundary nên giữ nguyên). Như `init`, file đã tồn
 tại ở target được preserve chứ không ghi đè; mỗi file báo
@@ -768,12 +921,40 @@ tính được — nằm dưới `gaps`. Các RPC mutation
 Human-authority và không được expose. Hai probe này retire khi host có
 `paseo plugin invoke` hoặc MCP `invoke_plugin_rpc`.
 
+### `tracker`
+
+`tracker <repository> [--paseo-home <absolute-home>]` là probe beads
+read-only — lệnh mà dòng managed session-entry nêu tên khi work tracker
+được bật (xem [Work tracker](#work-tracker-tùy-chọn)):
+
+```bash
+node "$SLP_RT/bin/slp.mjs" tracker /absolute/repository [--paseo-home /absolute/paseo-home]
+```
+
+Nó in `{tracker, repository, enabled, state, bd, workspace, gaps}`.
+`state` là `ready` (`bd` hoạt động và repository là một beads workspace),
+`uninitialized` (repository chưa có beads workspace) hoặc `unavailable`
+(không có `bd` dùng được trên PATH); `bd` báo `{path, version}` khi tìm
+thấy và `workspace` báo `{path, prefix, redirectedFrom}`. Gap là dữ liệu —
+lệnh exit 0 kể cả khi state không phải `ready`, và không có
+`--paseo-home` thì setting enable không được đọc (`enabled: null`).
+Probe chạy `bd version` và `bd where --json` với `BD_DISABLE_METRICS=1`
+bị ép, timeout 5 giây và buffer có giới hạn; nó không bao giờ cài, khởi
+tạo hay sửa thứ gì — tracker thiếu hoặc hỏng là gap để báo, không phải
+lỗi để vá.
+
 ## Kiểm thử
 
 ```bash
 npm test
 npm run check
 ```
+
+Trong managed session, tách suite khỏi ambient runtime env —
+`env -i HOME="$HOME" PATH="$PATH" PASEO_HOME="$(mktemp -d)" npm test`,
+hoặc unset đủ bộ `SLP_*` (`SLP_DAEMON_HOME SLP_MANAGED_RUNTIME
+SLP_RUNTIME_ROOT SLP_NODE_BIN`); unset thiếu sẽ leak runtime vào suite và
+gây fail giả.
 
 Kiểm tra local gồm transaction/recovery của manager, materializer, sinh
 launch-shim, bảo toàn cấu hình, protocol và adapter stdio; chúng không
@@ -827,6 +1008,10 @@ Spec implement:
 - [Plugin feasibility audit](docs/spec/paseo-plugin-feasibility.md)
 - [Settings-driven providers + hook injection](docs/spec/settings-driven-providers.md) —
   khám phá thiết kế
+- [Routing có Jev hỗ trợ](docs/spec/jev-routing-investigation.md) và
+  [tiêu chí routing](docs/spec/routing-criteria.md)
+- [Giám sát giao tiếp](docs/spec/supervision-integration.md)
+- [Beads work tracker](docs/spec/beads-work-tracker.md)
 
 Báo cáo và điều tra:
 

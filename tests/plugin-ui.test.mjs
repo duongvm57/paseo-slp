@@ -1163,6 +1163,22 @@ test('the Jev card offers both provider kinds with per-kind model/baseUrl/key su
   assert.ok(jevModule.includes('"Base URL (custom)"'), 'custom baseUrl marker missing');
 });
 
+// T4 pin (Spec F3): a corrupt/foreign work-tracker.json must surface on the
+// card — the server view carries `error` and the card renders it as a
+// visible `setting error:` line in the loaded branch, not just loadError.
+test('the work-tracker card surfaces a setting error on the loaded view (T4)', () => {
+  const card = readFileSync(join(root, 'plugin/client/cards/work-tracker.tsx'), 'utf8');
+  // The error branch renders inside the loaded view, styled as danger.
+  assert.ok(card.includes('view.error !== null'), 'card must branch on view.error');
+  assert.ok(card.includes('setting error: {view.error}'), 'card must render the setting error text');
+  const branch = card.indexOf('view.error !== null');
+  const danger = card.indexOf('colors.statusDanger', branch);
+  assert.ok(danger !== -1 && danger - branch < 300, 'setting error must render in the danger tone');
+  // Server side: the view contract carries `error` and the RPC populates it.
+  const contracts = readFileSync(join(root, 'plugin/shared/contracts.ts'), 'utf8');
+  assert.ok(contracts.includes('error: z.string().nullable()'), 'WorkTrackerView must expose error');
+});
+
 test('featureDefsForSeat is declared before poolBuild calls it eagerly', () => {
   // Regression: poolBuild runs during render and invokes the lambda per seat
   // — a const declared below it is a TDZ crash on any non-empty seat list
@@ -1631,15 +1647,17 @@ test('every card async completion, error and finally path is stale-guarded', () 
 // hover/focus/pressed/disabled states) ported onto host theme slots.
 // ---------------------------------------------------------------------------
 
-test('the in-surface tab strip switches the four routing sections in order', () => {
+test('the in-surface tab strip switches the five routing sections in order', () => {
   const source = readFileSync(join(root, 'plugin/client/ManagerSurface.tsx'), 'utf8');
-  // Four items in the fixed section order.
+  // Five items in the fixed section order — Supervision is not a tab; its
+  // card mounts inside the Jev section it depends on.
   const nav = source.slice(source.indexOf('MANAGER_SECTIONS = ['), source.indexOf('] as const'));
-  for (const label of ['"Role profiles"', '"Peer pool"', '"Communication language"', '"Jev"']) {
+  for (const label of ['"Role profiles"', '"Peer pool"', '"Communication language"', '"Work tracker"', '"Jev"']) {
     assert.ok(nav.includes(`label: ${label}`), `nav item missing: ${label}`);
   }
-  const order = ['profiles', 'pool', 'language', 'jev'].map(id => nav.indexOf(`id: "${id}"`));
-  assert.deepEqual([...order].sort((a, b) => a - b), order, 'nav order must be profiles → pool → language → jev');
+  assert.ok(!nav.includes('id: "supervision"'), 'supervision must not be a nav tab');
+  const order = ['profiles', 'pool', 'language', 'tracker', 'jev'].map(id => nav.indexOf(`id: "${id}"`));
+  assert.deepEqual([...order].sort((a, b) => a - b), order, 'nav order must be profiles → pool → language → tracker → jev');
   // Tab semantics: a press activates the section — no scrolling to it.
   assert.ok(source.includes('accessibilityLabel="Manager sections"'), 'tab strip a11y label missing');
   assert.ok(source.includes('role="tablist"'), 'tab strip must use a tablist container role');
@@ -1648,9 +1666,13 @@ test('the in-surface tab strip switches the four routing sections in order', () 
   assert.ok(source.includes('setActiveSection(section.id)'), 'tab press must switch the active section');
   // Inactive sections stay mounted under display:none — drafts and
   // card-local state survive a tab switch, but nothing lays out.
-  for (const id of ['profiles', 'pool', 'language', 'jev']) {
+  for (const id of ['profiles', 'pool', 'language', 'tracker', 'jev']) {
     assert.ok(source.includes(`sectionShown("${id}")`), `section ${id} must gate layout on the active tab`);
   }
+  assert.ok(!source.includes('sectionShown("supervision")'), 'supervision keeps no separate section gate');
+  // The supervision card renders inside the jev-gated view.
+  const jevView = source.slice(source.indexOf('sectionShown("jev")'), source.indexOf('sectionShown("jev")') + 1200);
+  assert.ok(jevView.includes('<SupervisionCard'), 'SupervisionCard must mount inside the Jev section');
   // The scroll-anchor machinery is gone — scrolling never reveals sections.
   for (const gone of ['sectionTops', 'scrollToSection', 'onRootScroll', 'scrollTo({ y:', 'onScroll={']) {
     assert.ok(!source.includes(gone), `scroll-anchor machinery remains: ${gone}`);

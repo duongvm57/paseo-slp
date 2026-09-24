@@ -387,7 +387,11 @@ export const JevConfig = z.object({
   provider: JevProvider,
 }).strict();
 /** Wire view of the Jev setup — hasKey only; the key material never leaves
- *  the daemon home. */
+ *  the daemon home. `sha256` is the raw jev.json byte hash — the optimistic-
+ *  concurrency token set-jev requires so a stale save cannot silently
+ *  overwrite another client's capability keys (supervision-integration.md
+ *  §Configuration); null means the file is absent, and it stays present on a
+ *  broken file so the CAS overwrite path still works. */
 export const JevView = z.object({
   configured: z.boolean(),
   enabled: z.boolean().nullable(),
@@ -395,6 +399,7 @@ export const JevView = z.object({
   provider: JevProvider.nullable(),
   hasKey: z.boolean(),
   keyPermissionsOk: z.boolean().nullable(),
+  sha256: Sha.nullable(),
   error: z.string().nullable(),
 }).strict();
 export const GetJevInput = z.object({
@@ -407,11 +412,15 @@ export const GetJevOutput = z.object({
 }).strict();
 /** Plugin-owned state mutation, same class as set-role-routing: writes
  *  slp-runtime/state/jev.json atomically (0600). Toggling off never removes
- *  the stored key. */
+ *  the stored key. `expectedSha256` is the sha256 get-jev returned (null =
+ *  expect the file to be absent); a mismatch is an IDEMPOTENCY_CONFLICT and
+ *  the client must reload first — this is what keeps one card's routing edit
+ *  from overwriting another's supervision toggle. */
 export const SetJevInput = z.object({
   schemaVersion: z.literal(1),
   target: Target,
   jev: JevConfig,
+  expectedSha256: Sha.nullable(),
 }).strict();
 export const SetJevOutput = z.object({
   schemaVersion: z.literal(1),
@@ -441,6 +450,48 @@ export const TestJevOutput = z.object({
   detail: z.string().max(512).nullable(),
   latencyMs: z.number().nonnegative(),
 }).strict();
+/** Beads work-tracker toggle — plugin-owned state at
+ *  slp-runtime/state/work-tracker.json whose sole writer is set-work-tracker
+ *  (atomic 0600 whole-file write, same class as jev.json). Strict so a
+ *  foreign shape is rejected rather than silently coerced; the package
+ *  reader (src/work-tracker.mjs) applies the same checks byte-for-byte. */
+export const WorkTrackerConfig = z.object({
+  schemaVersion: z.literal(1),
+  tracker: z.literal("beads"),
+  enabled: z.boolean(),
+}).strict();
+/** Wire view of the tracker state. `configured` means a valid setting file
+ *  exists; `enabled` is its flag (false when absent or invalid). `error`
+ *  surfaces an unparseable/foreign file — never blocks, matching the
+ *  session-entry gap line. `bd`/`bdError` report live detection of `bd` on
+ *  the plugin process PATH (= daemon PATH): a failure is evidence in
+ *  bdError, never an RPC failure. SLP never installs or initializes bd. */
+export const WorkTrackerView = z.object({
+  configured: z.boolean(),
+  enabled: z.boolean(),
+  error: z.string().nullable(),
+  bd: z.object({
+    path: z.string().min(1),
+    version: z.string().nullable(),
+  }).strict().nullable(),
+  bdError: z.string().nullable(),
+}).strict();
+export const GetWorkTrackerInput = z.object({
+  schemaVersion: z.literal(1),
+  target: Target,
+}).strict();
+export const GetWorkTrackerOutput = z.object({
+  schemaVersion: z.literal(1),
+  workTracker: WorkTrackerView,
+}).strict();
+/** Plugin-owned state mutation, same class as set-language: writes
+ *  work-tracker.json atomically (0600) and returns the post-write view. */
+export const SetWorkTrackerInput = z.object({
+  schemaVersion: z.literal(1),
+  target: Target,
+  enabled: z.boolean(),
+}).strict();
+export const SetWorkTrackerOutput = GetWorkTrackerOutput;
 export const LocalTargetInput = z.object({
   schemaVersion: z.literal(1),
 }).strict();
@@ -545,6 +596,8 @@ export const getJev = defineRpc({ name: "get-jev", input: GetJevInput, output: G
 export const setJev = defineRpc({ name: "set-jev", input: SetJevInput, output: SetJevOutput });
 export const setJevKey = defineRpc({ name: "set-jev-key", input: SetJevKeyInput, output: SetJevKeyOutput });
 export const testJev = defineRpc({ name: "test-jev", input: TestJevInput, output: TestJevOutput });
+export const getWorkTracker = defineRpc({ name: "get-work-tracker", input: GetWorkTrackerInput, output: GetWorkTrackerOutput });
+export const setWorkTracker = defineRpc({ name: "set-work-tracker", input: SetWorkTrackerInput, output: SetWorkTrackerOutput });
 
 // ---------------------------------------------------------------------------
 // §7 receipt / operation-intent journal schemas (server-internal; the client
@@ -728,6 +781,12 @@ export type SetJevKeyRequest = z.infer<typeof SetJevKeyInput>;
 export type SetJevKeyResult = z.infer<typeof SetJevKeyOutput>;
 export type TestJevRequest = z.infer<typeof TestJevInput>;
 export type TestJevResult = z.infer<typeof TestJevOutput>;
+export type WorkTrackerConfigValue = z.infer<typeof WorkTrackerConfig>;
+export type WorkTrackerViewValue = z.infer<typeof WorkTrackerView>;
+export type GetWorkTrackerRequest = z.infer<typeof GetWorkTrackerInput>;
+export type GetWorkTrackerResult = z.infer<typeof GetWorkTrackerOutput>;
+export type SetWorkTrackerRequest = z.infer<typeof SetWorkTrackerInput>;
+export type SetWorkTrackerResult = z.infer<typeof SetWorkTrackerOutput>;
 export type StartResult = z.infer<typeof StartOutput>;
 export type StatusResult = z.infer<typeof StatusOutput>;
 export type BindingViewValue = z.infer<typeof BindingView>;
