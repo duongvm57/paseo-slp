@@ -204,6 +204,20 @@ test('probe: failing bd where means uninitialized; JSON means ready', t => {
   assert.ok(odd.gaps.some(gap => /bd where failed/.test(gap)));
 });
 
+test('probe: bd where --json snake_case keys are canonical (bd 1.3.0)', t => {
+  const repo = tmp(t, 'wt-repo-');
+  // Real bd 1.3.0 output — snake_case keys plus database_path/schema_version
+  // the workspace record intentionally does not carry.
+  const bd = fakeBd(t, {
+    whereJson: '{"database_path":"/repo/.beads/embeddeddolt","path":"/repo/.beads","prefix":"slp","schema_version":1}',
+    whereExit: 0,
+  });
+  const ready = probeWorkTracker(repo, { env: { PATH: bd.dir } });
+  assert.equal(ready.state, 'ready');
+  assert.deepEqual(ready.workspace, { path: '/repo/.beads', prefix: 'slp', redirectedFrom: null });
+  assert.equal(ready.gaps.length, 0);
+});
+
 test('probe: bd is spawned read-only with forced telemetry off and a cwd', t => {
   const repo = tmp(t, 'wt-repo-');
   const captureEnv = join(tmp(t, 'wt-env-'), 'env');

@@ -134,13 +134,20 @@ export function probeWorkTracker(repository, { daemonHome = null, env = process.
   }
   try {
     const parsed = JSON.parse(run(path, ['where', '--json'], { env: runEnv, cwd: repository }));
-    // Field names (Path/Prefix/RedirectedFrom) are [verify] in the spec —
-    // missing keys degrade to null fields instead of a thrown probe.
+    // Verified on bd 1.3.0: `bd where --json` emits snake_case keys
+    // (path/prefix/redirected_from, plus database_path and schema_version
+    // the workspace record does not carry). PascalCase stays as a fallback
+    // for builds emitting the spec's older casing; missing keys degrade to
+    // null fields instead of a thrown probe.
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('expected an object');
+    const field = (snake, pascal) =>
+      typeof parsed[snake] === 'string' ? parsed[snake]
+      : typeof parsed[pascal] === 'string' ? parsed[pascal]
+      : null;
     result.workspace = {
-      path: typeof parsed.Path === 'string' ? parsed.Path : null,
-      prefix: typeof parsed.Prefix === 'string' ? parsed.Prefix : null,
-      redirectedFrom: typeof parsed.RedirectedFrom === 'string' ? parsed.RedirectedFrom : null,
+      path: field('path', 'Path'),
+      prefix: field('prefix', 'Prefix'),
+      redirectedFrom: field('redirected_from', 'RedirectedFrom'),
     };
     result.state = 'ready';
   } catch (error) {
