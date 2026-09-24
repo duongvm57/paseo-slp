@@ -184,7 +184,11 @@ workspaceId and assignment. Peer requests use the same task fields and providers
 plus route.optionId/catalogSha256. An optional paseoHome overrides the fallback
 catalog home ($PASEO_HOME, default ~/.paseo). Preparation resolves the repository
 pool with the user-scope catalog as fallback and emits arguments; it never creates
-an agent or chooses the option for Lead.
+an agent or chooses the option for Lead. When the repository catalog binds,
+prepare and route-decide still surface `poolDrift` and a `warnings` line for
+the chosen option whenever its runtime bundle (provider/model/modeId/
+thinkingOptionId/features) differs from the live pool record — reported for
+reconciliation, never auto-merged.
 Pass the array returned by live list_providers as request.providers, extracting
 it from the tool response envelope when necessary. Each entry carries the observed
 id, enabled and status (and extends when present). The same data can arrive by

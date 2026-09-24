@@ -27,7 +27,7 @@
 
 import { lstatSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
-import { readCatalog, optionExclusions, eligibleOptions, paseoHome,
+import { readCatalog, optionExclusions, eligibleOptions, paseoHome, poolDriftWarnings,
   ROUTE_DECISION_QUESTION, ROUTE_DECLINE_CANDIDATE } from './routing.mjs';
 import { resolveJev, askJev, JevError } from './jev.mjs';
 import { roles } from './profiles.mjs';
@@ -144,6 +144,10 @@ export async function routeDecide(request, { home, fetchImpl, now } = {}) {
   const { answers, receipt } = await askJev({ provider, key, state, questions, context }, { fetchImpl, now });
   const choice = answers[ROUTE_DECISION_QUESTION].choice;
   const declined = choice === ROUTE_DECLINE_CANDIDATE;
+  // Repository catalog vs the live user-scope pool — the catalog already won
+  // this decision; drift is surfaced so the two Human-owned sources get
+  // reconciled rather than silently diverging.
+  warnings.push(...poolDriftWarnings(catalog.poolDrift, declined ? null : choice));
   return {
     schemaVersion: 1,
     optionId: declined ? null : choice,
@@ -152,6 +156,7 @@ export async function routeDecide(request, { home, fetchImpl, now } = {}) {
     role,
     tokenConflicts: (catalog.tokenConflicts ?? []).map(conflict => conflict.id),
     warnings,
+    poolDrift: catalog.poolDrift ?? null,
     decision: receipt,
   };
 }

@@ -291,6 +291,26 @@ test('route-decide records the decline verdict instead of inventing a seat', asy
   assert.equal(result.decision.answers[ROUTE_DECISION_QUESTION].choice, ROUTE_DECLINE_CANDIDATE);
 });
 
+test('route-decide surfaces live-pool drift warnings alongside the receipt', async t => {
+  const { repo, home } = fixture(t);
+  catalogFixture(repo);
+  jevHome(home);
+  // The live pool disagrees on the chosen seat's model — the repository
+  // catalog already won the binding; the decision run reports the drift.
+  const pool = testCatalog();
+  pool.options.find(option => option.id === 'luna-code').model = 'gpt-5.6-drift';
+  writeFileSync(join(home, 'slp-runtime', 'state', 'peer-pool.json'), json(pool));
+  const result = await routeDecide({ repository: repo, brief: 'x' }, { home, fetchImpl: okFetch(choiceAnswer('luna-code')) });
+  assert.equal(result.optionId, 'luna-code');
+  assert.equal(result.poolDrift.identical, false);
+  assert.equal(result.poolDrift.userPoolPath, join(home, 'slp-runtime', 'state', 'peer-pool.json'));
+  assert.match(result.warnings.find(w => w.includes('differs from the live user-scope pool')), /"gpt-5.6-luna" \(catalog\) vs "gpt-5.6-drift" \(pool\)/);
+  // Identical sources leave no drift warning.
+  writeFileSync(join(home, 'slp-runtime', 'state', 'peer-pool.json'), json(testCatalog()));
+  const clean = await routeDecide({ repository: repo, brief: 'x' }, { home, fetchImpl: okFetch(choiceAnswer('luna-code')) });
+  assert.deepEqual(clean.warnings, []);
+});
+
 test('route-decide fails closed when every option is excluded', async t => {
   const { repo, home, dir } = fixture(t);
   const catalog = testCatalog();
