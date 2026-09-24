@@ -18,37 +18,45 @@ delegation rules, spawn kit, sha256 policy locators and managed runtime
 helpers — injected at session entry and not shown in the agent tab.
 Details in [Plugin architecture](docs/architecture.md).
 
+## Why subagents are not enough
+
+A subagent API solves process creation. It does not solve ownership,
+independent judgment, coordination, or acceptance. In practice,
+multi-agent coding commonly fails in these ways:
+
+- Authority gradient: when a parent already presents the answer, the
+  child tends to agree and optimize that answer instead of checking
+  whether its premise is wrong.
+- Perfect-plan trap: the coordinator pre-selects files, APIs, and
+  lifecycle before implementation. The worker becomes a typing bot,
+  while real dependencies surface late as compatibility patches.
+- Attention dilution: when the coordinator also implements, debugs, and
+  repeatedly explains local details, it loses the project-wide view of
+  ownership, dependencies, and agent lifecycle.
+- Unsafe parallelism: two agents can share one checkout and overwrite
+  the same moving files. A workspace or agent ID does not provide
+  filesystem isolation.
+- Biased or stale review: a reviewer forked from the author inherits the
+  same framing, while a reviewer reading changing files may approve a
+  candidate that no longer exists.
+- False completion: finished, idle, "done," and passing tests are
+  signals—not proof that the right artifact was reviewed by the right
+  authority.
+- Split control planes: if workers create their own untracked workers,
+  no single system knows who owns the task, workspace, correction, or
+  cleanup.
+
+More agents can therefore increase confidence and activity without
+increasing correctness.
+
 ## Why SLP
 
-Paseo already creates agents, workspaces, parentage and timelines — it
-solves *process creation*. What it does not decide is ownership,
-independent judgment, coordination discipline or acceptance. Adding more
-agents without those raises confidence and activity without raising
-correctness. Multi-agent coding commonly fails in the same few ways:
+Paseo already creates agents, workspaces, parentage and timelines — the
+process-creation half. SLP answers the rest by separating *kinds of
+judgment* rather than building a rigid `Supervisor > Lead > Peer`
+hierarchy:
 
-- **Authority gradient** — a parent that presents its answer gets
-  agreement back, not a check of the premise.
-- **Perfect-plan trap** — a coordinator that pre-selects files and
-  approach turns the worker into a typing bot; real dependencies surface
-  late as patches.
-- **Attention dilution** — a coordinator that also implements loses the
-  project-wide view of ownership, dependencies and lifecycle.
-- **Unsafe parallelism** — two agents sharing one checkout overwrite the
-  same moving files; a workspace or agent ID is not filesystem isolation.
-- **Biased or stale review** — a reviewer that inherits the author's
-  framing, or reviews files that are still moving, approves a candidate
-  that no longer exists.
-- **False completion** — `finished`, `idle`, "done" and passing tests are
-  signals, not proof that the right artifact was reviewed by the right
-  authority.
-- **Split control planes** — workers spawning their own untracked workers
-  leave no single system that knows who owns the task, the workspace or
-  the correction.
-
-SLP answers by separating *kinds of judgment* rather than building a
-rigid `Supervisor > Lead > Peer` hierarchy:
-
-![Paseo SLP role model: Human owns intent, boundaries and final acceptance; a Supervisor observes the Lead's workflow without joining execution; the Lead coordinates the project and delegates bounded outcomes to independent Engineer, Architect, Reviewer and Scout Peers, which return evidence, challenges, dependency requests or blocked work.](docs/images/slp-role-model.png)
+![Paseo SLP role model: Human owns intent, boundaries and final acceptance; a Supervisor observes the Lead's workflow without joining execution; the Lead coordinates the project and delegates bounded outcomes to independent Engineer, Architect, Reviewer and Scout Peers, which return evidence, challenges, dependency requests or blocked work; two optional Jev advisory instruments — a routing advisory tapping the delegation channel and a supervision assessment tapping the evidence-return channel — are never team seats.](docs/images/slp-role-model.svg)
 
 - **Human** keeps owner authority: intent, important trade-offs,
   exceptional grants, protocol changes and final acceptance.
@@ -566,6 +574,43 @@ notification is a separate Human gate. Live end-to-end validation has not
 run; the design, evidence and open decisions live in
 [docs/spec/supervision-integration.md](docs/spec/supervision-integration.md).
 
+### Work tracker (optional)
+
+The work tracker gives seats an optional durable work graph — beads
+(`bd`), a per-repository issue database — so they query task state
+(issues, assignees, dependencies, comments) instead of rebuilding it from
+conversation, and read it back after resume or compaction. It is
+evidence, never a control plane: Paseo alone owns lifecycle, parentage,
+notifications and report routes; a claim or assignee grants no write
+scope; tracker status never discharges a required review gate; a `closed`
+status is a recorded claim, not acceptance proof.
+
+Enable it on the SLP Manager's **Work tracker** card — the toggle writes
+`<daemonHome>/slp-runtime/state/work-tracker.json` (atomic, 0600; an
+absent file means disabled) and takes effect at the next session entry,
+no re-activation. The card also reports the `bd` it detects on the daemon
+PATH. **Detect, never install:** installing `bd` on the machine
+(`brew install beads`, `npm i -g @beads/bd`, or upstream `install.sh`)
+and initializing a repository (`bd init`) are Human actions — nothing in
+SLP downloads, installs, initializes, upgrades or configures beads, and a
+missing or broken tracker surfaces as a recorded gap, never a spawn
+blocker.
+
+When enabled, managed session entries gain a `Work tracker:` line naming
+the policy reference `src/references/work-tracking.md` (boundaries, the
+writers table — Supervisor owns the root issue, Lead owns children and
+assignment, each seat owns status on its named issue — and procedure) and
+the probe command below. Hook-family seats additionally receive the env
+overlay `BEADS_ACTOR=slp-<role>-<agent id>` plus defaults
+`BD_AGENT_PROFILE=conservative` and `BD_DISABLE_METRICS=1` (caller env
+wins); Devin seats bypass that env path and attribute writes with
+`--actor` per the reference. Disabled, absent or corrupt settings change
+nothing else — a corrupt file is a surfaced gap line, and a disabled
+render is byte-identical to a pre-feature one.
+
+Full design, boundaries and the verify-on-real-`bd` checklist:
+[docs/spec/beads-work-tracker.md](docs/spec/beads-work-tracker.md).
+
 ## Lead provider handoff
 
 Switching a Lead to Pi when Codex runs out of quota: change the **SLP Lead**
@@ -705,6 +750,32 @@ source checkout invocation needs a daemon home carrying that config (`--paseo-ho
 or `PASEO_HOME`). `--schema` prints the request contract without a request
 file or daemon; `--out` persists the response bytes, never the request.
 
+### `routes`
+
+`routes <repository> [--paseo-home <absolute-home>] [--out <path>]` prints
+the repository's effective routing catalog — the same read `prepare`
+validates against:
+
+```bash
+node "$SLP_RT/bin/slp.mjs" routes /absolute/repository [--paseo-home /absolute/paseo-home]
+```
+
+The repository catalog `.paseo-slp/slp-routing.json` wins when present;
+otherwise the user-scope pool
+`<paseoHome>/slp-runtime/state/peer-pool.json` is the declared fallback —
+a malformed repository file is an authoring error, never a fallback
+trigger. Output carries the catalog fields plus `path`, `scope`, `sha256`
+and `tokenConflicts` — feed an option's `id` and the `catalogSha256` into
+a `prepare` request's `route.*`. When the repository catalog wins while a
+live user pool exists, `userPool` plus an advisory `poolDrift` report
+evidence the two sources disagreeing (nothing is reconciled).
+`jevRouting` reports the daemon's Jev routing mode for the resolved home —
+`unconfigured`, `off`, `shadow`, `armed`, or `error` for a
+configured-but-unreadable config — so a Lead sees whether a
+`route-decide` receipt would bind, merely record, or be unavailable
+before planning a delegation. `--out` writes the response bytes to a
+file, never the request.
+
 ### `inventory` / `agents`
 
 Two read-only commands support discovery and work offline (no daemon or
@@ -763,9 +834,13 @@ packet and tells the new seat not to claim full-candidate coverage for it.
 
 ### `materialize`
 
-`.paseo-slp/` is gitignored local state with absolute paths, so a fresh
-worktree lacks the protocol entirely. `materialize` clones it from an
-existing checkout:
+`.paseo-slp/` is per-repo operating state. A repository may commit
+`workspace-protocol.md` and `slp-routing.json` (this one does) or keep the
+directory gitignored — `notebook.md` stays untracked Supervisor state
+either way. A fresh worktree can still lack the protocol: gitignored
+files never travel with git, a committed copy may postdate the checkout,
+and an older copy may carry absolute source-root paths in its frontmatter.
+`materialize` clones the current files from an existing checkout:
 
 ```bash
 node "$SLP_RT/bin/slp.mjs" materialize /absolute/target-repo --from /absolute/source-repo \
@@ -875,6 +950,29 @@ Mutation RPCs (activate/reconcile/deactivate/set-language/set-role-routing)
 stay Human-authority and are not exposed. These probes retire when the host
 ships `paseo plugin invoke` or MCP `invoke_plugin_rpc`.
 
+### `tracker`
+
+`tracker <repository> [--paseo-home <absolute-home>]` is the read-only
+beads probe — the command a managed session-entry line names when the
+work tracker is enabled (see
+[Work tracker](#work-tracker-optional)):
+
+```bash
+node "$SLP_RT/bin/slp.mjs" tracker /absolute/repository [--paseo-home /absolute/paseo-home]
+```
+
+It prints `{tracker, repository, enabled, state, bd, workspace, gaps}`.
+`state` is `ready` (a working `bd` and the repository is a beads
+workspace), `uninitialized` (no beads workspace in the repository) or
+`unavailable` (no working `bd` on PATH); `bd` reports `{path, version}`
+when found and `workspace` reports `{path, prefix, redirectedFrom}`.
+Gaps are data — the command exits 0 even when the state is not `ready`,
+and without `--paseo-home` the enablement setting is not read
+(`enabled: null`). The probe runs `bd version` and `bd where --json`
+with `BD_DISABLE_METRICS=1` forced, a 5 s timeout and a bounded buffer;
+it never installs, initializes or repairs anything — a missing or broken
+tracker is a gap to report, not a fault to fix.
+
 ## Testing
 
 ```bash
@@ -942,6 +1040,10 @@ Implementation specification:
 - [Plugin feasibility audit](docs/spec/paseo-plugin-feasibility.md)
 - [Settings-driven providers + hook injection](docs/spec/settings-driven-providers.md) —
   design exploration
+- [Jev-assisted routing](docs/spec/jev-routing-investigation.md) and
+  [routing criteria](docs/spec/routing-criteria.md)
+- [Communication supervision](docs/spec/supervision-integration.md)
+- [Beads work tracker](docs/spec/beads-work-tracker.md)
 
 Reports and investigations:
 
