@@ -55,7 +55,7 @@ test('Supervisor and Lead use saved profiles; Peer uses the project pool without
     id: `slp-${role}`, provider: `slp-pi-${role}`, model: `upstream/model-${i}`,
     thinkingOptionId: i ? 'high' : 'medium', featureValues: { enabled: true },
   }));
-  const inventory = [...saved.map(profile => ({ id: profile.provider, status: 'available' })), ...providers];
+  const inventory = [...saved.map(profile => ({ id: profile.provider, enabled: true, status: 'available' })), ...providers];
   const launch = fields => launchPlan(installed, { ...request, repository: dir, profiles: saved, providers: inventory, ...fields });
   for (const role of ['supervisor', 'lead']) {
     const selected = saved.find(p => p.id === `slp-${role}`);

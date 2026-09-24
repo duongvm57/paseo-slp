@@ -167,6 +167,34 @@ test('the prompt carrier is dropped only when the target wrapper provably inject
   assert.equal(alien.create.initialPrompt.split('Policy locators —').length - 1, 1);
 });
 
+test('verbatim provider shape is enforced — added, removed or forged fields refuse verification', t => {
+  const { dir, installed } = fixture(t);
+  const route = catalogFixture(dir);
+  const base = { ...request, repository: dir, role: 'peer', route };
+  const observed = { id: 'slp-devin-peer', enabled: true, status: 'available' };
+  const plan = launchPlan(installed, { ...base, providers: [observed] });
+  assert.match(plan.create.provider, /^slp-devin-peer\//);
+  // Added field — a forged marker is outside the live record vocabulary.
+  assert.throws(() => launchPlan(installed, { ...base, providers: [{ ...observed, forged: true }] }),
+    /unexpected field\(s\) 'forged'.*verbatim/);
+  // Removed required field — the verdict consumes id/enabled.
+  const { enabled: _enabled, ...noEnabled } = observed;
+  assert.throws(() => launchPlan(installed, { ...base, providers: [noEnabled] }),
+    /missing field\(s\) 'enabled'.*verbatim/);
+  // A forged provenance key cannot dress a static read as live evidence.
+  assert.throws(() => launchPlan(installed, { ...base, providers: [{ ...observed, provenance: 'live' }] }),
+    /unexpected field\(s\) 'provenance'/);
+  // Edited extends still refuses on the family check.
+  assert.throws(() => launchPlan(installed, { ...base, providers: [{ ...observed, extends: 'pi' }] }),
+    /'extends' \(pi\) does not match the 'devin' transport/);
+  // Advisory path: an explicit binding keeps the prompt carrier when the
+  // observed entry fails the shape check.
+  const wrapped = { ...piBinding, provider: 'slp-codex-lead' };
+  const forged = launchPlan(installed, { ...request, repository: dir, role: 'lead', binding: wrapped,
+    providers: [{ id: 'slp-codex-lead', enabled: true, status: 'available', forged: true }] });
+  assert.equal(forged.create.initialPrompt.split('Policy locators —').length - 1, 1);
+});
+
 test('orientation carries mechanical locators only', t => {
   const { dir, installed } = fixture(t);
   const lead = launchPlan(installed, { ...request, repository: dir, role: 'lead', binding: piBinding });

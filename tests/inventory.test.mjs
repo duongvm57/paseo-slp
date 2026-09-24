@@ -204,7 +204,7 @@ test('prepare fills missing providers/profiles from inventoryFile; inline arrays
   assert.equal(filled.create.provider, 'slp-codex-lead/gpt-5.6-luna');
   const inline = [{ id: 'slp-lead', provider: 'slp-codex-lead', model: 'override/model' }];
   const won = launchPlan(installed, { ...request(installed), role: 'lead', binding: undefined, profiles: inline,
-    providers: [{ id: 'slp-codex-lead' }], inventoryFile: file });
+    providers: [{ id: 'slp-codex-lead', enabled: true, status: 'available', extends: 'codex' }], inventoryFile: file });
   assert.equal(won.create.provider, 'slp-codex-lead/override/model');
   for (const [fields, pattern] of [
     [{ inventoryFile: 'relative.json' }, /Absolute inventoryFile/],

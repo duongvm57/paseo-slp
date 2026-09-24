@@ -15,7 +15,7 @@ test('profile resolution preserves user preferences and rejects missing or wrong
   const profiles = ['supervisor', 'lead'].map(role => ({ id: `slp-${role}`,
     ...binding, provider: `slp-codex-${role}`, modeId: 'full-access',
     featureValues: { fast_mode: true }, command: 'legacy-wrapper' }));
-  const providers = profiles.map(p => ({ id: p.provider, extends: 'codex' }));
+  const providers = profiles.map(p => ({ id: p.provider, enabled: true, status: 'available', extends: 'codex' }));
   const resolved = resolveProfile('supervisor', profiles, providers);
   assert.equal(resolved.modeId, 'full-access');
   assert.deepEqual(resolved.features, { fast_mode: true });
@@ -91,7 +91,7 @@ test('launcher loads installed role bytes, excludes private review material, pre
   }
   const routed = launchPlan(installed, { ...request, binding: undefined, profiles: [{ id: 'slp-supervisor',
     ...binding, provider: 'slp-codex-supervisor', modeId: 'full-access', featureValues: { fast_mode: false } }],
-    providers: [{ id: 'slp-codex-supervisor', status: 'available' }] });
+    providers: [{ id: 'slp-codex-supervisor', enabled: true, status: 'available' }] });
   assert.equal(routed.create.provider, 'slp-codex-supervisor/gpt-5.6-luna');
   assert.equal(routed.profileId, 'slp-supervisor');
   assert.equal(routed.create.settings.modeId, 'full-access');

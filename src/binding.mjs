@@ -28,6 +28,16 @@ export function rejectRouteKeys(route, keys, message) {
   for (const key of keys) if (Object.hasOwn(route, key)) throw new Error(message(key));
 }
 
+// The top-level vocabulary of a verbatim provider record — the contract
+// verifyProvider enforces. Required keys are the ones the verdict always
+// consumes (a missing `enabled` means the entry was edited or stripped);
+// `status`, `label`, `description`, `modes` ride along — normalized reads
+// (src/inventory.mjs) legitimately omit them. `extends` appears on derived
+// providers (devin extends acp). Anything else — including a forged
+// provenance — means the entry was edited after the call.
+export const providerRecordRequiredKeys = ['id', 'enabled'];
+export const providerRecordAllowedKeys = [...providerRecordRequiredKeys, 'status', 'label', 'description', 'modes', 'extends'];
+
 // One provider-health rule for every Binding source. familyFor resolves the
 // expected provider family from the observed provider id, and may itself reject.
 export function verifyProvider(inventory, id, familyFor, label = id) {
@@ -39,6 +49,14 @@ export function verifyProvider(inventory, id, familyFor, label = id) {
   // selected-connection inventory, so the enabled/status checks alone are
   // insufficient here (spec §10).
   if (observed.provenance === 'configured') throw new Error(`Unverified provider ${label}: configured inventory is not live evidence — pass provider objects verbatim from list_providers on the same daemon`);
+  // Verbatim shape: an added key (forged marker, injected flag) or a removed
+  // required key means the entry was edited after list_providers returned it.
+  // The check runs after the provenance refusal so configured reads keep their
+  // tailored error.
+  const extraKeys = Object.keys(observed).filter(key => !providerRecordAllowedKeys.includes(key));
+  if (extraKeys.length) throw new Error(`Unverified provider ${label}: unexpected field(s) ${extraKeys.map(key => `'${key}'`).join(', ')} — the provider object must be verbatim from list_providers; do not add, remove or edit fields`);
+  const missingKeys = providerRecordRequiredKeys.filter(key => !Object.hasOwn(observed, key));
+  if (missingKeys.length) throw new Error(`Unverified provider ${label}: missing field(s) ${missingKeys.map(key => `'${key}'`).join(', ')} — the provider object must be verbatim from list_providers; do not add, remove or edit fields`);
   const family = familyFor(observed.id);
   if (observed.extends != null && observed.extends !== transportOf(family)) throw new Error(`Unverified provider family ${label}: the entry's 'extends' (${observed.extends}) does not match the '${family}' transport '${transportOf(family)}' — the provider object must be verbatim from list_providers; do not add, remove or edit fields`);
   return { observed, family };
