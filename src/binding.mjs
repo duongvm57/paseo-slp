@@ -28,19 +28,37 @@ export function rejectRouteKeys(route, keys, message) {
   for (const key of keys) if (Object.hasOwn(route, key)) throw new Error(message(key));
 }
 
+// The top-level vocabulary of a verbatim provider record — the contract
+// verifyProvider enforces. `id` and `enabled` are required in effect — the
+// find and the fail-closed enabled gate below refuse their absence before
+// this list is consulted; `status`, `label`, `description`, `modes` ride
+// along — normalized reads (src/inventory.mjs) legitimately omit them.
+// `extends` appears on derived providers (devin extends acp). Anything else —
+// including a forged provenance — means the entry was edited after the call.
+export const providerRecordAllowedKeys = ['id', 'enabled', 'status', 'label', 'description', 'modes', 'extends'];
+
 // One provider-health rule for every Binding source. familyFor resolves the
 // expected provider family from the observed provider id, and may itself reject.
 export function verifyProvider(inventory, id, familyFor, label = id) {
-  if (!Array.isArray(inventory)) throw new Error('Paseo list_providers inventory required: pass the discovered providers array as request.providers, not the tool response envelope');
+  if (!Array.isArray(inventory)) throw new Error('Paseo list_providers inventory required: pass the discovered providers array verbatim as request.providers — the live list_providers array, not the tool response envelope, a configured inventory or hand-edited entries');
   const observed = inventory?.find(item => item.id === id);
-  if (!observed || observed.enabled === false || observed.status === 'unavailable') throw new Error(`Unverified provider ${label}`);
+  // Fail closed on enabled: only an observed true proves the provider is
+  // usable — a tri-state null (unknown) or a stripped key must not slip past
+  // targetInjectsCarrier into dropping the prompt-carrier fallback.
+  if (!observed || observed.enabled !== true || observed.status === 'unavailable') throw new Error(`Unverified provider ${label}: no entry with enabled===true for that id in the live list_providers inventory (observed enabled: ${observed ? JSON.stringify(observed.enabled) : 'no matching entry'}) — provider objects must be verbatim from list_providers, unedited`);
   // Managed-runtime inventory entries carry provenance:"configured" — static
   // config reads, never live provider state. Launch planning requires live
   // selected-connection inventory, so the enabled/status checks alone are
   // insufficient here (spec §10).
-  if (observed.provenance === 'configured') throw new Error(`Unverified provider ${label}: configured inventory is not live evidence`);
+  if (observed.provenance === 'configured') throw new Error(`Unverified provider ${label}: configured inventory is not live evidence — pass provider objects verbatim from list_providers on the same daemon`);
+  // Verbatim shape: an added key (forged marker, injected flag) means the
+  // entry was edited after list_providers returned it — removed required keys
+  // already refused above. The check runs after the provenance refusal so
+  // configured reads keep their tailored error.
+  const extraKeys = Object.keys(observed).filter(key => !providerRecordAllowedKeys.includes(key));
+  if (extraKeys.length) throw new Error(`Unverified provider ${label}: unexpected field(s) ${extraKeys.map(key => `'${key}'`).join(', ')} — the provider object must be verbatim from list_providers; do not add, remove or edit fields`);
   const family = familyFor(observed.id);
-  if (observed.extends != null && observed.extends !== transportOf(family)) throw new Error(`Unverified provider family ${label}`);
+  if (observed.extends != null && observed.extends !== transportOf(family)) throw new Error(`Unverified provider family ${label}: the entry's 'extends' (${observed.extends}) does not match the '${family}' transport '${transportOf(family)}' — the provider object must be verbatim from list_providers; do not add, remove or edit fields`);
   return { observed, family };
 }
 

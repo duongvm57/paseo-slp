@@ -17,7 +17,10 @@ Read/re-read policy text under the common core's freshness rule.
    it, else copy .paseo-slp/ and rebase absolute paths that point under the
    source root onto the target root. Materialize carries the repo catalog only
    when the source pinned one; a target without it resolves the user-scope pool
-   like the source does.
+   like the source does. Explicit extra files outside .paseo-slp/ — untracked
+   spec or evidence the seat must read — stage via repeated
+   `--include <repo-path>` flags: verbatim copies, deduped by target path,
+   preserved when already present.
    Supervisor/Lead runtime settings come from slp-supervisor/slp-lead saved profiles.
    Peer runtime settings come from this repository's .paseo-slp/slp-routing.json,
    or the plugin-owned user-scope pool
@@ -57,19 +60,26 @@ Read/re-read policy text under the common core's freshness rule.
    absolute path as request.inventoryFile; an explicit inline array, including
    [], always wins. Managed-runtime inventory providers are labeled provenance
    configured — static config, not live evidence — so pass live list_providers
-   output from the same daemon inline as providers instead. An inventory shows
-   configuration completeness, never provider health or readiness.
+   output from the same daemon inline as providers instead, each provider
+   object verbatim from that array: never the tool response envelope, never a
+   configured or hand-edited entry, no added, removed or renamed fields.
+   An inventory shows configuration completeness, never provider health or
+   readiness.
    All catalog settings are complete; do not overlay model/effort/features from
    slp-peer, the Lead or a different option. No saved slp-peer profile is required.
    Map catalog provider pi/codex/devin/claude to slp-pi-peer/slp-codex-peer/slp-devin-peer/slp-claude-peer. Combine the wrapper
    ID with the exact model ID, preserving embedded slashes. Copy modeId,
    thinkingOptionId and features to settings, omitting absent fields; saved
    profiles use featureValues as settings.features. `settings.modeId` resolves
-   by precedence: a prepare plan's binding `modeId` (emitted as
-   `create.settings.modeId` with top-level `modeId` and `warnings`), then the
-   protocol frontmatter `agent_mode` for direct spawns (Human→Supervisor),
-   then the copied bundle's own `modeId`. When none is set, ask the Human;
-   an agent must never silently inherit the caller's default. Record selected profile ID or
+   by precedence: the prepare plan's resolved `modeId` — emitted top-level
+   with `modeIdSource` (`binding` | `bundle` | `agent_mode` | `none`) and
+   copied into `create.settings.modeId` — then, for direct spawns
+   (Human→Supervisor), the protocol frontmatter `agent_mode`. A saved-profile
+   or catalog-option pin reports `bundle`; an explicit binding reports
+   `binding`. When nothing resolves (`none`) the plan warns: pin modeId in
+   the Human-owned option/profile or ask the Human — an agent must never
+   silently inherit the caller's default, and cross-family inheritance fails
+   at the host. Record selected profile ID or
    catalog option ID/hash and exact bundle with the launch arguments.
    Use agent-scoped Paseo create_agent for every seat joining the team —
    Supervisor→Lead and Lead→Peer alike; it has no profile parameter. Only

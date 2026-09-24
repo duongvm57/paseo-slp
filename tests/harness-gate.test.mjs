@@ -22,13 +22,13 @@ test('basic preflight requires Human profiles for the scenario family before cre
       model: family === 'devin' ? `swe-2-role-${i}` : `endpoint/model-${i}`,
       thinkingOptionId: i ? 'high' : 'medium', featureValues: { custom: i === 2 },
     }));
-    current.settings.providers = [...current.settings.profiles.map(profile => ({ id: profile.provider, status: 'available' })), { id: `slp-${family}-peer`, status: 'available' }];
+    current.settings.providers = [...current.settings.profiles.map(profile => ({ id: profile.provider, enabled: true, status: 'available' })), { id: `slp-${family}-peer`, enabled: true, status: 'available' }];
     assert.throws(() => begin(run, id, { ...current, settings: {} }), /profiles-and-peer-pool/);
     for (const role of ['supervisor', 'lead']) {
       const wrong = structuredClone(current);
       const profile = wrong.settings.profiles.find(p => p.id === `slp-${role}`);
       profile.provider = `slp-${family === 'pi' ? 'codex' : 'pi'}-${role}`;
-      wrong.settings.providers.push({ id: profile.provider, status: 'available' });
+      wrong.settings.providers.push({ id: profile.provider, enabled: true, status: 'available' });
       assert.throws(() => begin(run, id, wrong), new RegExp(`Human must configure slp-${role}`));
     }
     const missing = structuredClone(current); delete missing.settings.profiles[1].model;

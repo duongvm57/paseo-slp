@@ -1,5 +1,5 @@
 import { join, isAbsolute, basename } from 'node:path';
-import { statSync, accessSync, constants } from 'node:fs';
+import { statSync, accessSync, constants, readFileSync } from 'node:fs';
 import { savedProfileBinding, roleProvider, providerId, profileId, roles } from './profiles.mjs';
 import { verifyInstall, snapshot, readJson } from './package.mjs';
 import { catalogBinding, readCatalog } from './routing.mjs';
@@ -12,16 +12,19 @@ import { spawnKit } from './spawn-kit.mjs';
 const bindingSources = [
   {
     name: 'saved profiles',
+    token: 'saved-profile',
     selects: request => request.profiles != null,
     resolve: (role, request, route) => ({ binding: savedProfileBinding(role, request.profiles, request.providers, route) }),
   },
   {
     name: 'catalog routing',
+    token: 'catalog-option',
     selects: request => request.route?.optionId != null,
     resolve: (role, request, route) => catalogBinding(request.repository, role, request.providers, route, request.paseoHome),
   },
   {
     name: 'an explicit binding',
+    token: 'explicit-binding',
     selects: request => request.binding != null,
     resolve: (role, request) => ({ binding: request.binding }),
   },
@@ -32,14 +35,14 @@ export function resolveBinding(role, request, disposition) {
     if (request.binding != null) throw new Error('Peer requires a project pool option; explicit bindings cannot bypass routing');
     // Profile inventory may accompany discovery, but never selects a Peer runtime.
     if (!request.route?.optionId) throw new Error('Peer requires a project routing option; run onboarding and select route.optionId with catalogSha256');
-    return catalogBinding(request.repository, role, request.providers, { ...request.route, disposition }, request.paseoHome);
+    return { ...catalogBinding(request.repository, role, request.providers, { ...request.route, disposition }, request.paseoHome), bindingSource: 'catalog-option' };
   }
   const source = bindingSources.find(candidate => candidate.selects(request));
   if (!source) throw new Error('Binding source required: saved profiles, catalog routing or an explicit binding');
   if (request.binding != null && source.name !== 'an explicit binding') {
     throw new Error(`Choose ${source.name} or an explicit binding, not both`);
   }
-  return source.resolve(role, request, { ...request.route, disposition });
+  return { ...source.resolve(role, request, { ...request.route, disposition }), bindingSource: source.token };
 }
 
 export function prompt(root, role, assignment, binding) {
@@ -118,6 +121,42 @@ function assignmentFile(path) {
   try { accessSync(path, constants.R_OK); }
   catch { throw new Error(`Assignment file is not readable: ${path}`); }
   return path;
+}
+
+// The repository's declared default spawn mode — the `agent_mode` key in
+// .paseo-slp/workspace-protocol.md frontmatter. A binding-level modeId wins;
+// this fills the gap before the plan reports 'none'. Read advisory-only:
+// absent file, missing key or an empty value all yield null.
+function agentMode(repository) {
+  let text;
+  try { text = readFileSync(join(repository, '.paseo-slp', 'workspace-protocol.md'), 'utf8'); }
+  catch { return null; }
+  if (!text.startsWith('---')) return null;
+  const parts = text.split(/^---[ \t]*$/m);
+  if (parts.length < 3) return null;
+  const line = parts[1].match(/^agent_mode:[ \t]*(.*?)[ \t]*$/m);
+  if (!line) return null;
+  const raw = line[1];
+  const value = raw.length >= 2 && ((raw.startsWith("'") && raw.endsWith("'")) || (raw.startsWith('"') && raw.endsWith('"')))
+    ? raw.slice(1, -1) : raw;
+  return value === '' ? null : value;
+}
+
+// modeId provenance, emitted on every plan: `binding` for an explicit
+// request.binding, `bundle` for the saved-profile or catalog-option pin,
+// `agent_mode` for the protocol frontmatter fallback, `none` when nothing
+// resolves. A permission mode never expands task authority, and the host
+// refuses cross-family inheritance — 'none' is a gap to fix by pinning the
+// mode in the Human-owned option/profile or asking the Human, never a silent
+// inherit.
+function resolveMode(binding, bindingSource, repository) {
+  if (binding?.modeId != null) {
+    return { modeId: binding.modeId, modeIdSource: bindingSource === 'explicit-binding' ? 'binding' : 'bundle' };
+  }
+  const fallback = agentMode(repository);
+  return fallback != null
+    ? { modeId: fallback, modeIdSource: 'agent_mode' }
+    : { modeId: null, modeIdSource: 'none' };
 }
 
 // The orientation manifest carries mechanical locators only — installed root,
@@ -216,19 +255,27 @@ function prepareInputs(request, inspect) {
 function plan(root, request, packet) {
   verifyInstall(root);
   const prepared = prepareInputs(request);
-  const { role, disposition, file, binding, routing } = prepared;
+  const { role, disposition, file, binding, routing, bindingSource } = prepared;
   request = prepared.request;
   const assignment = `Repository: ${request.repository}\nWorkspace ID: ${request.workspaceId}\n${disposition ? `Disposition: ${disposition}\n` : ''}${request.assignment}`
     + (file ? `\nAssignment file: ${file} — read it first; it is authoritative for scope details.` : '');
-  // Surface the intended mode once, at plan level: a binding without modeId
-  // silently falls back to the caller's default mode at create_agent time.
-  const warnings = binding?.modeId == null ? ['no modeId in binding — spawn inherits caller default'] : [];
+  // Surface the intended mode once, at plan level, with its provenance: an
+  // unresolved mode would silently fall back to the caller's default at
+  // create_agent time — and cross-family inheritance fails at the host.
+  const { modeId, modeIdSource } = resolveMode(binding, bindingSource, request.repository);
+  const warnings = [...(prepared.warnings ?? [])];
+  if (modeIdSource === 'none') {
+    warnings.push('no modeId resolved (none in the binding and no agent_mode in .paseo-slp/workspace-protocol.md) — the spawn would inherit the caller default and cross-family inheritance fails at the host; pin modeId in the pool option or saved profile, or ask the Human');
+  } else if (modeIdSource === 'agent_mode') {
+    warnings.push(`modeId '${modeId}' resolved from .paseo-slp/workspace-protocol.md agent_mode, not pinned in the binding — prefer pinning modeId in the pool option or saved profile so the plan is self-describing`);
+  }
   const kit = spawnKit(role);
   const manifest = orientation(root, role, routing);
   return {
     transport: 'Paseo create_agent; settings.features must be preserved',
     role, instructionPath: join(root, `src/roles/${role}.md`),
-    modeId: binding?.modeId ?? null,
+    modeId,
+    modeIdSource,
     ...(warnings.length ? { warnings } : {}),
     ...(routing ? { routing } : {}),
     ...(binding?.profileId ? { profileId: binding.profileId } : {}),
@@ -241,7 +288,7 @@ function plan(root, request, packet) {
         + (targetInjectsCarrier(role, binding, request.providers) ? '' : carrierBlock(kit, manifest.policyBytes, planLocatorCaption))
         + (packet ? handoffNotice(role, packet) : ''),
       settings: {
-        ...(binding.modeId ? { modeId: binding.modeId } : {}),
+        ...(modeId != null ? { modeId } : {}),
         ...(binding.thinkingOptionId ? { thinkingOptionId: binding.thinkingOptionId } : {}),
         features: binding.features ?? {},
       },
@@ -295,7 +342,7 @@ export function launchCheck(root, request, { handoff = false } = {}) {
     }
   };
   step('install', () => { verifyInstall(root); });
-  const { request: merged, role, binding } = prepareInputs(request, step);
+  const { request: merged, role, binding, bindingSource, warnings: bindingWarnings } = prepareInputs(request, step);
   const provider = binding?.provider ?? providerGuess(role, merged);
   // Live verification is mandatory for profile/catalog resolutions (their
   // resolvers embed verifyProvider); for a pure explicit binding the planner
@@ -319,7 +366,15 @@ export function launchCheck(root, request, { handoff = false } = {}) {
   }
   if (binding) step('settings', () => bindingCheck(binding));
   else checks.push({ name: 'settings', ok: true, skipped: true, detail: 'skipped — no resolved binding to check' });
-  const warnings = binding && binding.modeId == null ? ['no modeId in binding — spawn inherits caller default'] : [];
+  const warnings = [...(bindingWarnings ?? [])];
+  if (binding != null) {
+    const { modeId, modeIdSource } = resolveMode(binding, bindingSource, merged.repository);
+    if (modeIdSource === 'none') {
+      warnings.push('no modeId resolved (none in the binding and no agent_mode in .paseo-slp/workspace-protocol.md) — the spawn would inherit the caller default and cross-family inheritance fails at the host; pin modeId in the pool option or saved profile, or ask the Human');
+    } else if (modeIdSource === 'agent_mode') {
+      warnings.push(`modeId '${modeId}' resolved from .paseo-slp/workspace-protocol.md agent_mode, not pinned in the binding — prefer pinning modeId in the pool option or saved profile so the plan is self-describing`);
+    }
+  }
   if (handoff) step('handoff', () => { handoffPacket(request); });
   step('plan', () => { (handoff ? handoffPlan : launchPlan)(root, request); });
   return { ok: checks.every(check => check.ok), checks, ...(warnings.length ? { warnings } : {}) };
@@ -345,7 +400,7 @@ export function requestSchema(handoff = false) {
     bindingSources: {
       'saved profiles — supervisor/lead': {
         profiles: 'list_profiles array; the slp-<role> profile must exist with model and settings configured',
-        providers: 'live list_providers array from the same daemon — configured-provenance entries are refused',
+        providers: 'live list_providers array from the same daemon — each provider object verbatim, unedited; configured-provenance entries are refused',
         'route.profileId': 'optional — defaults to slp-<role>',
       },
       'catalog routing — required for peer': {
@@ -353,7 +408,7 @@ export function requestSchema(handoff = false) {
         'route.catalogSha256': 'the sha256 routes returned — stale or missing fails',
         'route.disposition': 'peer only — the bounded specialism (engineer, architect, reviewer, scout, …)',
         'route.decision': 'Jev receipt from `route-decide` — verified when supplied (shadow mode records jevChoice/declined in the plan), and REQUIRED + binding when the daemon arms jev.capabilities.routing (a bare optionId then fails)',
-        providers: 'live list_providers array; the option’s canonical slp-<family>-<role> wrapper must be observed',
+        providers: 'live list_providers array, each provider object verbatim — the option’s canonical slp-<family>-<role> wrapper must be observed',
       },
       'explicit binding — supervisor/lead': {
         binding: '{ provider, model, modeId?, thinkingOptionId?, features? }; provider is a stock family or the canonical slp-<family>-<role> wrapper',
@@ -361,7 +416,9 @@ export function requestSchema(handoff = false) {
     },
     notes: [
       'The planner emits a plan only — it never creates agents or mutates host state.',
-      'prepare --check <request.json> reports each stage failure; prepare <request.json> --emit create prints only the create_agent argument record.',
+      'Provider objects must be verbatim entries from live list_providers (request.providers) — no added, removed or edited fields; a mismatched extends or a configured/static inventory is refused, not adapted.',
+      'The plan emits the resolved modeId plus modeIdSource (binding | bundle | agent_mode | none) — a catalog option or saved profile pin reports bundle, an explicit binding reports binding, the .paseo-slp/workspace-protocol.md agent_mode frontmatter is the declared fallback, and none means pin the mode in the Human-owned option/profile or ask the Human (cross-family inheritance fails at the host; a permission mode never expands task authority).',
+      'prepare --check <request.json> reports each stage failure; prepare <request.json> --emit create prints the audit artifact { modeId, modeIdSource, create } — create is the verbatim create_agent argument record.',
       'Peer launches only through the project pool option: an explicit binding is refused, and profiles may accompany the request for discovery but never select the runtime.',
       'Jev routing mode is per-daemon and evaluated at plan time for both prepare and prepare-handoff (they share the plan builder): a route.decision receipt is always verified, is required whenever jev.capabilities.routing is armed, and only then binds route.optionId to the receipt choice — an enabled-but-unarmed daemon verifies and records both picks (shadow evaluation). prepare never calls the network — receipts are produced only by the explicit route-decide helper command.',
     ],
