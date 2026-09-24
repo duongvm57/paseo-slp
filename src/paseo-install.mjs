@@ -1,11 +1,11 @@
-import { existsSync, readFileSync, writeFileSync, rmSync, lstatSync, mkdirSync, renameSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, rmSync, lstatSync, mkdirSync, renameSync, readdirSync } from 'node:fs';
 import { join, resolve, isAbsolute, relative } from 'node:path';
 import { homedir } from 'node:os';
 import { isDeepStrictEqual } from 'node:util';
 import { json, readJson, hash, identity, install, verifyInstall, files, stageInstall, swapIn, verifyReplaceable } from './package.mjs';
 import { roles, profileRoles, families, profileId, providerId } from './profiles.mjs';
 import { transportOf } from './binding.mjs';
-import { validateCatalog, routingPath } from './routing.mjs';
+import { validateCatalog, routingPath, probeUserPool, catalogPoolDrift } from './routing.mjs';
 import { configFile, writeConfig, mcpFlags, requireMcp, verifyOwnedProviders, verifyOwnedProfiles,
   providers as hostProviders, agentProfiles as hostAgentProfiles } from './host-config.mjs';
 
@@ -260,12 +260,42 @@ function rebaseFrontmatter(text, source, target) {
   return { text: frontmatter.replace(pattern, target) + text.slice(end), rebased: true };
 }
 
+// An --include path is a repository-relative POSIX path: no absolute or
+// drive-prefixed forms, no backslashes, no empty/dot/dot-dot segments — the
+// same shape rules the plugin payload enforces. `.paseo-slp` stays managed by
+// the materialize contract itself, never through includes.
+function includeRelative(raw) {
+  const valid = typeof raw === 'string' && raw.length > 0 && !raw.includes('\0') && !raw.includes('\\')
+    && !raw.startsWith('/') && !/^[A-Za-z]:/.test(raw)
+    && raw.split('/').every(part => part !== '' && part !== '.' && part !== '..');
+  if (!valid) throw new Error(`Invalid include path — a repository-relative POSIX path is required: ${JSON.stringify(raw)}`);
+  if (raw === '.paseo-slp' || raw.startsWith('.paseo-slp/')) {
+    throw new Error(`Include path ${raw} is managed by materialize — .paseo-slp entries stage from the protocol/catalog contract, not --include`);
+  }
+  return raw;
+}
+
+// Recursive copy plan: regular files only — a symlink or anything else
+// exotic is refused loudly rather than followed or silently skipped.
+function collectIncludes(root, rel, out) {
+  const stat = lstat(join(root, rel));
+  if (stat == null) throw new Error(`Include path does not exist in the source checkout: ${rel}`);
+  if (stat.isSymbolicLink()) throw new Error(`Include path is a symlink, not copied: ${rel}`);
+  if (stat.isFile()) { out.set(rel, readFileSync(join(root, rel))); return; }
+  if (!stat.isDirectory()) throw new Error(`Include path is not a regular file or directory: ${rel}`);
+  for (const name of readdirSync(join(root, rel)).sort()) collectIncludes(root, `${rel}/${name}`, out);
+}
+
 // Clone an initialized checkout's .paseo-slp into a target checkout: a fresh
 // worktree lacks the gitignored local state, and a manual copy leaves source
 // absolute paths behind. Explicit source only — never the user-scope catalog
 // or the package template. notebook.md is Supervisor-owned state and is
-// deliberately not copied.
-export function materializeWorkspace(from, repository, apply = false) {
+// deliberately not copied. `options.includePaths` stages additional
+// repository-relative files (untracked spec/evidence the seats must see) —
+// copied verbatim, deduped by target path, preserved when already present.
+// `options.home` enables the advisory catalog↔live-pool drift report.
+export function materializeWorkspace(from, repository, apply = false, options = {}) {
+  const { includePaths = [], home = null } = options;
   const source = resolve(routingPath(from), '../..');
   repository = resolve(routingPath(repository), '../..');
   const sourceFile = name => {
@@ -282,11 +312,21 @@ export function materializeWorkspace(from, repository, apply = false) {
   // drift formatting and hash.
   const catalogSource = join(source, '.paseo-slp', 'slp-routing.json');
   const catalogBytes = lstat(catalogSource)?.isFile() ? readFileSync(catalogSource) : null;
-  if (catalogBytes !== null) validateCatalog(JSON.parse(catalogBytes.toString('utf8')));
+  const catalog = catalogBytes === null ? null : validateCatalog(JSON.parse(catalogBytes.toString('utf8')));
+  // Advisory cross-check with the live user-scope pool — the staged catalog
+  // and the pool are two Human-owned sources that drift silently otherwise.
+  const poolDrift = home != null && catalog != null
+    ? catalogPoolDrift({ ...catalog, sha256: hash(catalogBytes), userPool: probeUserPool(home) })
+    : null;
+  // Validate every include before staging anything — a bad entry must not
+  // leave a half-materialized plan.
+  const includes = new Map();
+  for (const raw of includePaths) collectIncludes(source, includeRelative(raw), includes);
   const protocol = rebaseFrontmatter(readFileSync(sourceFile('workspace-protocol.md'), 'utf8'), source, repository);
   const entries = [
     { path: join(repository, '.paseo-slp/workspace-protocol.md'), bytes: protocol.text },
     ...(catalogBytes !== null ? [{ path: join(repository, '.paseo-slp/slp-routing.json'), bytes: catalogBytes }] : []),
+    ...[...includes.entries()].map(([rel, bytes]) => ({ path: join(repository, rel), bytes })),
   ];
   const result = stageEntries(entries, repository, apply);
   const protocolFile = result.find(file => file.path.endsWith('workspace-protocol.md'));
@@ -297,5 +337,5 @@ export function materializeWorkspace(from, repository, apply = false) {
   if (!protocolFile.preserved && !protocol.rebased) {
     protocolFile.warning = 'frontmatter has no source-root path; absolute paths left verbatim';
   }
-  return { repository, source, files: result, applied: result.some(file => file.applied), preserved: result.every(file => file.preserved) };
+  return { repository, source, files: result, applied: result.some(file => file.applied), preserved: result.every(file => file.preserved), ...(poolDrift ? { poolDrift } : {}) };
 }

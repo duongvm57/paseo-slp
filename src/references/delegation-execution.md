@@ -17,7 +17,10 @@ Read/re-read policy text under the common core's freshness rule.
    it, else copy .paseo-slp/ and rebase absolute paths that point under the
    source root onto the target root. Materialize carries the repo catalog only
    when the source pinned one; a target without it resolves the user-scope pool
-   like the source does.
+   like the source does. Explicit extra files outside .paseo-slp/ — untracked
+   spec or evidence the seat must read — stage via repeated
+   `--include <repo-path>` flags: verbatim copies, deduped by target path,
+   preserved when already present.
    Supervisor/Lead runtime settings come from slp-supervisor/slp-lead saved profiles.
    Peer runtime settings come from this repository's .paseo-slp/slp-routing.json,
    or the plugin-owned user-scope pool
