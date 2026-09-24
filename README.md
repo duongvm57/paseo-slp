@@ -882,6 +882,12 @@ npm test
 npm run check
 ```
 
+Inside a managed session, isolate the suite from ambient runtime env —
+`env -i HOME="$HOME" PATH="$PATH" PASEO_HOME="$(mktemp -d)" npm test`, or
+unset the full `SLP_*` set (`SLP_DAEMON_HOME SLP_MANAGED_RUNTIME
+SLP_RUNTIME_ROOT SLP_NODE_BIN`); a partial unset leaks the runtime into
+the suite and fakes failures.
+
 Local checks cover the manager's transaction/recovery logic, the
 materializer, launch-shim generation, config preservation, protocol and the
 stdio adapter; they do not prove role compliance with the operating guide.

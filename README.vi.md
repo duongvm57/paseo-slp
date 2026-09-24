@@ -838,6 +838,12 @@ npm test
 npm run check
 ```
 
+Trong managed session, tách suite khỏi ambient runtime env —
+`env -i HOME="$HOME" PATH="$PATH" PASEO_HOME="$(mktemp -d)" npm test`,
+hoặc unset đủ bộ `SLP_*` (`SLP_DAEMON_HOME SLP_MANAGED_RUNTIME
+SLP_RUNTIME_ROOT SLP_NODE_BIN`); unset thiếu sẽ leak runtime vào suite và
+gây fail giả.
+
 Kiểm tra local gồm transaction/recovery của manager, materializer, sinh
 launch-shim, bảo toàn cấu hình, protocol và adapter stdio; chúng không
 chứng minh role tuân thủ operating guide. Plugin đã được kiểm chứng live

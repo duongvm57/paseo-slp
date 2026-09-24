@@ -72,9 +72,12 @@ duplicates. Record the returned ID, owner session, task scope, cadence, expiry a
 stop condition durably in the timeline/notebook. Require a bounded lifetime for
 task-local fallback wakes so an interrupted owner cannot leave them indefinite.
 
-The prompt identifies the task/observed agents, last evidence checkpoint and asks
+The prompt identifies the task/observed agents and asks
 the observer to inspect only material delta, test hypotheses and escalate within
-authority. It must not assign implementation or revive work after Human stop.
+authority. It names the current evidence checkpoint or state file to read —
+it never embeds the checkpoint's contents: text armed earlier cannot track
+later state, and an embedded snapshot silently goes stale. It must not assign
+implementation or revive work after Human stop.
 After a wake, advance the checkpoint if there is new evidence; with no material
 change, take no intervention. Return to event-driven waiting instead of looping.
 

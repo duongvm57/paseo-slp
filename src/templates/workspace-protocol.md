@@ -107,8 +107,8 @@ an undecided API or representation. In a new domain, establish enough Human fram
 to locate owner boundaries before foundational implementation.
 
 Keep split-seat titles short: name the seat inside taskLabel —
-`Peer — Reviewer — <task> / Spec` and `Peer — Reviewer — <task> / Std`, QC as
-`Peer — Reviewer — <task> / QC` — never an "axis" suffix. Apply the
+`Peer — Reviewer — <task> / Spec` and `Peer — Reviewer — <task> / Std` —
+never an "axis" suffix. Apply the
 convention to new spawns; seats already running keep their titles.
 
 ## Ownership and integration
@@ -176,7 +176,8 @@ reopen/dependency requests and significant risk changes to the assigned Supervis
 For short bounded work with adequate events, default to no heartbeat. For long work
 or incomplete event coverage, decide and record the observer, reporting route,
 cron/timezone, expiry/run bound, evidence checkpoint and stop condition before
-creating a fallback heartbeat. No universal cadence is prescribed; ownership,
+creating a fallback heartbeat; the heartbeat prompt names the live checkpoint
+or state file to read, never a snapshot of its contents. No universal cadence is prescribed; ownership,
 receipts, bounded lifetime and settlement follow references/monitoring.md.
 Record the creation/deletion receipts and retain pre-existing monitoring outside
 the task.
@@ -184,7 +185,11 @@ the task.
 ## Candidate, verification, review, and acceptance
 
 Identify established repo checks for each requested outcome; record exact commands
-and the behavior they demonstrate in the assignment. Match evidence to the risk:
+and the behavior they demonstrate in the assignment. When a check must run
+isolated from the session's ambient environment, whitelist it (`env -i` plus
+the variables the check needs) or unset the complete injected variable set —
+a partial `env -u` leaks the runtime's variables into the check and can fake
+failures. Match evidence to the risk:
 integration/failure/cancellation/migration checks or Human visual/playtest/product
 evaluation where needed. Coverage and mock-only checks cannot define success.
 Use a deterministic snapshot or exact commit with relevant working changes accounted
