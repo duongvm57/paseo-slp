@@ -65,6 +65,10 @@ try {
   const targetArg = { snapshot: 'repository', verify: 'dir', prepare: 'request.json', 'prepare-handoff': 'request.json', routes: 'repository', init: 'repository', materialize: 'repository', monitor: 'request.json', notebook: 'repository', instructions: 'role', 'route-decide': 'request.json' };
   if (targetArg[command] && !target && !options['--schema']) throw new Error(`${command} requires <${targetArg[command]}>`);
   if (target && !targetArg[command] && !['install', 'uninstall', 'upgrade'].includes(command)) throw new Error(`${command} takes no arguments`);
+  // --out persists the response bytes — never the request file. Reject early
+  // when it resolves to the request path so the input record is never
+  // destroyed by its own result.
+  if (options['--out'] && target && targetArg[command] === 'request.json' && resolve(options['--out']) === resolve(target)) throw new Error('--out must not resolve to the request file — it writes the response, never the request');
   let result;
   if (command === 'identity') result = identity(root);
   else if (command === 'snapshot') result = snapshot(target);

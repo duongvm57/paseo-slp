@@ -205,6 +205,26 @@ test('route-decide --schema prints the request contract and --out persists the r
   assert.match(invalid.stderr, /--out is not valid for monitor/);
 });
 
+test('--out refuses to overwrite the request file', t => {
+  const dir = fixture(t);
+  const env = { PATH: '' };
+  const installed = join(dir, 'release'); install(root, installed);
+  const cli = join(installed, 'bin/slp.mjs');
+  const request = join(dir, 'request.json');
+  writeFileSync(request, json({ installed, workspaceId: 'wks-x', repository: root, assignment: 'out overwrite check', binding }));
+  const bytes = readFileSync(request);
+  for (const command of ['prepare', 'prepare-handoff', 'route-decide']) {
+    const run = spawnSync(process.execPath, [cli, command, request, '--out', request], { env, encoding: 'utf8' });
+    assert.equal(run.status, 1, command);
+    assert.match(run.stderr, /--out must not resolve to the request file/);
+    assert.deepEqual(readFileSync(request), bytes, `${command} must leave the request file untouched`);
+  }
+  // A distinct --out path still persists the result.
+  const out = join(dir, 'plan.json');
+  execFileSync(process.execPath, [cli, 'prepare', request, '--out', out], { env, encoding: 'utf8' });
+  assert.equal(JSON.parse(readFileSync(out, 'utf8')).create.provider, 'codex/gpt-5.6-luna');
+});
+
 test('CLI reports a missing target instead of a raw path error', () => {
   const cli = join(root, 'bin/slp.mjs');
   for (const command of ['prepare', 'prepare-handoff', 'snapshot', 'verify', 'routes', 'init']) {
