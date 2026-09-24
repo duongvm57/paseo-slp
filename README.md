@@ -553,7 +553,7 @@ Human disables the capability in the Manager card and Lead judgment resumes.
 ### Communication supervision (optional, shadow-only)
 
 Supervision is a second opt-in capability, configured per Lead route in the
-SLP Manager's **Supervision** card
+**Supervision** section inside the SLP Manager's **Jev** tab
 (`<daemonHome>/slp-runtime/state/supervision.json`, 0600, sha256 CAS). It is
 off by default — configuring Jev alone never enables observation, and a
 route does nothing until its mode is explicitly `shadow` *and* Jev is

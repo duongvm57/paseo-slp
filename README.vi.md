@@ -521,7 +521,7 @@ Manager card và phán đoán của Lead được khôi phục.
 ### Giám sát giao tiếp (tùy chọn, chỉ shadow)
 
 Supervision là capability opt-in thứ hai, cấu hình theo từng route Lead trong
-card **Supervision** của SLP Manager
+section **Supervision** nằm trong tab **Jev** của SLP Manager
 (`<daemonHome>/slp-runtime/state/supervision.json`, 0600, sha256 CAS). Mặc
 định tắt — chỉ cấu hình Jev không bao giờ bật quan sát, và một route không
 làm gì cho tới khi mode được đặt tường minh là `shadow` *và* Jev được bật

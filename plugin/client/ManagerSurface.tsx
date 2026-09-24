@@ -102,7 +102,6 @@ const MANAGER_SECTIONS = [
   { id: "language", label: "Communication language" },
   { id: "tracker", label: "Work tracker" },
   { id: "jev", label: "Jev" },
-  { id: "supervision", label: "Supervision" },
 ] as const;
 type ManagerSectionId = (typeof MANAGER_SECTIONS)[number]["id"];
 
@@ -885,14 +884,11 @@ export function ManagerSurface({ host, layout, theme }: PluginSurfaceProps) {
         // value.
         <View style={sectionShown("jev")}>
         <JevCard colors={colors} target={target} jev={jev} />
-        </View>
-      ) : null}
-
-      {target ? (
-        // Supervision routes are per-daemon-home plugin state (same class as
-        // the Jev card) — one explicit Lead→Supervisor route per Lead ID,
-        // CAS-guarded whole-file saves, served-home verified server-side.
-        <View style={sectionShown("supervision")}>
+        {/* Supervision routes are per-daemon-home plugin state (same class as
+            the Jev card) — one explicit Lead→Supervisor route per Lead ID,
+            CAS-guarded whole-file saves, served-home verified server-side.
+            The card mounts inside the Jev section: supervision assessments
+            run through the same Jev config this section edits. */}
         <SupervisionCard colors={colors} target={target} jev={jev} supervision={supervision} />
         </View>
       ) : null}
