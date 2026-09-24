@@ -25,7 +25,7 @@ const enabledOf = value =>
 
 // paseo provider ls --json uses `provider` for the id, "Enabled"/"Disabled"
 // strings for enabled, and carries no `extends`; verifyProvider's pass rule is
-// enabled !== false and status !== 'unavailable'.
+// fail-closed — enabled === true and status !== 'unavailable'.
 const liveProvider = entry => ({
   id: entry.provider,
   enabled: enabledOf(entry.enabled),
