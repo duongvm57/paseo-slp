@@ -1,6 +1,6 @@
 .local-checks/
 .e2e-runs/
-.paseo-slp/
+.paseo-slp/notebook.md
 node_modules/
 
 # Local skill-install artifacts (skills CLI)
