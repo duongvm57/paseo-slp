@@ -115,8 +115,10 @@ is itself measured during shadow evaluation. The helper computes the eligible
 candidate set deterministically — the same `optionExclusions` tokens prepare
 enforces — plus one explicit `no-suitable-option` sentinel, sends
 `{brief, role, options}` as state (catalog `notes` are
-withheld), and emits `{optionId, catalogSha256, declined, warnings, decision}`
-where `decision` is the receipt. prepare then takes `route.optionId` +
+withheld), and emits `{schemaVersion, optionId, catalogSha256, declined, role,
+tokenConflicts, warnings, poolDrift, decision}` where `decision` is the
+receipt and `poolDrift`/`warnings` surface repository-catalog↔live-pool
+divergence (advisory — the catalog still binds). prepare then takes `route.optionId` +
 `route.catalogSha256` + `route.decision` and verifies the receipt offline:
 internal hash, pinned model (matching the configured provider), catalog hash
 match, exactly the `route_option` question, matching role, candidate
