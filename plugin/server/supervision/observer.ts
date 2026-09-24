@@ -23,7 +23,6 @@
 import { lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { PaseoApi } from "@getpaseo/client";
 import type { PluginHookAgent } from "@getpaseo/plugin/server";
 import { z } from "zod";
 import { isSlpLead, isSlpPeer, SupervisionFileSchema, SupervisionObservation } from "../../shared/supervision.ts";
@@ -173,6 +172,26 @@ function bounded<T>(work: Promise<T>, signal: AbortSignal, timeoutMs = SDK_TIMEO
   });
 }
 
+// The connected-SDK surface the shadow checks need — a structural subset
+// of PaseoApi (same narrowing as the PaseoLike in state.ts): tests double
+// it without the daemon, and plugin/package.json carries no runtime
+// @getpaseo/client dependency a standalone install would have to resolve
+// for a type-only import.
+type PaseoAgentSnapshot = {
+  provider?: unknown;
+  status?: unknown;
+  archivedAt?: unknown;
+  workspaceId?: unknown;
+  labels?: Record<string, unknown> | null;
+};
+type PaseoLike = {
+  agents: {
+    ref(id: string): {
+      refresh(): Promise<{ agent: PaseoAgentSnapshot | null | undefined } | null>;
+    };
+  };
+};
+
 export interface ObserverDeps {
   stableRoot: string;
   now?: () => number;
@@ -237,7 +256,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
   const openTurns = new Map<string, Set<string>>(); // leadId → started-not-ended turnIds
   const routeReasons = new Map<string, string>();
   const diagnostics = { droppedEvents: 0, reasons: [] as string[] };
-  let lastPaseo: PaseoApi | undefined;
+  let lastPaseo: PaseoLike | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let ring: Map<string, Observation> | null = null;
   let ringDirty = false;
@@ -463,7 +482,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
   const startKey = (leadId: string, turnId: string | null): string | null =>
     turnId === null ? null : `${leadId}\0${turnId}`;
 
-  function onCreated(agent: PluginHookAgent, paseo: PaseoApi): void {
+  function onCreated(agent: PluginHookAgent, paseo: PaseoLike): void {
     if (signal.aborted) return;
     lastPaseo = paseo;
     const routes = shadowRoutes();
@@ -498,7 +517,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     }
   }
 
-  function onArchived(agent: PluginHookAgent, paseo: PaseoApi): void {
+  function onArchived(agent: PluginHookAgent, paseo: PaseoLike): void {
     if (signal.aborted) return;
     lastPaseo = paseo;
     // Tombstone + generation bump are synchronous so a late event cannot
@@ -565,7 +584,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     }
   }
 
-  function onTurn(event: TurnEnded, paseo: PaseoApi): void {
+  function onTurn(event: TurnEnded, paseo: PaseoLike): void {
     if (signal.aborted) return;
     lastPaseo = paseo;
     const routes = shadowRoutes();
