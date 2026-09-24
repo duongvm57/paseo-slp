@@ -11,9 +11,10 @@
 // Peer's handback — or, when no usable start reached this observer instance
 // (plugin reload clears the in-memory start maps, lifecycle hook RPC timeouts
 // drop calls, gate pauses drop starts at the hook — all observed on host
-// 0.9.1), when the handback's own delivery is present inside the ended turn's
-// timeline. The end-derived path only reads ordering the event itself records;
-// it never fabricates a start, and whatever it cannot prove stays uncertain.
+// 0.9.1), when the handback's own delivery is the user_message opening the
+// ended turn's current slice. The end-derived path only reads ordering the
+// event itself records; it never fabricates a start, and whatever it cannot
+// prove stays uncertain.
 //
 // Queue/generation mechanics are adapted from hoangnb24/paseo-supervision
 // server/observer.ts @ 1bad19b8ee6c58482494f56a3d8c6edb4f969ee1
@@ -28,7 +29,7 @@ import { z } from "zod";
 import { isSlpLead, isSlpPeer, SupervisionFileSchema, SupervisionObservation } from "../../shared/supervision.ts";
 import type { SupervisionObservation as Observation, SupervisionRoute } from "../../shared/supervision.ts";
 import { writePrivate } from "../state-store.ts";
-import { capture, handbackAnchorIndex, VISIBILITY } from "./capture.ts";
+import { capture, fingerprint, handbackAnchorIndex, VISIBILITY } from "./capture.ts";
 import type { Capture, SendObservation, TurnEnded, TurnStarted } from "./capture.ts";
 import {
   localGate, decide, parseAssessmentResponse, SUPERVISION_QUESTIONS,
@@ -96,7 +97,9 @@ interface Case {
    *  case's Peer addressed to the bound Lead (confirmed AND unconfirmed —
    *  an unconfirmed send's parsed prompt appearing verbatim in the Lead's
    *  own timeline still proves that content arrived). Feeds the end-only
-   *  chronology anchor; cleared with every other body. */
+   *  chronology anchor, filtered through leadPromptClaims so a body is
+   *  usable only when this peer is its sole claimant; cleared with every
+   *  other body. */
   peerLeadPrompts: string[];
   gatedReason: string | null;
   disposition: "observed" | "unknown" | "suspected_drift";
@@ -240,6 +243,14 @@ export function createSupervisionObserver(deps: ObserverDeps) {
   const leadStarts = new Map<string, number>(); // leadId\0turnId → callback order
   const startMeta = new Map<string, { seq: number; overlapped: boolean }>();
   const openTurns = new Map<string, Set<string>>(); // leadId → started-not-ended turnIds
+  // Report-prompt provenance for the end-only chronology anchor:
+  // leadId → prompt-body hash → the peers observed sending that body to
+  // the lead. A verbatim user_message can only anchor a case when ONE
+  // peer claims the body — a body two peers sent cannot be attributed
+  // (ambiguity resolves unknown, never a guess). Hash-only entries carry
+  // no body, so claims survive body scrubbing and stay fail-closed for
+  // the process lifetime; adding a claim can only add doubt, never proof.
+  const leadPromptClaims = new Map<string, Map<string, Set<string>>>();
   const routeReasons = new Map<string, string>();
   const diagnostics = { droppedEvents: 0, reasons: [] as string[] };
   let lastPaseo: PaseoApi | undefined;
@@ -800,6 +811,19 @@ export function createSupervisionObserver(deps: ObserverDeps) {
       diag("lead-archived"); return;
     }
     if (event.kind === "peer") {
+      // Record this peer's report-prompt claims before any sub-gate: the
+      // send was observed regardless of what happens to the case, and an
+      // extra claim can only widen ambiguity — the conservative direction.
+      {
+        const claims = leadPromptClaims.get(event.leadId) ?? new Map<string, Set<string>>();
+        leadPromptClaims.set(event.leadId, claims);
+        for (const send of [...event.sends, ...event.uncertainSends]) {
+          if (send.recipient !== event.leadId || send.prompt === "") continue;
+          const owners = claims.get(fingerprint(send.prompt)) ?? new Set<string>();
+          owners.add(event.peerId);
+          claims.set(fingerprint(send.prompt), owners);
+        }
+      }
       if (tombstoned(event.peerId) || archiveGen.get(event.peerId) !== job.peerGen) {
         // Captured live, archived (or archived→restored) while queued —
         // record a metadata-only row so the lost observation stays
@@ -1013,6 +1037,7 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     for (const [id, lead] of pendingPeers) if (!tombstoned(id)) peers.set(id, lead);
     for (const callKey of accepted) sentCalls.add(callKey);
     const startProven = job.startSeq !== null && !job.overlap;
+    const promptClaims = leadPromptClaims.get(event.leadId);
     for (const item of cases.values()) {
       if (item.leadId !== event.leadId) continue;
       // A case-peer archived mid-gather sits on the archive boundary —
@@ -1023,14 +1048,21 @@ export function createSupervisionObserver(deps: ObserverDeps) {
       // End-only fallback (spec §Observation point 5): when no usable
       // turn-start is on record — reload erased the start maps, the hook
       // RPC timed out, or a gate pause dropped it — the ended turn's own
-      // timeline can still prove ordering: the user_message that delivered
-      // THIS case's handback (finish-notification envelope or verbatim
-      // report prompt) precedes every extracted send. A scrubbed anchor or
-      // cleared prompt simply cannot match — the fallback never invents
-      // evidence and never fabricates a start timestamp.
+      // ordering can still prove chronology, but only inside the turn
+      // slice extraction used: the turn-opening user_message IS this
+      // case's handback delivery — the finish-notification envelope with
+      // the peer's id at the status-line position, or a verbatim report
+      // prompt exactly one peer claims. An anchor in an older turn, an
+      // ambiguous or unclaimed body, or a scrubbed body never qualifies —
+      // the fallback invents nothing and fabricates no start.
+      const anchorablePrompts = item.peerLeadPrompts.filter(prompt => {
+        if (prompt === "") return false;
+        const owners = promptClaims?.get(fingerprint(prompt));
+        return owners !== undefined && owners.size === 1 && owners.has(item.peerId);
+      });
       const endDerived = handbackAnchorIndex(
         event.anchors, item.peerId,
-        item.evidence.handback?.text ?? null, item.peerLeadPrompts,
+        item.evidence.handback?.text ?? null, anchorablePrompts,
       ) >= 0;
       const qualifies = startQualifies || endDerived;
       // One chronology rule for EVERY send class (spec §Observation point

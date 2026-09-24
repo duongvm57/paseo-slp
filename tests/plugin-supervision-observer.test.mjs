@@ -234,6 +234,11 @@ test('capture: handbackAnchorIndex — finish envelope and verbatim report ancho
   assert.equal(handbackAnchorIndex(anchors(['REPORT: X done']), PEER, null, ['REPORT: X done']), 0);
   // Fail-closed shapes — none of these may anchor.
   assert.equal(handbackAnchorIndex(anchors([env]), OTHER, HANDBACK, []), -1, 'another agent\'s notification');
+  // Identity holds at the status-line position only: a foreign agent's
+  // envelope naming THIS peer inside its title must not anchor even when
+  // the embedded response matches.
+  const foreignEnv = `<paseo-system>\nAgent ${OTHER} (relay for Agent ${PEER} (x)) finished.\n\n<agent-response>\n${HANDBACK}\n</agent-response>\n</paseo-system>`;
+  assert.equal(handbackAnchorIndex(anchors([foreignEnv]), PEER, HANDBACK, []), -1, 'peer id inside a foreign status line is not identity');
   assert.equal(handbackAnchorIndex(anchors([finishEnvelope(PEER, 'a different body')]), PEER, HANDBACK, []), -1, 'mismatched handback body');
   assert.equal(handbackAnchorIndex(anchors(['Agent x finished']), PEER, HANDBACK, []), -1, 'not an envelope');
   assert.equal(handbackAnchorIndex(anchors(['']), PEER, null, ['']), -1, 'scrubbed bodies never match');
@@ -814,6 +819,75 @@ test('observer: end-only turn without handback evidence stays uncertain — noth
   // No start AND no handback anchor inside the turn — chronology cannot be
   // derived; the send stays in the uncertain lane with the unmatched flag.
   observer.onTurn(leadEnd([userMsg('an unrelated input'), codexSend('c1', PEER, 'maybe-early ack')]), paseo);
+  await settle(observer);
+  assert.equal(calls.length, 0);
+  const rows = ringRows(home);
+  assert.equal(rows[0].counts.roomMessages, 0);
+  assert.equal(rows[0].counts.uncertainRoomMessages, 1);
+  assert.ok(rows[0].visibility.includes('lead-start-unmatched'));
+  assert.ok(!rows[0].visibility.includes('lead-start-end-derived'));
+});
+
+test('observer: a handback delivery in an OLDER turn slice does not anchor the current turn', async t => {
+  // The envelope sits before the last user_message — it belongs to an
+  // earlier turn slice, so it is not this turn's handling evidence even
+  // though the text matches the handback exactly.
+  const { observer, paseo, home, calls } = await baseSetup(t);
+  observer.onCreated(peerHook(), paseo);
+  observer.onTurn(peerTurn(), paseo);
+  await observer.idle();
+  observer.onTurn(leadEnd([
+    userMsg(finishEnvelope(PEER, HANDBACK)),
+    asstMsg('work done in the earlier slice'),
+    userMsg('an unrelated new input'),
+    codexSend('c1', PEER, 'ack'),
+  ]), paseo);
+  await settle(observer);
+  assert.equal(calls.length, 0);
+  const rows = ringRows(home);
+  assert.equal(rows[0].counts.roomMessages, 0);
+  assert.equal(rows[0].counts.uncertainRoomMessages, 1);
+  assert.ok(rows[0].visibility.includes('lead-start-unmatched'));
+  assert.ok(!rows[0].visibility.includes('lead-start-end-derived'));
+});
+
+test('observer: a report prompt body claimed by two peers anchors neither case', async t => {
+  // Both peers sent the Lead the same report body — a verbatim
+  // user_message matching it cannot be attributed to one peer, so it
+  // proves nothing for either case (ambiguity resolves unknown).
+  const { observer, paseo, home, calls } = await baseSetup(t);
+  observer.onCreated(peerHook(), paseo);
+  observer.onCreated(peerHook(PEER2), paseo);
+  observer.onTurn(peerEnd([
+    userMsg('brief A'), codexSend('r1', LEAD, 'SHARED REPORT'), asstMsg('handback A'),
+  ]), paseo);
+  observer.onTurn(peerEnd([
+    userMsg('brief B'), codexSend('r2', LEAD, 'SHARED REPORT'), asstMsg('handback B'),
+  ], { peerId: PEER2, turnId: 'turn-p2' }), paseo);
+  await observer.idle();
+  observer.onTurn(leadEnd([userMsg('SHARED REPORT'), codexSend('c1', PEER, 'ack')]), paseo);
+  await settle(observer);
+  assert.equal(calls.length, 0);
+  const rows = ringRows(home);
+  for (const peerId of [PEER, PEER2]) {
+    const row = rows.find(r => r.peerId === peerId);
+    assert.ok(row !== undefined, `a case exists for ${peerId}`);
+    assert.equal(row.counts.roomMessages, 0);
+    assert.equal(row.counts.uncertainRoomMessages, 1);
+    assert.ok(row.visibility.includes('lead-start-unmatched'), `ambiguous body stays unmatched for ${peerId}`);
+  }
+});
+
+test('observer: a foreign agent\'s envelope naming the peer in its title does not anchor', async t => {
+  // OTHER's finish notification embeds THIS peer's handback text and even
+  // mentions the peer id inside its title — but the status line names
+  // OTHER, so it is not the peer's delivery.
+  const { observer, paseo, home, calls } = await baseSetup(t);
+  observer.onCreated(peerHook(), paseo);
+  observer.onTurn(peerTurn(), paseo);
+  await observer.idle();
+  const foreign = `<paseo-system>\nAgent ${OTHER} (relay for Agent ${PEER} (p)) finished.\n\n<agent-response>\n${HANDBACK}\n</agent-response>\n</paseo-system>`;
+  observer.onTurn(leadEnd([userMsg(foreign), codexSend('c1', PEER, 'ack')]), paseo);
   await settle(observer);
   assert.equal(calls.length, 0);
   const rows = ringRows(home);

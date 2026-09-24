@@ -88,10 +88,13 @@ export type Capture =
       sends: SendObservation[];
       uncertainSends: SendObservation[];
       flags: string[];
-      /** Every user_message position in the event's timeline — the raw
-       *  material for the end-only chronology fallback (see
-       *  handbackAnchorIndex). Bodies live in-process only; the gate-down
-       *  scrub empties them like every other captured body. */
+      /** user_message positions inside the CURRENT turn slice — the same
+       *  slice send extraction used, so at most the turn-opening message
+       *  (latestTurn starts at the last user_message; nothing older can
+       *  anchor this turn's handling). The raw material for the end-only
+       *  chronology fallback (see handbackAnchorIndex). Bodies live
+       *  in-process only; the gate-down scrub empties them like every
+       *  other captured body. */
       anchors: { index: number; text: string }[];
     };
 
@@ -340,7 +343,7 @@ export function capture(event: TurnEnded, activeLeadIds: ReadonlySet<string>): C
     id: fingerprint([leadId, event.turnId, extraction.sends, extraction.uncertainSends]),
     sends: extraction.sends, uncertainSends: extraction.uncertainSends,
     flags: [...flags],
-    anchors: event.timeline.flatMap((item, index) =>
+    anchors: turn.flatMap((item, index) =>
       item.type === "user_message" ? [{ index, text: item.text }] : []),
   };
 }
@@ -354,13 +357,16 @@ export function capture(event: TurnEnded, activeLeadIds: ReadonlySet<string>): C
 // time out (observed in daemon logs: "Lifecycle hook agent.turn_ended failed:
 // Plugin RPC timed out"), and gate-pause windows drop starts at the hook.
 // When no usable start is on record, the only honest fallback is ordering the
-// turn_ended event proves internally: a user_message that IS this case's
-// handback delivery — the host's <paseo-system> finish notification embedding
-// the handback body (agent-prompt.js formatFinishNotificationBody), or the
-// verbatim send_agent_prompt report — precedes every send extracted from the
-// latest-turn slice (`latestTurn` slices at the LAST user_message, so all
-// extracted sends sit after all user_messages). Anything it cannot establish
-// stays uncertain; no start time is ever fabricated.
+// turn_ended event proves INSIDE the same slice the sends were extracted
+// from: the turn-opening user_message is this case's handback delivery —
+// the host's <paseo-system> finish notification embedding the handback body
+// (agent-prompt.js formatFinishNotificationBody; the peer's identity must
+// hold at the status-line position, not anywhere in the body), or the
+// verbatim send_agent_prompt report prompt that the observer attributes to
+// exactly this peer (a body another peer also sent cannot be attributed and
+// anchors nothing). A match in an older turn, an ambiguous body, or a
+// scrubbed body proves nothing — the fallback never invents evidence and
+// never fabricates a start timestamp.
 export function handbackAnchorIndex(
   anchors: readonly { index: number; text: string }[],
   peerId: string,
@@ -389,11 +395,12 @@ const AGENT_RESPONSE_CLOSE = "\n</agent-response>";
 const FINISH_MESSAGE_LIMIT = 4000;
 
 const isFinishAnchor = (text: string, peerId: string, handbackText: string): boolean => {
-  if (!text.startsWith(SYSTEM_PREFIX) || !text.endsWith(SYSTEM_SUFFIX)) return false;
-  // The status line is `Agent ${childAgentId} (${title}) ${reason}.` — the
-  // UUID cannot collide with prose, and any terminal reason carries the
-  // same agent-response section.
-  if (!text.includes(`Agent ${peerId} (`)) return false;
+  // The status line is the body's FIRST line — `Agent ${childAgentId}
+  // (${title}) ${reason}.` (sections[0] of formatFinishNotificationBody).
+  // Identity must hold at that exact position: a foreign agent's envelope
+  // naming this peer inside its title or reason must never anchor.
+  if (!text.startsWith(`${SYSTEM_PREFIX}Agent ${peerId} (`)) return false;
+  if (!text.endsWith(SYSTEM_SUFFIX)) return false;
   const open = text.indexOf(AGENT_RESPONSE_OPEN);
   if (open < 0) return false;
   const start = open + AGENT_RESPONSE_OPEN.length;
