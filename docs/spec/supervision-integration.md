@@ -204,14 +204,17 @@ remains a distinct source of cheap signal candidates.
    time out, and gate pauses drop starts at the hook — an end-only fallback
    may still prove ordering from the `turn_ended` event itself: the
    `user_message` opening that turn's slice — the same slice send
-   extraction uses — is this case's handback delivery (the `<paseo-system>`
-   finish notification embedding the handback body with the peer's id at
-   the status-line position, or the verbatim `send_agent_prompt` report
-   prompt exactly one peer claims), so it precedes every extracted send
-   and the in-event ordering is sufficient evidence. A matching
-   `user_message` in an older turn, a prompt body another peer also sent,
-   or an envelope naming the peer only inside its title or reason proves
-   nothing. The
+   extraction uses — is this case's handback delivery, meaning the
+   `<paseo-system>` finish notification embedding the handback body with
+   the peer's id at the status-line position, so it precedes every
+   extracted send and the in-event ordering is sufficient evidence. A bare
+   `send_agent_prompt` report body is never an anchor: timeline
+   `user_message` items carry no authenticated sender (the host passes the
+   prompt through verbatim — no wrapper, no sender field), so a text-only
+   match cannot distinguish the peer's delivery from a manual message or
+   another agent's identical input. A matching `user_message` in an older
+   turn, or an envelope naming the peer only inside its title or reason,
+   proves nothing either. The
    fallback never fabricates a start timestamp; whatever it cannot establish
    stays uncertain, flagged `lead-start-end-derived` when it did prove the
    ordering and `lead-start-unmatched` when it could not. Overlap,

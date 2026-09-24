@@ -224,32 +224,31 @@ test('capture: malformed pi args string stays unparsed', () => {
   assert.ok(result.flags.includes('send-input-unparsed'));
 });
 
-test('capture: handbackAnchorIndex — finish envelope and verbatim report anchor; everything else stays unproven', () => {
+test('capture: handbackAnchorIndex — only the finish envelope anchors; everything else stays unproven', () => {
   const anchors = texts => texts.map((text, index) => ({ index, text }));
   const env = finishEnvelope(PEER, HANDBACK);
   // The notify-on-finish envelope carrying THIS peer's captured handback is
   // the handback's own delivery proof inside the ended turn's timeline.
-  assert.equal(handbackAnchorIndex(anchors(['earlier input', env, 'x']), PEER, HANDBACK, []), 1);
-  // The Peer's report prompt arriving verbatim is the same proof.
-  assert.equal(handbackAnchorIndex(anchors(['REPORT: X done']), PEER, null, ['REPORT: X done']), 0);
+  assert.equal(handbackAnchorIndex(anchors(['earlier input', env, 'x']), PEER, HANDBACK), 1);
   // Fail-closed shapes — none of these may anchor.
-  assert.equal(handbackAnchorIndex(anchors([env]), OTHER, HANDBACK, []), -1, 'another agent\'s notification');
+  assert.equal(handbackAnchorIndex(anchors(['REPORT: X done']), PEER, null), -1, 'a bare report body is not authenticated delivery');
+  assert.equal(handbackAnchorIndex(anchors([env]), OTHER, HANDBACK), -1, 'another agent\'s notification');
   // Identity holds at the status-line position only: a foreign agent's
   // envelope naming THIS peer inside its title must not anchor even when
   // the embedded response matches.
   const foreignEnv = `<paseo-system>\nAgent ${OTHER} (relay for Agent ${PEER} (x)) finished.\n\n<agent-response>\n${HANDBACK}\n</agent-response>\n</paseo-system>`;
-  assert.equal(handbackAnchorIndex(anchors([foreignEnv]), PEER, HANDBACK, []), -1, 'peer id inside a foreign status line is not identity');
-  assert.equal(handbackAnchorIndex(anchors([finishEnvelope(PEER, 'a different body')]), PEER, HANDBACK, []), -1, 'mismatched handback body');
-  assert.equal(handbackAnchorIndex(anchors(['Agent x finished']), PEER, HANDBACK, []), -1, 'not an envelope');
-  assert.equal(handbackAnchorIndex(anchors(['']), PEER, null, ['']), -1, 'scrubbed bodies never match');
+  assert.equal(handbackAnchorIndex(anchors([foreignEnv]), PEER, HANDBACK), -1, 'peer id inside a foreign status line is not identity');
+  assert.equal(handbackAnchorIndex(anchors([finishEnvelope(PEER, 'a different body')]), PEER, HANDBACK), -1, 'mismatched handback body');
+  assert.equal(handbackAnchorIndex(anchors(['Agent x finished']), PEER, HANDBACK), -1, 'not an envelope');
+  assert.equal(handbackAnchorIndex(anchors(['']), PEER, null), -1, 'scrubbed bodies never match');
   assert.equal(handbackAnchorIndex(
     anchors([`<paseo-system>\nAgent ${PEER} (t) finished.\n\n<agent-response>\n\n</agent-response>\n</paseo-system>`]),
-    PEER, '', []), -1, 'an empty handback cannot verify content');
+    PEER, ''), -1, 'an empty handback cannot verify content');
   // The host truncates the embedded response at 4000 chars — the same
   // truncation form still verifies.
   const long = 'x'.repeat(4100);
   const truncatedEnv = finishEnvelope(PEER, `${'x'.repeat(4000)}\n[truncated 100 chars; use get_agent_activity for the full response]`);
-  assert.equal(handbackAnchorIndex(anchors([truncatedEnv]), PEER, long, []), 0);
+  assert.equal(handbackAnchorIndex(anchors([truncatedEnv]), PEER, long), 0);
 });
 
 test('capture: peer on failed turn keeps confirmed sends but no handback', () => {
@@ -852,9 +851,10 @@ test('observer: a handback delivery in an OLDER turn slice does not anchor the c
 });
 
 test('observer: a report prompt body claimed by two peers anchors neither case', async t => {
-  // Both peers sent the Lead the same report body — a verbatim
-  // user_message matching it cannot be attributed to one peer, so it
-  // proves nothing for either case (ambiguity resolves unknown).
+  // Two peers reporting the same body is the sharpest ambiguity case —
+  // but bare prompt bodies are not anchors at all now (no authenticated
+  // sender on user_messages), so the message proves nothing regardless
+  // of how many peers could have sent it.
   const { observer, paseo, home, calls } = await baseSetup(t);
   observer.onCreated(peerHook(), paseo);
   observer.onCreated(peerHook(PEER2), paseo);
@@ -874,7 +874,7 @@ test('observer: a report prompt body claimed by two peers anchors neither case',
     assert.ok(row !== undefined, `a case exists for ${peerId}`);
     assert.equal(row.counts.roomMessages, 0);
     assert.equal(row.counts.uncertainRoomMessages, 1);
-    assert.ok(row.visibility.includes('lead-start-unmatched'), `ambiguous body stays unmatched for ${peerId}`);
+    assert.ok(row.visibility.includes('lead-start-unmatched'), `unauthenticated body stays unmatched for ${peerId}`);
   }
 });
 
@@ -916,11 +916,13 @@ test('observer: a steered finish notification qualifies sends on a pre-handback 
   assert.ok(!rows[0].visibility.includes('lead-start-unmatched'));
 });
 
-test('observer: the peer report prompt landing as a lead user_message anchors end-only', async t => {
-  // The second delivery path: the Peer called send_agent_prompt to the Lead —
-  // the captured report prompt arriving verbatim in the Lead's own turn_ended
-  // timeline proves the content reached the Lead before the send.
-  const { observer, paseo, home } = await baseSetup(t);
+test('observer: a bare report-prompt user_message does not anchor — only the envelope proves delivery', async t => {
+  // The Peer called send_agent_prompt to the Lead and its prompt body
+  // lands verbatim — but user_messages carry no authenticated sender (the
+  // host passes the prompt through raw), so the match cannot distinguish
+  // this delivery from a manual message. The send stays uncertain; the
+  // peer's send itself remains recorded evidence.
+  const { observer, paseo, home, calls } = await baseSetup(t);
   observer.onCreated(peerHook(), paseo);
   observer.onTurn(peerEnd([
     userMsg('Implement X per the brief'),
@@ -930,10 +932,13 @@ test('observer: the peer report prompt landing as a lead user_message anchors en
   await observer.idle();
   observer.onTurn(leadEnd([userMsg('REPORT: X done, tests pass'), codexSend('c1', PEER, 'ack')]), paseo);
   await settle(observer);
+  assert.equal(calls.length, 0);
   const rows = ringRows(home);
-  assert.equal(rows[0].counts.roomMessages, 1);
-  assert.equal(rows[0].counts.peerSends, 1, 'the peer report send is captured evidence too');
-  assert.ok(rows[0].visibility.includes('lead-start-end-derived'));
+  assert.equal(rows[0].counts.roomMessages, 0);
+  assert.equal(rows[0].counts.uncertainRoomMessages, 1);
+  assert.equal(rows[0].counts.peerSends, 1, 'the peer report send is still captured evidence');
+  assert.ok(rows[0].visibility.includes('lead-start-unmatched'));
+  assert.ok(!rows[0].visibility.includes('lead-start-end-derived'));
 });
 
 test('observer scenario 6: failed tool send — no structured success, not proof of either verdict', async t => {

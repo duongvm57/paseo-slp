@@ -358,26 +358,25 @@ export function capture(event: TurnEnded, activeLeadIds: ReadonlySet<string>): C
 // Plugin RPC timed out"), and gate-pause windows drop starts at the hook.
 // When no usable start is on record, the only honest fallback is ordering the
 // turn_ended event proves INSIDE the same slice the sends were extracted
-// from: the turn-opening user_message is this case's handback delivery —
-// the host's <paseo-system> finish notification embedding the handback body
+// from: the turn-opening user_message is this case's handback delivery — the
+// host's <paseo-system> finish notification embedding the handback body
 // (agent-prompt.js formatFinishNotificationBody; the peer's identity must
-// hold at the status-line position, not anywhere in the body), or the
-// verbatim send_agent_prompt report prompt that the observer attributes to
-// exactly this peer (a body another peer also sent cannot be attributed and
-// anchors nothing). A match in an older turn, an ambiguous body, or a
-// scrubbed body proves nothing — the fallback never invents evidence and
-// never fabricates a start timestamp.
+// hold at the status-line position, not anywhere in the body). A bare
+// send_agent_prompt report body is NOT an anchor: timeline user_messages
+// carry no authenticated sender (host send_agent_prompt passes the prompt
+// through verbatim — no wrapper, no sender field), so a text-only match
+// cannot tell the peer's delivery from a manual message or another agent's
+// identical input. A match in an older turn or a scrubbed body proves
+// nothing either — the fallback never invents evidence and never fabricates
+// a start timestamp.
 export function handbackAnchorIndex(
   anchors: readonly { index: number; text: string }[],
   peerId: string,
   handbackText: string | null,
-  reportPrompts: readonly string[],
 ): number {
   let first = -1;
   for (const anchor of anchors) {
-    const matched =
-      reportPrompts.some(prompt => prompt !== "" && anchor.text === prompt) ||
-      (handbackText !== null && isFinishAnchor(anchor.text, peerId, handbackText));
+    const matched = handbackText !== null && isFinishAnchor(anchor.text, peerId, handbackText);
     if (matched && (first < 0 || anchor.index < first)) first = anchor.index;
   }
   return first;

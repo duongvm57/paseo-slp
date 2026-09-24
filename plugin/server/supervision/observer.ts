@@ -29,7 +29,7 @@ import { z } from "zod";
 import { isSlpLead, isSlpPeer, SupervisionFileSchema, SupervisionObservation } from "../../shared/supervision.ts";
 import type { SupervisionObservation as Observation, SupervisionRoute } from "../../shared/supervision.ts";
 import { writePrivate } from "../state-store.ts";
-import { capture, fingerprint, handbackAnchorIndex, VISIBILITY } from "./capture.ts";
+import { capture, handbackAnchorIndex, VISIBILITY } from "./capture.ts";
 import type { Capture, SendObservation, TurnEnded, TurnStarted } from "./capture.ts";
 import {
   localGate, decide, parseAssessmentResponse, SUPERVISION_QUESTIONS,
@@ -93,14 +93,6 @@ interface Case {
    *  evidence arriving during an assessment invalidates that
    *  assessment." */
   evidenceVersion: number;
-  /** Internal correlation data, never shipped to Jev: prompt bodies this
-   *  case's Peer addressed to the bound Lead (confirmed AND unconfirmed —
-   *  an unconfirmed send's parsed prompt appearing verbatim in the Lead's
-   *  own timeline still proves that content arrived). Feeds the end-only
-   *  chronology anchor, filtered through leadPromptClaims so a body is
-   *  usable only when this peer is its sole claimant; cleared with every
-   *  other body. */
-  peerLeadPrompts: string[];
   gatedReason: string | null;
   disposition: "observed" | "unknown" | "suspected_drift";
   assessments: number;
@@ -243,14 +235,6 @@ export function createSupervisionObserver(deps: ObserverDeps) {
   const leadStarts = new Map<string, number>(); // leadId\0turnId → callback order
   const startMeta = new Map<string, { seq: number; overlapped: boolean }>();
   const openTurns = new Map<string, Set<string>>(); // leadId → started-not-ended turnIds
-  // Report-prompt provenance for the end-only chronology anchor:
-  // leadId → prompt-body hash → the peers observed sending that body to
-  // the lead. A verbatim user_message can only anchor a case when ONE
-  // peer claims the body — a body two peers sent cannot be attributed
-  // (ambiguity resolves unknown, never a guess). Hash-only entries carry
-  // no body, so claims survive body scrubbing and stay fail-closed for
-  // the process lifetime; adding a claim can only add doubt, never proof.
-  const leadPromptClaims = new Map<string, Map<string, Set<string>>>();
   const routeReasons = new Map<string, string>();
   const diagnostics = { droppedEvents: 0, reasons: [] as string[] };
   let lastPaseo: PaseoApi | undefined;
@@ -811,19 +795,6 @@ export function createSupervisionObserver(deps: ObserverDeps) {
       diag("lead-archived"); return;
     }
     if (event.kind === "peer") {
-      // Record this peer's report-prompt claims before any sub-gate: the
-      // send was observed regardless of what happens to the case, and an
-      // extra claim can only widen ambiguity — the conservative direction.
-      {
-        const claims = leadPromptClaims.get(event.leadId) ?? new Map<string, Set<string>>();
-        leadPromptClaims.set(event.leadId, claims);
-        for (const send of [...event.sends, ...event.uncertainSends]) {
-          if (send.recipient !== event.leadId || send.prompt === "") continue;
-          const owners = claims.get(fingerprint(send.prompt)) ?? new Set<string>();
-          owners.add(event.peerId);
-          claims.set(fingerprint(send.prompt), owners);
-        }
-      }
       if (tombstoned(event.peerId) || archiveGen.get(event.peerId) !== job.peerGen) {
         // Captured live, archived (or archived→restored) while queued —
         // record a metadata-only row so the lost observation stays
@@ -901,10 +872,6 @@ export function createSupervisionObserver(deps: ObserverDeps) {
         handbackOrder: job.order,
         dirty: true,
         evidenceVersion: 0,
-        peerLeadPrompts: [...event.sends, ...event.uncertainSends]
-          .filter(s => s.recipient === event.leadId)
-          .map(s => s.prompt)
-          .filter(p => p !== ""),
         gatedReason: null,
         disposition: "observed",
         assessments: 0,
@@ -1037,7 +1004,6 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     for (const [id, lead] of pendingPeers) if (!tombstoned(id)) peers.set(id, lead);
     for (const callKey of accepted) sentCalls.add(callKey);
     const startProven = job.startSeq !== null && !job.overlap;
-    const promptClaims = leadPromptClaims.get(event.leadId);
     for (const item of cases.values()) {
       if (item.leadId !== event.leadId) continue;
       // A case-peer archived mid-gather sits on the archive boundary —
@@ -1051,18 +1017,14 @@ export function createSupervisionObserver(deps: ObserverDeps) {
       // ordering can still prove chronology, but only inside the turn
       // slice extraction used: the turn-opening user_message IS this
       // case's handback delivery — the finish-notification envelope with
-      // the peer's id at the status-line position, or a verbatim report
-      // prompt exactly one peer claims. An anchor in an older turn, an
-      // ambiguous or unclaimed body, or a scrubbed body never qualifies —
-      // the fallback invents nothing and fabricates no start.
-      const anchorablePrompts = item.peerLeadPrompts.filter(prompt => {
-        if (prompt === "") return false;
-        const owners = promptClaims?.get(fingerprint(prompt));
-        return owners !== undefined && owners.size === 1 && owners.has(item.peerId);
-      });
+      // the peer's id at the status-line position and the handback in the
+      // agent-response section. A bare prompt body is not accepted (no
+      // authenticated sender on user_messages); an anchor in an older
+      // turn or a scrubbed body never qualifies — the fallback invents
+      // nothing and fabricates no start.
       const endDerived = handbackAnchorIndex(
         event.anchors, item.peerId,
-        item.evidence.handback?.text ?? null, anchorablePrompts,
+        item.evidence.handback?.text ?? null,
       ) >= 0;
       const qualifies = startQualifies || endDerived;
       // One chronology rule for EVERY send class (spec §Observation point
@@ -1122,7 +1084,6 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     for (const lane of [item.evidence.roomMessages, item.evidence.uncertainRoomMessages, item.evidence.otherRoomMessages, item.evidence.reportMessages, item.evidence.peerSends]) {
       for (const message of lane) message.prompt = "";
     }
-    item.peerLeadPrompts = [];
     // Body loss changes the evaluation basis — an in-flight assessment
     // built on the pre-clear payload is stale and must be discarded.
     item.evidenceVersion += 1;
@@ -1469,7 +1430,6 @@ export function createSupervisionObserver(deps: ObserverDeps) {
     let n = 0;
     if (item.evidence.brief !== null && item.evidence.brief.text !== "") n += 1;
     if (item.evidence.handback !== null && item.evidence.handback.text !== "") n += 1;
-    n += item.peerLeadPrompts.length;
     for (const lane of [
       item.evidence.roomMessages, item.evidence.uncertainRoomMessages,
       item.evidence.otherRoomMessages, item.evidence.reportMessages, item.evidence.peerSends,
