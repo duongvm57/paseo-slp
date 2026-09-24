@@ -177,10 +177,11 @@ test('verbatim provider shape is enforced — added, removed or forged fields re
   // Added field — a forged marker is outside the live record vocabulary.
   assert.throws(() => launchPlan(installed, { ...base, providers: [{ ...observed, forged: true }] }),
     /unexpected field\(s\) 'forged'.*verbatim/);
-  // Removed required field — the verdict consumes id/enabled.
+  // Removed required field — a stripped `enabled` fails the fail-closed gate
+  // (undefined is not true).
   const { enabled: _enabled, ...noEnabled } = observed;
   assert.throws(() => launchPlan(installed, { ...base, providers: [noEnabled] }),
-    /missing field\(s\) 'enabled'.*verbatim/);
+    /enabled===true.*observed enabled: undefined/);
   // A forged provenance key cannot dress a static read as live evidence.
   assert.throws(() => launchPlan(installed, { ...base, providers: [{ ...observed, provenance: 'live' }] }),
     /unexpected field\(s\) 'provenance'/);
@@ -193,6 +194,26 @@ test('verbatim provider shape is enforced — added, removed or forged fields re
   const forged = launchPlan(installed, { ...request, repository: dir, role: 'lead', binding: wrapped,
     providers: [{ id: 'slp-codex-lead', enabled: true, status: 'available', forged: true }] });
   assert.equal(forged.create.initialPrompt.split('Policy locators —').length - 1, 1);
+});
+
+test('verifyProvider fails closed on enabled — null (unknown) refuses like false', t => {
+  const { dir, installed } = fixture(t);
+  const route = catalogFixture(dir);
+  const base = { ...request, repository: dir, role: 'peer', route };
+  // Tri-state null from inventory normalization means "unknown", never
+  // enabled — it must not pass as live-verified.
+  assert.throws(() => launchPlan(installed, { ...base,
+    providers: [{ id: 'slp-devin-peer', enabled: null, status: 'available' }] }),
+    /enabled===true.*observed enabled: null/);
+  assert.throws(() => launchPlan(installed, { ...base,
+    providers: [{ id: 'slp-devin-peer', enabled: false, status: 'available' }] }),
+    /observed enabled: false/);
+  // Advisory path: enabled:null keeps the prompt carrier — the provider is
+  // unproven, so the fallback block stays.
+  const wrapped = { ...piBinding, provider: 'slp-codex-lead' };
+  const unknown = launchPlan(installed, { ...request, repository: dir, role: 'lead', binding: wrapped,
+    providers: [{ id: 'slp-codex-lead', enabled: null, status: 'available' }] });
+  assert.equal(unknown.create.initialPrompt.split('Policy locators —').length - 1, 1);
 });
 
 test('orientation carries mechanical locators only', t => {
