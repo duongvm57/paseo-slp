@@ -23,7 +23,11 @@ Read the assigned repository's .paseo-slp/slp-routing.json with
 Resolution is skill-style: the repository catalog wins when present; when the
 repository has no catalog, routes resolves the plugin-owned user-scope pool
 ($PASEO_HOME/slp-runtime/state/peer-pool.json, default ~/.paseo) and reports
-scope/path. The Manager's Peer pool card is that file's sole writer — its
+scope/path. routes also reports `jevRouting` (unconfigured | off | shadow |
+armed | error) so the daemon's routing mode is visible where the seat choice
+happens, and — when the repository catalog wins — attaches `userPool` plus
+`poolDrift`, an advisory diff of the two Human-owned sources (sha pair plus
+per-option field differences). The Manager's Peer pool card is that file's sole writer — its
 model/mode/thinking values come from the live provider catalog, so a seat
 cannot name a mode the provider never offered.
 Each option contains an id, provider family (pi/codex/devin/claude), model, optional modeId,
@@ -211,6 +215,12 @@ it is not a reason to change the selected model or read package implementation.
 Use taskLabel for a short Human-readable work label and disposition for the Peer
 seat. prepare renders the naming convention from delegation-execution.md; omitted taskLabel
 uses the repository directory name, and omitted Peer disposition displays General.
+`prepare <request.json> --emit create` emits the audit artifact
+`{ modeId, modeIdSource, create }` — `create` is the verbatim create_agent
+argument record and the mode fields record the resolved mode plus its
+provenance, so a saved emit file is self-describing. `--out <path>` writes
+any command's result to a file — the response, never the request file;
+`route-decide --schema` prints its request contract without a request file.
 Catalog hash validation is not atomic with host creation; record actual launches.
 
 Installed providers are slp-codex-{role}, slp-pi-{role}, slp-devin-{role} and

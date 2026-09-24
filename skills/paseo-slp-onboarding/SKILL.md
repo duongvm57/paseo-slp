@@ -215,7 +215,9 @@ route: { optionId, catalogSha256 } to inspect launch arguments without creating
 an agent — or `prepare <request.json> --check` to get every failing stage named
 in one report (missing profile/provider/model, stale hash) with exit 1 on
 failure. `prepare --schema` prints the request contract from a source checkout;
-`prepare <request.json> --emit create` prints the exact create_agent record.
+`prepare <request.json> --emit create` prints the audit artifact
+`{ modeId, modeIdSource, create }` — `create` is the exact create_agent
+record.
 Verify the wrapper/model/settings match the option. Include profiles
 only if useful for discovery; they never select or override the Peer runtime.
 

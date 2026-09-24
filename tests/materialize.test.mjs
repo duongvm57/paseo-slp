@@ -138,7 +138,7 @@ test('materialize preserves existing target files and the CLI reports per-file r
   assert.equal(protocol.applied, true);
   for (const [argv, pattern] of [
     [[cli, 'materialize', target], /materialize requires --from/],
-    [[cli, 'materialize', target, '--from', source, '--paseo-home', dir], /--paseo-home is not valid for materialize/],
+    [[cli, 'materialize', target, '--from', source, '--check'], /--check is not valid for materialize/],
   ]) {
     const fail = spawnSync(process.execPath, argv, { encoding: 'utf8' });
     assert.equal(fail.status, 1, argv.join(' '));

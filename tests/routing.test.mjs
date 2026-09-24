@@ -587,6 +587,74 @@ test('repository catalog wins over the plugin-owned user-scope pool; fallback en
   assert.equal(routes().scope, 'user');
 });
 
+test('repository catalog vs live user-scope pool drift is reported, never reconciled', t => {
+  const { dir, installed } = fixture(t); install(root, installed);
+  const home = join(dir, 'home');
+  const stateDir = join(home, 'slp-runtime', 'state'); mkdirSync(stateDir, { recursive: true });
+  const poolPath = join(stateDir, 'peer-pool.json');
+  const repo = join(dir, 'repo'); mkdirSync(repo);
+  const { path, catalog, route } = catalogFixture(repo);
+  // The run-5 drift shape: the repo catalog pins swe-2-max while the live
+  // pool carries swe-2-high for the same seat, plus a pool-only seat and a
+  // repo-only seat.
+  const pool = testCatalog();
+  pool.options.forEach(option => { option.availability = 'ready'; });
+  pool.options = pool.options.filter(option => option.id !== 'luna-code');
+  pool.options.find(option => option.id === 'swe2-max').model = 'swe-2-high';
+  pool.options.push({ id: 'pool-extra', provider: 'pi', roles: ['peer'], model: 'opencode/x', enabled: true, availability: 'ready', suitableFor: [], avoidFor: [], notes: 'pool only' });
+  writeFileSync(poolPath, json(pool));
+
+  const resolved = readCatalog(repo, home);
+  assert.equal(resolved.scope, 'repository');
+  const drift = resolved.poolDrift;
+  assert.equal(drift.identical, false);
+  assert.equal(drift.userPoolPath, poolPath);
+  assert.deepEqual(drift.options.find(o => o.id === 'swe2-max').fields.model, { catalog: 'swe-2-max', pool: 'swe-2-high' });
+  assert.deepEqual(drift.options.find(o => o.id === 'luna-code'), { id: 'luna-code', onlyIn: 'catalog' });
+  assert.deepEqual(drift.options.find(o => o.id === 'pool-extra'), { id: 'pool-extra', onlyIn: 'pool' });
+  // prepare still binds the repository catalog, but warns and records drift.
+  const plan = launchPlan(installed, { ...request, profiles: undefined, repository: repo, route: route('swe2-max'), paseoHome: home });
+  assert.equal(plan.create.provider, 'slp-devin-peer/swe-2-max');
+  assert.equal(plan.routing.poolDrift.userPoolPath, poolPath);
+  assert.match(plan.warnings.find(w => w.includes('differs from the live user-scope pool')), /"swe-2-max" \(catalog\) vs "swe-2-high" \(pool\)/);
+  // A repo-only seat warns differently; a pool-only seat stays silent.
+  const repoOnly = launchPlan(installed, { ...request, profiles: undefined, repository: repo, route: route('luna-code'), paseoHome: home });
+  assert.match(repoOnly.warnings.find(w => w.includes('has no seat in the live user-scope pool')), /luna-code/);
+  // Identical sources report identical:true and produce no drift warning.
+  writeFileSync(poolPath, json(catalog));
+  const clean = launchPlan(installed, { ...request, profiles: undefined, repository: repo, route: route('swe2-max'), paseoHome: home });
+  assert.equal(clean.routing.poolDrift.identical, true);
+  assert.equal((clean.warnings ?? []).some(w => w.includes('user-scope pool')), false);
+  // An unreadable pool still reports its sha and the error — never read as
+  // "no pool to compare".
+  writeFileSync(poolPath, '{broken');
+  const broken = readCatalog(repo, home);
+  assert.equal(typeof broken.poolDrift.userPoolSha256, 'string');
+  assert.match(broken.poolDrift.error, /JSON|valid/i);
+  const planBroken = launchPlan(installed, { ...request, profiles: undefined, repository: repo, route: route('swe2-max'), paseoHome: home });
+  assert.match(planBroken.warnings.find(w => w.includes('could not be compared')), /peer-pool/);
+});
+
+test('routes output carries the Jev routing mode for the daemon', t => {
+  const { dir, installed } = fixture(t); install(root, installed);
+  const home = join(dir, 'home');
+  const stateDir = join(home, 'slp-runtime', 'state'); mkdirSync(stateDir, { recursive: true });
+  const repo = join(dir, 'repo'); mkdirSync(repo);
+  catalogFixture(repo);
+  const jevPath = join(stateDir, 'jev.json');
+  const routes = () => JSON.parse(execFileSync(process.execPath, [join(installed, 'bin/slp.mjs'), 'routes', repo, '--paseo-home', home], { env: { PATH: '' }, encoding: 'utf8' }));
+  assert.deepEqual(routes().jevRouting, { routing: 'unconfigured' });
+  writeFileSync(jevPath, json({ schemaVersion: 1, enabled: false }));
+  assert.deepEqual(routes().jevRouting, { routing: 'off' });
+  writeFileSync(jevPath, json({ schemaVersion: 1, enabled: true, capabilities: {}, provider: { kind: 'openrouter', model: 'typesafe/jev-1.13' } }));
+  assert.deepEqual(routes().jevRouting, { routing: 'shadow' });
+  writeFileSync(jevPath, json({ schemaVersion: 1, enabled: true, capabilities: { routing: true }, provider: { kind: 'openrouter', model: 'typesafe/jev-1.13' } }));
+  assert.deepEqual(routes().jevRouting, { routing: 'armed' });
+  // A corrupt config reports error, never reads as unconfigured.
+  writeFileSync(jevPath, '{broken');
+  assert.equal(routes().jevRouting.routing, 'error');
+});
+
 test('pool validation: provider may be blank only while disabled; priority is not required', () => {
   const parked = { id: 'parked', provider: '', roles: ['peer'], model: '', enabled: false, availability: 'ready', suitableFor: [], avoidFor: [], notes: 'Parked seat — Human fills provider and model later' };
   assert.doesNotThrow(() => validateCatalog({ ...emptyCatalog(), options: [parked] }));

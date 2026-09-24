@@ -118,13 +118,17 @@ test('prepare --emit create prints the create record verbatim and --check gates 
   writeFileSync(request, json({ workspaceId: 'wks-x', repository: root, assignment: 'emit check', binding }));
   const env = { PATH: '' };
   const cli = join(installed, 'bin/slp.mjs');
-  // --emit create is byte-identical to the plan's create member — no trimming
-  // or recomposing of initialPrompt, title, settings or workspaceId.
+  // --emit create emits an audit artifact: `create` stays byte-identical to
+  // the plan's create member — no trimming or recomposing — and the resolved
+  // mode plus its provenance travel alongside so the file records the mode
+  // actually used.
   const emitted = JSON.parse(execFileSync(process.execPath, [cli, 'prepare', request, '--emit', 'create'], { env, encoding: 'utf8' }));
   const full = JSON.parse(execFileSync(process.execPath, [cli, 'prepare', request], { env, encoding: 'utf8' }));
-  assert.deepEqual(emitted, full.create);
-  assert.equal(emitted.provider, 'codex/gpt-5.6-luna');
-  assert.ok(emitted.initialPrompt.includes('SLP role=supervisor'));
+  assert.deepEqual(emitted.create, full.create);
+  assert.equal(emitted.modeId, full.modeId);
+  assert.equal(emitted.modeIdSource, full.modeIdSource);
+  assert.equal(emitted.create.provider, 'codex/gpt-5.6-luna');
+  assert.ok(emitted.create.initialPrompt.includes('SLP role=supervisor'));
   // --check on a valid request exits 0 with per-stage results.
   const ok = JSON.parse(execFileSync(process.execPath, [cli, 'prepare', request, '--check'], { env, encoding: 'utf8' }));
   assert.equal(ok.ok, true);
@@ -165,6 +169,40 @@ test('prepare --schema prints the request contract without a request file, recei
   const bad = spawnSync(process.execPath, [join(root, 'bin/slp.mjs'), 'prepare', 'x.json', '--schema'], { env, encoding: 'utf8' });
   assert.equal(bad.status, 1);
   assert.match(bad.stderr, /takes no request file/);
+});
+
+test('route-decide --schema prints the request contract and --out persists the result', t => {
+  const dir = fixture(t);
+  const env = { PATH: '' };
+  const cli = join(root, 'bin/slp.mjs');
+  // --schema runs without a request file, a daemon home or jev.json.
+  const schema = JSON.parse(execFileSync(process.execPath, [cli, 'route-decide', '--schema'], { env, encoding: 'utf8' }));
+  assert.match(schema.request.brief, /nonempty STRING of raw task/);
+  assert.match(schema.request.brief, /Structured forms.*refused/);
+  const clash = spawnSync(process.execPath, [cli, 'route-decide', 'x.json', '--schema'], { env, encoding: 'utf8' });
+  assert.equal(clash.status, 1);
+  assert.match(clash.stderr, /takes no request file/);
+  // --out writes the RESULT bytes — the response, never the request file —
+  // creating parent directories as needed.
+  const out = join(dir, 'nested', 'schema.json');
+  execFileSync(process.execPath, [cli, 'route-decide', '--schema', '--out', out], { env, encoding: 'utf8' });
+  assert.deepEqual(JSON.parse(readFileSync(out, 'utf8')), schema);
+  // The same flag persists a plan result (not just schema modes).
+  const installed = join(dir, 'release'); install(root, installed);
+  const request = join(dir, 'request.json');
+  writeFileSync(request, json({ installed, workspaceId: 'wks-x', repository: root, assignment: 'out flag check', binding }));
+  const planOut = join(dir, 'plan.json');
+  const plan = JSON.parse(execFileSync(process.execPath, [join(installed, 'bin/slp.mjs'), 'prepare', request, '--out', planOut], { env, encoding: 'utf8' }));
+  assert.deepEqual(JSON.parse(readFileSync(planOut, 'utf8')), plan);
+  assert.equal(plan.modeId, 'auto');
+  assert.equal(plan.modeIdSource, 'binding');
+  // --out requires a path and is not valid everywhere.
+  const missing = spawnSync(process.execPath, [cli, 'route-decide', '--schema', '--out'], { env, encoding: 'utf8' });
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /--out requires a path/);
+  const invalid = spawnSync(process.execPath, [cli, 'monitor', 'x.json', '--out', out], { env, encoding: 'utf8' });
+  assert.equal(invalid.status, 1);
+  assert.match(invalid.stderr, /--out is not valid for monitor/);
 });
 
 test('CLI reports a missing target instead of a raw path error', () => {

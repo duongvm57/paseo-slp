@@ -160,3 +160,29 @@ export async function routeDecide(request, { home, fetchImpl, now } = {}) {
     decision: receipt,
   };
 }
+
+// route-decide --schema: the request contract routeDecide() consumes,
+// descriptive only — emitted so callers author request files without guessing.
+export function routeDecideSchema() {
+  return {
+    description: 'Request contract for slp.mjs route-decide — the explicit Jev network call (the only path that calls Jev; never inside prepare)',
+    request: {
+      repository: 'required — absolute path to the work repository; its .paseo-slp/slp-routing.json (or the user-scope pool) supplies the candidate set',
+      brief: 'required — a nonempty STRING of raw task/assignment text: task description, risk/effort signals, constraints, dependencies. Structured forms (object/array, e.g. a signals field) are refused — inline the facts as prose so suitability classification stays Jev’s, not the caller’s. Verbatim axis:value tokens inside the text ship as unverified mentions and are flagged in warnings.',
+      role: 'optional — supervisor | lead | peer; default peer',
+      paseoHome: 'optional — absolute daemon home for the user-scope pool and jev.json (the --paseo-home flag or PASEO_HOME also resolves it)',
+    },
+    output: '{ schemaVersion, optionId, catalogSha256, declined, role, tokenConflicts, warnings, poolDrift, decision } — decision is the signed receipt; feed optionId/catalogSha256/decision into route.* of a prepare request. declined=true is a successful run whose answer is "no suitable option" (exit 1).',
+    notes: [
+      'Never assignmentFile bytes — pass a Lead-authored task text; eligibility is computed deterministically and Jev only sees {task, role, vocabulary, options}.',
+      'Requires the daemon’s jev.json to be enabled; capabilities.routing=true arms the receipt as binding, otherwise it is a shadow receipt (the Lead’s choice still binds).',
+      'Fails closed on missing config/key, outage, timeout, empty eligible set, out-of-set choice or stale catalog.',
+      'Use --out <path> to persist this response — it writes the result bytes (receipt-bearing output), never the request file.',
+    ],
+    example: {
+      repository: '<absolute path to the repository>',
+      brief: '<raw task/assignment text — obligations, constraints, dependencies; no structured signals>',
+      role: 'peer',
+    },
+  };
+}

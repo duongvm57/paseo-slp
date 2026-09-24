@@ -615,12 +615,16 @@ Three modes support request authoring — all side-effect free:
   incompatible settings, stale catalog hash — distinguishing a complete
   profile from a live-verified provider. Exits 1 when any stage fails; nothing
   is created.
-- `prepare <request.json> --emit create` prints exactly the `create` member —
-  the create_agent argument record, untrimmed — for callers that pass it
-  through directly. Note the host gap: Paseo has no plan-file consumer today,
-  so pasting or parsing this output into `create_agent` remains a manual
-  mitigation with a cross-check — it does not eliminate the risk of an
-  altered record reaching the host.
+- `prepare <request.json> --emit create` prints an audit artifact:
+  `{ modeId, modeIdSource, create }` — `create` is exactly the `create` member
+  (the create_agent argument record, untrimmed) for callers that pass it
+  through directly, and the mode fields record the resolved mode plus its
+  provenance so a saved emit file is self-describing. Note the host gap:
+  Paseo has no plan-file consumer today, so pasting or parsing `create` into
+  `create_agent` remains a manual mitigation with a cross-check — it does not
+  eliminate the risk of an altered record reaching the host. `--out <path>`
+  writes whichever result a command produced to a file — the response, never
+  the request file.
 
 A complete request carries: `taskLabel` (or the repo name is used), the role
 (and `disposition` for Peer), the real `repository` path and `workspaceId`,

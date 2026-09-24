@@ -580,11 +580,15 @@ Ba mode hỗ trợ viết request — đều không có side effect:
   và report từng stage fail theo tên — thiếu profile/provider/model, settings
   không tương thích, catalog hash stale — phân biệt "profile đầy đủ" với
   "provider đã live-verify". Exit 1 khi có stage fail; không tạo gì.
-- `prepare <request.json> --emit create` in đúng member `create` — record
-  create_agent arguments nguyên vẹn — cho caller truyền thẳng. Lưu ý host gap:
-  Paseo hiện không có consumer đọc plan-file trực tiếp, nên paste/parse output
-  này vào `create_agent` vẫn là mitigation thủ công cần đối chiếu chéo — chưa
-  loại bỏ rủi ro record bị sửa trước khi tới host.
+- `prepare <request.json> --emit create` in artifact audit:
+  `{ modeId, modeIdSource, create }` — `create` là đúng member `create`
+  (record create_agent arguments nguyên vẹn) cho caller truyền thẳng, còn hai
+  trường mode ghi lại mode đã resolve và nguồn của nó để file emit tự mô tả
+  phục vụ audit. Lưu ý host gap: Paseo hiện không có consumer đọc plan-file
+  trực tiếp, nên paste/parse `create` vào `create_agent` vẫn là mitigation
+  thủ công cần đối chiếu chéo — chưa loại bỏ rủi ro record bị sửa trước khi
+  tới host. `--out <path>` ghi kết quả của lệnh ra file — là response, không
+  bao giờ là request file.
 
 Một request đầy đủ gồm: `taskLabel` (mặc định tên repo), role (và
 `disposition` cho Peer), `repository` path và `workspaceId` thật,
