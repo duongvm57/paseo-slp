@@ -11,7 +11,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, isAbsolute, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import {
   WORK_TRACKER_FILE,
   beadsSeatEnv,
@@ -379,31 +379,17 @@ test('session entry: disabled tracker renders byte-identically — absent file a
 // T1 byte-level pin (Spec F2): the disabled render must equal the render the
 // pre-feature code produced, outside the one accepted §11b locator delta —
 // the integrity list gains src/references/work-tracking.md even when disabled.
-// The pre-feature render comes from a real install of the merge-base source:
-// `git archive` it, install that tree and the current tree into the SAME path
-// (so embedded absolute paths are identical), render with the same managed
-// env, then drop the new locator line and compare byte for byte.
-test('session entry: disabled render equals the pre-feature render byte-for-byte outside the locator delta (T1)', async t => {
-  const baseOut = spawnSync('git', ['-C', root, 'merge-base', 'HEAD', 'main'], { encoding: 'utf8' });
-  assert.equal(baseOut.status, 0, baseOut.stderr);
-  const base = baseOut.stdout.trim();
-  assert.ok(base, 'merge-base HEAD main must resolve');
-  const pre = tmp(t, 'wt-pre-');
-  const archive = join(pre, 'base.tar');
-  const git = spawnSync('git', ['-C', root, 'archive', base, '-o', archive]);
-  assert.equal(git.status, 0, git.stderr?.toString());
-  const untar = spawnSync('tar', ['-xf', archive, '-C', pre]);
-  assert.equal(untar.status, 0, untar.stderr?.toString());
-  const prePkg = await import(pathToFileURL(join(pre, 'src/package.mjs')).href);
-  const preBundle = await import(pathToFileURL(join(pre, 'src/role-bundle.mjs')).href);
+// The fixture captures the historical render with runtime/home paths normalized.
+// Tests need neither Git history nor git/tar executables to load this baseline.
+test('session entry: disabled render equals the pre-feature render byte-for-byte outside the locator delta (T1)', t => {
+  const before = JSON.parse(readFileSync(join(root, 'tests/fixtures/pre-tracker-session.json'), 'utf8'));
   const home = tmpHome(t);
   const installed = join(tmp(t, 'wt-inst-'), 'release');
   const env = managedEnv(home, installed);
-  prePkg.install(pre, installed);
-  const before = preBundle.roleBundle(installed, 'peer', env).instructions;
-  rmSync(installed, { recursive: true, force: true });
   install(root, installed);
-  const after = roleBundle(installed, 'peer', env).instructions;
+  const after = roleBundle(installed, 'peer', env).instructions
+    .replaceAll(installed, '<RUNTIME_ROOT>')
+    .replaceAll(home, '<DAEMON_HOME>');
   // Integrity locators carry per-file size+sha256, so another lane's doctrine
   // edit legitimately rewrites that file's locator line. Pin the invariant,
   // not the bytes: the render body must be identical, and the locator path
@@ -417,11 +403,16 @@ test('session entry: disabled render equals the pre-feature render byte-for-byte
     }
     return { locators, body: body.join('\n') };
   };
-  const a = splitRender(after), b = splitRender(before);
+  const a = splitRender(after), b = { locators: new Set(before.locators), body: before.body };
   assert.deepEqual(
     [...a.locators].filter(path => !b.locators.has(path)),
-    [`${installed}/src/references/work-tracking.md`],
+    ['<RUNTIME_ROOT>/src/references/work-tracking.md'],
     'work tracker adds exactly its own locator entry',
+  );
+  assert.deepEqual(
+    [...b.locators].filter(path => !a.locators.has(path)),
+    [],
+    'work tracker preserves every pre-feature locator entry',
   );
   assert.equal(a.body, b.body, 'disabled render body must equal the pre-feature render byte-for-byte');
 });

@@ -534,9 +534,9 @@ test('tiny policy keeps protocol-owned ceremony separate from required gates and
   assert.match(lead, /first required full workspace-protocol read remains\nmandatory/);
   assert.match(protocol, /1\. Lead supplies one short inline brief/);
   assert.match(protocol, /2\. Delegate to one Peer Engineer/);
-  assert.match(protocol, /3\. Engineer returns the artifact\/diff/);
+  assert.match(protocol, /3\. Engineer runs the inner loop/);
   assert.match(protocol, /4\. Lead inspects the artifact/);
-  assert.match(protocol, /does not silently inherit\nthese exemptions/);
+  assert.match(protocol, /does not\s+silently inherit\s+these exemptions/);
   assert.match(orchestration, /One Peer Engineer under Lead/);
   assert.ok(!orchestration.includes('Lead directly if protocol'));
 });

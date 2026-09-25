@@ -276,9 +276,13 @@ Skill onboarding dạy agent cách cài đặt bộ pack này cho một repo.
 npx skills add duongvm57/paseo-slp-plugin --skill paseo-slp-onboarding
 ```
 
-- `paseo-slp-onboarding` — phỏng vấn bạn về quyết định pool Peer, ngôn ngữ
-  giao tiếp và notebook của Supervisor, rồi ghi `.paseo-slp/` đúng chuẩn.
-  Sau khi cài, nó tự trigger khi bạn yêu cầu agent onboard/setup SLP.
+- `paseo-slp-onboarding` — khảo sát repo rồi đề xuất một protocol kết hợp
+  assignment, thực thi và giao kết quả. Connector/MCP và tự động pull do harness
+  của repo cung cấp. Feature, task từ tracker và thay đổi
+  dữ liệu dùng chung protocol; Lead chọn flow theo task. Chỉ tách Lead khi cần
+  về quyền hoặc tải công việc. Agent hỏi phần quyết định còn thiếu,
+  trình diff đầy đủ và cấu hình pool trong quyền setup; quy trình custom hoàn toàn
+  mới cần phỏng vấn sâu. Sau khi cài, skill tự trigger khi bạn yêu cầu onboard/setup SLP.
 
 (`paseo-slp-e2e` không cần cài — nó chạy từ source checkout; xem
 [E2E](#e2e).)

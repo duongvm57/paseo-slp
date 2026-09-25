@@ -96,6 +96,9 @@ test('workspace init creates only protocol and notebook once and preserves Human
   assert.equal(initialized.files.length, 2);
   const protocol = join(dir, '.paseo-slp/workspace-protocol.md');
   const notebook = join(dir, '.paseo-slp/notebook.md');
+  assert.equal(readFileSync(protocol, 'utf8'),
+    readFileSync(join(destination, 'src/templates/workspace-protocol.md'), 'utf8'),
+    'init stages the effective default template verbatim, without resolving repository settings');
   assert.match(readFileSync(protocol, 'utf8'), /Supervisor and Lead read this file when the assignment lands/);
   // A repository routing catalog is a deliberate opt-in — default init never
   // writes one, so the repo resolves the user-scope pool.
