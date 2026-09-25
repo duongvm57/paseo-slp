@@ -15,6 +15,16 @@ Keep repository tactics in workspace-protocol.md, outside global roles.
 Runtime installation, host configuration, live agents, commit and push require
 task authority. Other repositories are read-only unless explicitly authorized.
 
+## Ceremony boundary
+
+Global policy owns authority, delegation, ownership and review invariants;
+workspace protocol owns repo ceremony. Repo harness owns external MCP/connectors,
+credentials, polling and queue state. Supervisor uses supplied tools under its
+assignment; Lead chooses workflows. Tracker input implies no Lead type; beads
+remains opt-in. Before adding a plugin setting, gate or onboarding step, name
+its invariant and why protocol/harness cannot own it. Keep optional integrations
+out of default ceremony; preserve required review and authority checks.
+
 When asked to run E2E or dogfood this package, read
 skills/paseo-slp-e2e/SKILL.md and execute the requested scenarios from this session
 (the whole manifest for a full-suite request). Resume an existing run when requested;

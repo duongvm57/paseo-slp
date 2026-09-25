@@ -49,11 +49,17 @@ Chains, Middle Man, Refused Bequest.
 
 ## Seat briefs
 
-Every seat gets a neutral brief: the frozen candidate identity (snapshot
-hash or exact commit), its axis, the spec/standards source paths — and
+Every fresh seat gets a neutral first-review brief: the frozen candidate
+identity (snapshot hash or exact commit), its axis, the spec/standards source paths — and
 nothing else. No prior findings, no Lead verdict, no writer identity.
 The seat verifies the candidate identity before reviewing; a changed
 snapshot invalidates the attempt.
+
+For re-review within the same assignment, continue the same independent seat
+with the new candidate identity, changes and that seat's prior findings so it
+can check closure and regressions. Another seat's verdict or the Lead's desired
+verdict is never an answer key. A fresh replacement receives the neutral
+first-review brief, not the previous reviewer's conclusions.
 
 Reports stay in-session, bounded: findings quoted against the axis source,
 hard violations separated from judgement calls.

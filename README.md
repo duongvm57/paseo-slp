@@ -300,10 +300,15 @@ The onboarding skill teaches your agent how to set up this pack for a repo.
 npx skills add duongvm57/paseo-slp-plugin --skill paseo-slp-onboarding
 ```
 
-- `paseo-slp-onboarding` — interviews you for the Peer pool decision
-  and Supervisor notebook, then writes `.paseo-slp/`
-  correctly. Once installed it auto-triggers when you ask an agent to
-  onboard/set up SLP.
+- `paseo-slp-onboarding` — inspects the repo and recommends a protocol
+  with assignment, execution and delivery settings. External connectors and pull
+  automation belong to the repo harness. Product work, tracker
+  tasks and controlled data changes share that protocol; Lead chooses workflows
+  per task. Separate Leads are optional when authority or capacity requires them.
+  It asks for missing decisions, shows the complete proposed diff, and
+  configures the Peer pool within setup authority. A fully custom process
+  gets a deeper interview. Once installed it auto-triggers when you ask an
+  agent to onboard/set up SLP.
 
 (`paseo-slp-e2e` is not installed — it runs from a source checkout; see
 [E2E](#e2e).)

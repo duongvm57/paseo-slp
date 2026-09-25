@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, chmodSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, chmodSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { join } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { identity, install, verifyInstall, uninstall, snapshot, json } from '../src/package.mjs';
 import { prompt, launchPlan } from '../src/launch.mjs';
@@ -58,6 +58,49 @@ test('changed install and user-added files block destructive rollback', t => {
   assert.equal(existsSync(join(target, 'notes.txt')), true);
   writeFileSync(join(target, 'src/common.md'), 'changed');
   assert.throws(() => verifyInstall(target), /changed/);
+});
+
+test('onboarding Markdown resource links resolve from an installed package', t => {
+  const installed = join(fixture(t), 'release');
+  install(root, installed);
+  const walk = directory => readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+    const path = join(directory, entry.name);
+    return entry.isDirectory() ? walk(path) : path.endsWith('.md') ? [path] : [];
+  });
+  for (const file of walk(join(installed, 'skills/paseo-slp-onboarding'))) {
+    const markdown = readFileSync(file, 'utf8');
+    for (const match of markdown.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)) {
+      const target = match[1].split('#')[0];
+      if (!target || /^[a-z]+:/i.test(target)) continue;
+      assert.ok(existsSync(resolve(dirname(file), target)), `${file}: missing installed resource ${target}`);
+    }
+  }
+});
+
+test('installed common protocol supports combined configuration without losing gates', t => {
+  const installed = join(fixture(t), 'release');
+  install(root, installed);
+  const base = readFileSync(join(installed, 'src/templates/workspace-protocol.md'), 'utf8');
+  assert.match(base, /^template_sha256:/m);
+  assert.equal(base.match(/^## Repository configuration$/gm).length, 1);
+  for (const field of ['Assignment source', 'Execution scope', 'Delivery and completion point', 'Shared-state controls', 'Lead topology']) {
+    assert.ok(base.includes(`| ${field} |`), field);
+  }
+  assert.match(base, /All four recipes remain available by default/);
+  assert.match(base, /tracker does not\nrequire a separate Task Lead/);
+  assert.match(base, /requires an independent review gate/);
+  assert.match(base, /parallel Spec and Standards seats/);
+  const transition = base.split('## Recipe C')[1].split('## Recipe D')[0];
+  assert.ok(transition.indexOf('| Gate |') < transition.indexOf('| Execute |'));
+  assert.match(transition, /outcome verdict/);
+  const skill = readFileSync(join(installed, 'skills/paseo-slp-onboarding/SKILL.md'), 'utf8');
+  assert.ok(!skill.includes('templates/profiles/'));
+  assert.match(skill, /combine every applicable setting/);
+  const examples = readFileSync(join(installed, 'skills/paseo-slp-onboarding/references/repository-configuration.md'), 'utf8');
+  assert.match(skill, /Do not\nadd tracker setup questions or activation gates/);
+  assert.ok(!base.includes('| Connector and cadence |'));
+  assert.match(examples, /new pricing feature with a database backfill/);
+  assert.match(examples, /Opening a PR does not grant production\nexecution/);
 });
 
 test('launcher loads installed role bytes, excludes private review material, preserves configured custom provider/full-access', t => {
@@ -469,12 +512,12 @@ test('decision-doctrine lines reach the standalone bundles that need them and ne
   assert.match(template, /keep accepted Peers idle/);
   assert.match(template, /assignment that formed the team/, 'idle-retention referent is the team assignment');
   assert.match(template, /agent-scoped create_agent/);
-  assert.match(template, /share the assignment'?s workspace by default/, 'team-workspace default');
-  assert.match(template, /owner map and creation receipts/, 'formation receipts tactic');
+  assert.match(template, /share the\s+assignment'?s workspace by default/, 'team-workspace default');
+  assert.match(template, /owner map and\s+creation receipts/, 'formation receipts tactic');
   // B25: split-seat naming convention — slash suffix, never an "axis" suffix.
   assert.match(template, /Reviewer — <task> \/ Spec/, 'Spec seat naming convention');
   assert.match(template, /Reviewer — <task> \/ Std/, 'Std seat naming convention');
-  assert.match(template, /never an "axis" suffix/);
+  assert.match(template, /never\s+an "axis" suffix/);
   // B24: monitoring doctrine enumerates seats by identity, not cwd, and never
   // infers nonexistence from an empty listing (references ship as locators —
   // pin the installed bytes directly).
